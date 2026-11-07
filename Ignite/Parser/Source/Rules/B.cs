@@ -1,76 +1,14 @@
-﻿using Ignite.Parser.Objects;
-using static Ignite.Parser.Builder.RuleBuilder;
+﻿using static Ignite.Parser.Builder.RuleBuilder;
 
 namespace Ignite.Parser
 {
     public static partial class Tokenizer
     {
-        static Tokenizer()
-        {
-            Punctuation();
-            PropertiesA();
-        }
-
-        private static void Punctuation()
-        {
-            // punctuation.
-            Exact(';', TokenKind.SemiColon);
-            Exact(':', TokenKind.Colon);
-            Exact('{', TokenKind.LeftCurlyBrace);
-            Exact('}', TokenKind.RightCurlyBrace);
-            Exact('[', TokenKind.LeftSquareBracket);
-            Exact(']', TokenKind.RightSquareBracket);
-            Exact('(', TokenKind.LeftParenthesis);
-            Exact(')', TokenKind.RightParenthesis);
-            Exact('>', TokenKind.DirectChildBracket);
-            Exact("::", TokenKind.PseudoElementColon);
-        }
-        
-        /// <summary>
-        /// All CSS properties beginning with 'a'
-        /// </summary>
-        private static void PropertiesA()
-        {
-            CssPropertyName("accent-color");
-            
-            CssPropertyGroup("align", 
-                "content", 
-                "items", 
-                "self", 
-                "baseline"
-            );
-            
-            CssPropertyName("all");
-            
-            CssPropertyName("anchor-scope");
-            
-            CssPropertyGroup("animation",
-                "composition", 
-                "delay",
-                "direction",
-                "duration",
-                "fill-mode",
-                "iteration-count",
-                "name",
-                "play-state",
-                "range",
-                "range-end",
-                "range-start",
-                "timeline",
-                "timing-function",
-                "trigger"
-            );
-
-            CssPropertyName("appearance");
-
-            CssPropertyName("aspect-ratio");
-        }
-
         private static void PropertiesB()
         {
             CssPropertyName("backdrop-filter");
             CssPropertyName("backface-visibility");
-            
+
             CssPropertyGroup("background",
                 "attachment",
                 "blend-mode",
@@ -86,11 +24,11 @@ namespace Ignite.Parser
                 "repeat-y",
                 "size"
             );
-            
+
             CssPropertyName("baseline-shift");
             CssPropertyName("baseline-source");
             CssPropertyName("block-size");
-            
+
             CssPropertyGroup("border",
                 "block",
                 "block-color",
@@ -153,7 +91,24 @@ namespace Ignite.Parser
             );
 
             CssPropertyName("bottom");
-            
+
+            CssPropertyGroup("box",
+                "align",
+                "decoration-break",
+                "direction",
+                "flex",
+                "flex-group",
+                "lines",
+                "ordinal-group",
+                "orient",
+                "pack",
+                "shadow",
+                "sizing"
+            );
+
+            CssPropertyName("break-after");
+            CssPropertyName("break-before");
+            CssPropertyName("break-inside");
         }
     }
 }
