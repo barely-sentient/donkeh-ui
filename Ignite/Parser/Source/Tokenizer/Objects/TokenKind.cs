@@ -1,6 +1,6 @@
 ﻿namespace Ignite.Parser.Objects
 {
-    public enum TokenKind : byte
+    public enum TokenKind
     {
         /// <summary>
         /// A property name 'color', 'text-align' etc...
@@ -58,7 +58,11 @@
         #endregion
         #region Special functionality
             
-        PseudoClass
+        PseudoClass,
+        
+        PseudoElement,
+        
+        Function
         #endregion
     }
 }

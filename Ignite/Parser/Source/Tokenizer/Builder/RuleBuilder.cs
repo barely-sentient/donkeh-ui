@@ -60,12 +60,21 @@ namespace Ignite.Parser.Builder
         }
         
         /// <summary>
-        /// Add a pseudo class in CSS, you don't need to specify the ':'
+        /// Add a pseudo class in CSS, you don't need to specify the '::'
         /// </summary>
         /// <param name="name"></param>
         public static void CssPseudoElement(string name)
         {
-            Exact($"::{name}", TokenKind.PseudoClass);
+            Exact($"::{name}", TokenKind.PseudoElement);
+        }
+
+        /// <summary>
+        /// Add a function from CSS
+        /// </summary>
+        /// <param name="functionName"></param>
+        public static void Function(string functionName)
+        {
+            Exact(functionName, TokenKind.Function);
         }
     }
 }

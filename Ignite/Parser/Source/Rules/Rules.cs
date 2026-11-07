@@ -32,6 +32,7 @@
             PropertiesZ();
             PseudoClasses();
             PseudoElements();
+            Functions();
         }
     }
 }
