@@ -18,6 +18,9 @@
             // No rules with 'k'
             PropertiesL();
             PropertiesM();
+            PropertiesO();
+            PropertiesP();
+            PropertiesQ();
         }
     }
 }
