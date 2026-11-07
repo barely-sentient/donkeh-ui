@@ -24,6 +24,12 @@
             PropertiesR();
             PropertiesS();
             PropertiesT();
+            PropertiesU();
+            PropertiesV();
+            PropertiesW();
+            PropertiesX();
+            PropertiesY();
+            PropertiesZ();
         }
     }
 }
