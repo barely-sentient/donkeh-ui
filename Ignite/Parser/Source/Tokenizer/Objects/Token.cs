@@ -6,8 +6,8 @@
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Tokens are created in very large numbers, so this type is deliberately
-    /// compact. Rather than storing <see cref="StartIndex"/> and
+    /// Tokens are created in very large numbers, so this is a value type and is
+    /// deliberately compact. Rather than storing <see cref="StartIndex"/> and
     /// <see cref="EndIndex"/> as two separate <see cref="int"/> fields, both are
     /// packed into the single <see cref="Location"/> field, saving 4 bytes per token.
     /// </para>
@@ -16,7 +16,7 @@
     /// token lengths in 8 bits. See <see cref="Location"/> for the exact layout.
     /// </para>
     /// </remarks>
-    public class Token
+    public struct Token
     {
         /// <summary>
         /// Gets or sets the kind of token (identifier, keyword, punctuation, etc.).

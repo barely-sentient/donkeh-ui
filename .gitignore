@@ -1,5 +1,7 @@
 bin/
 obj/
+BenchmarkDotNet.Artifacts/
+bdn.log
 /packages/
 riderModule.iml
 /_ReSharper.Caches/

@@ -62,7 +62,78 @@
         
         PseudoElement,
         
-        Function
+        Function,
+        
+        PseudoElementColon,
+        
+        #endregion
+        #region Values
+        
+        /// <summary>
+        /// A generic identifier that is not a known property, function or pseudo selector.
+        /// </summary>
+        Identifier,
+        
+        /// <summary>
+        /// A numeric literal, e.g. 10, 1.5 or -2e3.
+        /// </summary>
+        Number,
+        
+        /// <summary>
+        /// A number followed by a unit, e.g. 10px.
+        /// </summary>
+        Dimension,
+        
+        /// <summary>
+        /// A number followed by '%', e.g. 50%.
+        /// </summary>
+        Percentage,
+        
+        /// <summary>
+        /// A hash token, e.g. #fff or #id.
+        /// </summary>
+        Hash,
+        
+        /// <summary>
+        /// A quoted string.
+        /// </summary>
+        String,
+        
+        /// <summary>
+        /// An at-keyword, e.g. @media.
+        /// </summary>
+        AtKeyword,
+        
+        /// <summary>
+        /// The ',' character.
+        /// </summary>
+        Comma,
+        
+        /// <summary>
+        /// The '+' character.
+        /// </summary>
+        Plus,
+        
+        /// <summary>
+        /// The '~' character.
+        /// </summary>
+        Tilde,
+        
+        /// <summary>
+        /// The '*' character.
+        /// </summary>
+        Asterisk,
+        
+        /// <summary>
+        /// The '=' character.
+        /// </summary>
+        Equals,
+        
+        /// <summary>
+        /// Any other single character that has no dedicated token kind.
+        /// </summary>
+        Delimiter
+        
         #endregion
     }
 }

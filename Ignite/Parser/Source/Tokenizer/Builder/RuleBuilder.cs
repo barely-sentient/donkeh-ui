@@ -4,7 +4,7 @@ namespace Ignite.Parser.Builder
 {
     public static partial class RuleBuilder
     {
-        private static readonly Dictionary<int, TokenKind> ExactRules = [];
+        public static readonly Dictionary<int, TokenKind> ExactRules = [];
 
         /// <summary>
         /// Add a Token by exact value
@@ -13,7 +13,16 @@ namespace Ignite.Parser.Builder
         /// <param name="kind"></param>
         public static void Exact(string sequence, TokenKind kind)
         {
-            ExactRules[InternTable.Intern(sequence)] = kind;
+            int id = InternTable.Intern(sequence);
+
+            // Some names are both a property and a function, for example
+            // 'color', 'rotate' and 'scale'. A lexer can only tell them apart
+            // by looking ahead for '(', so keep the property kind here and let
+            // the tokenizer upgrade the token to Function when it sees '('.
+            if (!ExactRules.TryAdd(id, kind) && kind == TokenKind.PropertyName)
+            {
+                ExactRules[id] = kind;
+            }
         }
 
         /// <summary>
