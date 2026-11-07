@@ -8,6 +8,9 @@
             PropertiesA();
             PropertiesB();
             PropertiesC();
+            PropertiesD();
+            PropertiesE();
+            PropertiesF();
         }
     }
 }
