@@ -46,7 +46,7 @@ namespace Ignite.Parser.Compilation
                     continue;
                 }
 
-                char first = text[0];
+                var first = text[0];
                 if (!groups.TryGetValue(first, out var list))
                 {
                     list = new List<(string Text, TokenKind Kind)>();
@@ -61,8 +61,8 @@ namespace Ignite.Parser.Compilation
                 return;
             }
 
-            char minChar = char.MaxValue;
-            char maxChar = char.MinValue;
+            var minChar = char.MaxValue;
+            var maxChar = char.MinValue;
             foreach (var key in groups.Keys)
             {
                 if (key < minChar) minChar = key;
@@ -74,7 +74,7 @@ namespace Ignite.Parser.Compilation
             // where a single 20 KB method was measurably slower than a table of
             // small ones.
             var groupMatchers = new Func<ReadOnlySpan<char>, int>[maxChar - minChar + 1];
-            for (int i = 0; i < groupMatchers.Length; i++)
+            for (var i = 0; i < groupMatchers.Length; i++)
             {
                 groupMatchers[i] = NoMatch;
             }
@@ -168,7 +168,7 @@ namespace Ignite.Parser.Compilation
             var buckets = new Dictionary<int, List<(string Text, TokenKind Kind)>>();
             foreach (var rule in rules)
             {
-                int ruleLength = rule.Text.Length;
+                var ruleLength = rule.Text.Length;
                 if (!buckets.TryGetValue(ruleLength, out var bucket))
                 {
                     bucket = new List<(string Text, TokenKind Kind)>();
@@ -177,8 +177,8 @@ namespace Ignite.Parser.Compilation
                 bucket.Add(rule);
             }
 
-            int minLength = int.MaxValue;
-            int maxLength = int.MinValue;
+            var minLength = int.MaxValue;
+            var maxLength = int.MinValue;
             foreach (var key in buckets.Keys)
             {
                 if (key < minLength) minLength = key;
@@ -191,9 +191,9 @@ namespace Ignite.Parser.Compilation
                 bucketLabels[key] = _ilGenerator.DefineLabel();
             }
 
-            int lengthRange = maxLength - minLength + 1;
+            var lengthRange = maxLength - minLength + 1;
             var lengthSwitch = new Label[lengthRange];
-            for (int i = 0; i < lengthRange; i++)
+            for (var i = 0; i < lengthRange; i++)
             {
                 if (bucketLabels.TryGetValue(minLength + i, out var bucketLabel))
                 {
@@ -214,10 +214,10 @@ namespace Ignite.Parser.Compilation
 
             // Emit longer buckets first.
             var lengths = new List<int>(buckets.Keys);
-            for (int i = 1; i < lengths.Count; i++)
+            for (var i = 1; i < lengths.Count; i++)
             {
-                int key = lengths[i];
-                int j = i - 1;
+                var key = lengths[i];
+                var j = i - 1;
                 while (j >= 0 && lengths[j] < key)
                 {
                     lengths[j + 1] = lengths[j];
@@ -284,7 +284,7 @@ namespace Ignite.Parser.Compilation
             var byChar = new Dictionary<char, List<(string Text, TokenKind Kind)>>();
             foreach (var rule in rules)
             {
-                char c = rule.Text[depth];
+                var c = rule.Text[depth];
                 if (!byChar.TryGetValue(c, out var list))
                 {
                     list = new List<(string Text, TokenKind Kind)>();
@@ -300,8 +300,8 @@ namespace Ignite.Parser.Compilation
                 return;
             }
 
-            char minChar = char.MaxValue;
-            char maxChar = char.MinValue;
+            var minChar = char.MaxValue;
+            var maxChar = char.MinValue;
             foreach (var key in byChar.Keys)
             {
                 if (key < minChar) minChar = key;
@@ -314,9 +314,9 @@ namespace Ignite.Parser.Compilation
                 charLabels[key] = _ilGenerator.DefineLabel();
             }
 
-            int range = maxChar - minChar + 1;
+            var range = maxChar - minChar + 1;
             var charSwitch = new Label[range];
-            for (int i = 0; i < range; i++)
+            for (var i = 0; i < range; i++)
             {
                 if (charLabels.TryGetValue((char)(minChar + i), out var label))
                 {
@@ -351,14 +351,14 @@ namespace Ignite.Parser.Compilation
             MethodInfo sequenceEqual,
             Label returnMinusOne)
         {
-            for (int i = 0; i < rules.Count; i++)
+            for (var i = 0; i < rules.Count; i++)
             {
                 var rule = rules[i];
-                bool isLastRule = i == rules.Count - 1;
+                var isLastRule = i == rules.Count - 1;
 
                 // The final rule can fail straight to the shared -1 exit,
                 // removing both a label and a trailing branch.
-                Label nextRule = isLastRule ? returnMinusOne : _ilGenerator.DefineLabel();
+                var nextRule = isLastRule ? returnMinusOne : _ilGenerator.DefineLabel();
 
                 _ilGenerator.Emit(OpCodes.Ldarg_0);
                 _ilGenerator.Emit(OpCodes.Ldstr, rule.Text);
@@ -398,7 +398,7 @@ namespace Ignite.Parser.Compilation
                 return -1;
             }
 
-            int index = span[0] - _minChar;
+            var index = span[0] - _minChar;
             if ((uint)index >= (uint)_groups.Length)
             {
                 return -1;

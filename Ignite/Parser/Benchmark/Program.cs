@@ -47,8 +47,8 @@ public class ExactMatchBenchmarks
     public int MatchCommonTokens()
     {
         var tokens = _tokens;
-        int acc = 0;
-        for (int i = 0; i < tokens.Length; i++)
+        var acc = 0;
+        for (var i = 0; i < tokens.Length; i++)
         {
             acc += Tokenizer.ExactMatch(tokens[i].AsSpan());
         }
@@ -110,7 +110,7 @@ internal sealed class GcCollectionsColumn : IColumn
         }
 
         var gc = report.GcStats;
-        double scale = gc.TotalOperations > 0 ? 1000.0 / gc.TotalOperations : 1.0;
+        var scale = gc.TotalOperations > 0 ? 1000.0 / gc.TotalOperations : 1.0;
         return $"{gc.Gen0Collections * scale:N0}/{gc.Gen1Collections * scale:N0}/{gc.Gen2Collections * scale:N0}";
     }
 }
@@ -147,7 +147,7 @@ internal sealed class AllocationColumn : IColumn
             return "?";
         }
 
-        long? bytes = report.GcStats.GetBytesAllocatedPerOperation(benchmarkCase);
+        var bytes = report.GcStats.GetBytesAllocatedPerOperation(benchmarkCase);
         if (bytes is null)
         {
             return "?";
@@ -199,7 +199,7 @@ internal sealed class ThroughputColumn : IColumn
 
     public string GetValue(Summary summary, BenchmarkCase benchmarkCase, SummaryStyle style)
     {
-        bool isDocument = benchmarkCase.Descriptor.WorkloadMethod.Name == nameof(ExactMatchBenchmarks.ParseCssDocument);
+        var isDocument = benchmarkCase.Descriptor.WorkloadMethod.Name == nameof(ExactMatchBenchmarks.ParseCssDocument);
         if (_document != isDocument)
         {
             return "-";
@@ -211,13 +211,13 @@ internal sealed class ThroughputColumn : IColumn
             return "?";
         }
 
-        double ns = report.ResultStatistics.Mean;
+        var ns = report.ResultStatistics.Mean;
         if (ns <= 0)
         {
             return "?";
         }
 
-        double value = _document
+        var value = _document
             ? CssInfo.Value.Bytes / ns * 1e3
             : TokenSamples.CommonTokens.Length / ns * 1e3;
 
@@ -226,7 +226,7 @@ internal sealed class ThroughputColumn : IColumn
 
     private static readonly Lazy<(long Bytes, int Tokens)> CssInfo = new(static () =>
     {
-        string css = CssCorpus.BuildFromRules(1_000_000);
+        var css = CssCorpus.BuildFromRules(1_000_000);
         var tokens = new List<Token>(css.Length / 3);
         Tokenizer.Parse(css.AsSpan(), tokens);
         return (Encoding.UTF8.GetByteCount(css), tokens.Count);
@@ -258,7 +258,7 @@ internal static class TokenSamples
 
         const int repeats = 64;
         var result = new string[hot.Length * repeats];
-        for (int i = 0; i < result.Length; i++)
+        for (var i = 0; i < result.Length; i++)
         {
             result[i] = hot[i % hot.Length];
         }
@@ -269,8 +269,8 @@ internal static class TokenSamples
     /// <summary>UTF-8 byte count of every sampled token, used for text throughput.</summary>
     public static long TotalCharBytes(string[] tokens)
     {
-        long total = 0;
-        for (int i = 0; i < tokens.Length; i++)
+        var total = 0L;
+        for (var i = 0; i < tokens.Length; i++)
         {
             total += Encoding.UTF8.GetByteCount(tokens[i]);
         }
@@ -314,7 +314,7 @@ internal static class CssCorpus
             }
         }
 
-        string sample = sampleBuilder.ToString();
+        var sample = sampleBuilder.ToString();
         if (sample.Length == 0)
         {
             sample = "body{margin:0;padding:0;color:red;display:block;}";
@@ -345,13 +345,13 @@ internal static class QuickBench
         _ = Tokenizer.ExactMatch("".AsSpan());
 
         var tokens = TokenSamples.CommonTokens;
-        long tokenBytes = TokenSamples.TotalCharBytes(tokens);
+        var tokenBytes = TokenSamples.TotalCharBytes(tokens);
 
-        string css = CssCorpus.BuildFromRules(1_000_000);
-        long cssBytes = Encoding.UTF8.GetByteCount(css);
+        var css = CssCorpus.BuildFromRules(1_000_000);
+        var cssBytes = (long)Encoding.UTF8.GetByteCount(css);
         var tokenBuffer = new List<Token>(Math.Max(16, css.Length / 3));
         Tokenizer.Parse(css.AsSpan(), tokenBuffer);
-        int cssTokens = tokenBuffer.Count;
+        var cssTokens = tokenBuffer.Count;
 
         int ParseCss()
         {
@@ -360,33 +360,33 @@ internal static class QuickBench
             return tokenBuffer.Count;
         }
 
-        for (int i = 0; i < 2_000; i++)
+        for (var i = 0; i < 2_000; i++)
         {
             MatchTokens(tokens);
         }
-        for (int i = 0; i < 20; i++)
+        for (var i = 0; i < 20; i++)
         {
             ParseCss();
         }
 
-        int sink = 0;
+        var sink = 0;
         var match = Measure(() => MatchTokens(tokens), iterations: 10_000, runs: 3, ref sink);
         var scan = Measure(ParseCss, iterations: 100, runs: 3, ref sink);
 
-        double matchNs = match.NanosecondsPerOp;
-        double scanNs = scan.NanosecondsPerOp;
+        var matchNs = match.NanosecondsPerOp;
+        var scanNs = scan.NanosecondsPerOp;
 
         var compileWatch = Stopwatch.StartNew();
-        long compileAllocBefore = GC.GetAllocatedBytesForCurrentThread();
-        int gc0 = GC.CollectionCount(0);
-        int gc1 = GC.CollectionCount(1);
-        int gc2 = GC.CollectionCount(2);
+        var compileAllocBefore = GC.GetAllocatedBytesForCurrentThread();
+        var gc0 = GC.CollectionCount(0);
+        var gc1 = GC.CollectionCount(1);
+        var gc2 = GC.CollectionCount(2);
         var compiled = new Compiler().Compile(RuleBuilder.ExactRules);
-        long compileBytes = GC.GetAllocatedBytesForCurrentThread() - compileAllocBefore;
+        var compileBytes = GC.GetAllocatedBytesForCurrentThread() - compileAllocBefore;
         compileWatch.Stop();
-        int gc0After = GC.CollectionCount(0);
-        int gc1After = GC.CollectionCount(1);
-        int gc2After = GC.CollectionCount(2);
+        var gc0After = GC.CollectionCount(0);
+        var gc1After = GC.CollectionCount(1);
+        var gc2After = GC.CollectionCount(2);
 
         Console.WriteLine("Exact matcher (token stream)");
         Console.WriteLine($"  tokens/op:            {tokens.Length:N0}");
@@ -416,27 +416,27 @@ internal static class QuickBench
 
     private static Measurement Measure(Func<int> operation, int iterations, int runs, ref int sink)
     {
-        double bestNs = double.MaxValue;
-        double allocatedBytes = 0;
+        var bestNs = double.MaxValue;
+        var allocatedBytes = 0.0;
 
-        for (int run = 0; run < runs; run++)
+        for (var run = 0; run < runs; run++)
         {
             // Start the timer before sampling allocations so the Stopwatch
             // instance itself is not counted as benchmark allocation.
             var sw = Stopwatch.StartNew();
-            long allocBefore = GC.GetAllocatedBytesForCurrentThread();
-            int local = 0;
-            for (int i = 0; i < iterations; i++)
+            var allocBefore = GC.GetAllocatedBytesForCurrentThread();
+            var local = 0;
+            for (var i = 0; i < iterations; i++)
             {
                 local += operation();
             }
             sw.Stop();
-            long allocAfter = GC.GetAllocatedBytesForCurrentThread();
+            var allocAfter = GC.GetAllocatedBytesForCurrentThread();
 
             sink += local & 1;
 
-            double ns = sw.Elapsed.TotalNanoseconds / iterations;
-            double alloc = (allocAfter - allocBefore) / (double)iterations;
+            var ns = sw.Elapsed.TotalNanoseconds / iterations;
+            var alloc = (allocAfter - allocBefore) / (double)iterations;
             if (ns < bestNs)
             {
                 bestNs = ns;
@@ -449,8 +449,8 @@ internal static class QuickBench
 
     private static int MatchTokens(string[] tokens)
     {
-        int acc = 0;
-        for (int i = 0; i < tokens.Length; i++)
+        var acc = 0;
+        for (var i = 0; i < tokens.Length; i++)
         {
             acc += Tokenizer.ExactMatch(tokens[i].AsSpan());
         }

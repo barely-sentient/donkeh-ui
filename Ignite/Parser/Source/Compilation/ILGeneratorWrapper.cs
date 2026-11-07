@@ -55,7 +55,7 @@ namespace Ignite.Parser.Compilation
             if (types == null || types.Length == 0) return string.Empty;
 
             var sb = new StringBuilder();
-            for (int i = 0; i < types.Length; i++)
+            for (var i = 0; i < types.Length; i++)
             {
                 if (i > 0) sb.Append(", ");
                 sb.Append(FormatType(types[i]));
@@ -68,7 +68,7 @@ namespace Ignite.Parser.Compilation
         private static string FormatLabels(Label[] labels)
         {
             var sb = new StringBuilder("[");
-            for (int i = 0; i < labels.Length; i++)
+            for (var i = 0; i < labels.Length; i++)
             {
                 if (i > 0) sb.Append(", ");
                 sb.Append(FormatLabel(labels[i]));
@@ -82,8 +82,8 @@ namespace Ignite.Parser.Compilation
             var sb = new StringBuilder();
             sb.Append(FormatType(method.DeclaringType)).Append("::").Append(method.Name).Append('(');
 
-            ParameterInfo[] parameters = method.GetParameters();
-            for (int i = 0; i < parameters.Length; i++)
+            var parameters = method.GetParameters();
+            for (var i = 0; i < parameters.Length; i++)
             {
                 if (i > 0) sb.Append(", ");
                 sb.Append(FormatType(parameters[i].ParameterType));
@@ -221,7 +221,7 @@ namespace Ignite.Parser.Compilation
         {
             if (SHOW_GENERATED_IL)
             {
-                string extra = optionalParameterTypes == null || optionalParameterTypes.Length == 0
+                var extra = optionalParameterTypes == null || optionalParameterTypes.Length == 0
                     ? string.Empty
                     : " varargs(" + FormatTypes(optionalParameterTypes) + ")";
                 Log(opcode, FormatMethod(method) + extra);
@@ -255,7 +255,7 @@ namespace Ignite.Parser.Compilation
 
         public Label DefineLabel()
         {
-            Label label = _generator.DefineLabel();
+            var label = _generator.DefineLabel();
             if (SHOW_GENERATED_IL) Console.WriteLine("// define " + FormatLabel(label));
             return label;
         }
@@ -268,14 +268,14 @@ namespace Ignite.Parser.Compilation
 
         public LocalBuilder DeclareLocal(Type type)
         {
-            LocalBuilder local = _generator.DeclareLocal(type);
+            var local = _generator.DeclareLocal(type);
             if (SHOW_GENERATED_IL) Console.WriteLine("// .local V_" + local.LocalIndex + " : " + FormatType(type));
             return local;
         }
 
         public LocalBuilder DeclareLocal(Type type, bool pinned)
         {
-            LocalBuilder local = _generator.DeclareLocal(type, pinned);
+            var local = _generator.DeclareLocal(type, pinned);
             if (SHOW_GENERATED_IL)
             {
                 Console.WriteLine("// .local V_" + local.LocalIndex + " : " + FormatType(type) + (pinned ? " (pinned)" : ""));

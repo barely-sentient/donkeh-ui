@@ -17,7 +17,7 @@
                 return value;
             }
 
-            int id = InternedStrings.Count;
+            var id = InternedStrings.Count;
             if (!InternedStrings.TryAdd(s, id))
             {
                 throw new InvalidOperationException($"Unable to intern string {s}");

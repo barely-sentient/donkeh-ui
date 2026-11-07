@@ -10,7 +10,7 @@ public class TokenizerTests
         var tokens = Tokenizer.Parse(source);
         var result = new (TokenKind, string)[tokens.Count];
 
-        for (int i = 0; i < tokens.Count; i++)
+        for (var i = 0; i < tokens.Count; i++)
         {
             var token = tokens[i];
             result[i] = (token.Kind, source.Substring(token.StartIndex, token.EndIndex - token.StartIndex));
@@ -112,7 +112,7 @@ public class TokenizerTests
     public void RefOverloadConsumesTheSpan()
     {
         var span = "color: red;".AsSpan();
-        int count = Tokenizer.Parse(ref span);
+        var count = Tokenizer.Parse(ref span);
 
         Assert.True(span.IsEmpty);
         Assert.Equal(Tokenizer.Parse("color: red;").Count, count);
@@ -123,7 +123,7 @@ public class TokenizerTests
     {
         foreach (var pair in RuleBuilder.ExactRules)
         {
-            string text = InternTable.GetString(pair.Key)!;
+            var text = InternTable.GetString(pair.Key)!;
             Assert.Equal((int)pair.Value, Tokenizer.ExactMatch(text.AsSpan()));
         }
     }

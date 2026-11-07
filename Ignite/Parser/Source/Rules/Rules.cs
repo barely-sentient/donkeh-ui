@@ -7,7 +7,7 @@ namespace Ignite.Parser
     {
         static Tokenizer()
         {
-            for (int i = 0; i < MinLengthByFirstChar.Length; i++)
+            for (var i = 0; i < MinLengthByFirstChar.Length; i++)
             {
                 MinLengthByFirstChar[i] = int.MaxValue;
             }
@@ -50,7 +50,7 @@ namespace Ignite.Parser
                     continue;
                 }
 
-                char first = text[0];
+                var first = text[0];
                 if (text.Length < MinLengthByFirstChar[first])
                 {
                     MinLengthByFirstChar[first] = text.Length;

@@ -89,7 +89,7 @@ namespace Ignite.Parser
             // once and write into it by index. The list's count is trimmed back
             // to the real token count at the end.
             var offset = 0;
-            Span<Token> buffer = default;
+            var buffer = default(Span<Token>);
 
             if (tokens is not null)
             {
@@ -259,7 +259,7 @@ namespace Ignite.Parser
 
                             // A lone '-' (for example in calc(100% - 1px)) is a
                             // delimiter, not an identifier.
-                            TokenKind kind = i == start + 1 && c == '-'
+                            var kind = i == start + 1 && c == '-'
                                 ? TokenKind.Delimiter
                                 : ClassifyName(source, start, i);
 
@@ -294,7 +294,7 @@ namespace Ignite.Parser
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static bool IsDigitFollowsSign(ReadOnlySpan<char> source, int i)
         {
-            char c = source[i];
+            var c = source[i];
             if (c != '-' && c != '+')
             {
                 return false;
@@ -352,8 +352,8 @@ namespace Ignite.Parser
 
             // Skip the matcher entirely when the candidate is shorter than any
             // registered rule with the same first character.
-            int minLen = MinLengthByFirstChar[(int)source[start]];
-            int kind = (end - start) < minLen
+            var minLen = MinLengthByFirstChar[(int)source[start]];
+            var kind = (end - start) < minLen
                 ? -1
                 : ExactMatch(source.Slice(start, end - start));
             if (kind == -1 || kind == (int)TokenKind.Function)
@@ -367,10 +367,10 @@ namespace Ignite.Parser
 
         private static int ScanPseudo(ReadOnlySpan<char> source, int i, Span<Token> buffer, ref int count)
         {
-            int start = i;
-            int length = source.Length;
-            int nameStart = i + 1;
-            bool isElement = nameStart < length && source[nameStart] == ':';
+            var start = i;
+            var length = source.Length;
+            var nameStart = i + 1;
+            var isElement = nameStart < length && source[nameStart] == ':';
 
             if (isElement)
             {
@@ -379,8 +379,8 @@ namespace Ignite.Parser
 
             if (nameStart < length && IsNameStart(source[nameStart]))
             {
-                int end = ScanName(source, nameStart);
-                int kind = (end - start) < MinLengthByFirstChar[(int)source[start]]
+                var end = ScanName(source, nameStart);
+                var kind = (end - start) < MinLengthByFirstChar[(int)source[start]]
                     ? -1
                     : ExactMatch(source.Slice(start, end - start));
 
@@ -426,7 +426,7 @@ namespace Ignite.Parser
             int end,
             ref int count)
         {
-            int length = end - start;
+            var length = end - start;
 
             if ((uint)length > byte.MaxValue)
             {
@@ -459,7 +459,7 @@ namespace Ignite.Parser
         private static int SkipComment(ReadOnlySpan<char> source, int i)
         {
             i += 2;
-            int length = source.Length;
+            var length = source.Length;
 
             while (i + 1 < length)
             {
@@ -476,13 +476,13 @@ namespace Ignite.Parser
 
         private static int ScanString(ReadOnlySpan<char> source, int i)
         {
-            char quote = source[i];
+            var quote = source[i];
             i++;
-            int length = source.Length;
+            var length = source.Length;
 
             while (i < length)
             {
-                char c = source[i];
+                var c = source[i];
 
                 if (c == quote)
                 {
@@ -509,11 +509,11 @@ namespace Ignite.Parser
 
         private static int ScanName(ReadOnlySpan<char> source, int i)
         {
-            int length = source.Length;
+            var length = source.Length;
 
             while (i < length)
             {
-                char c = source[i];
+                var c = source[i];
 
                 if (IsNameChar(c))
                 {
@@ -540,7 +540,7 @@ namespace Ignite.Parser
         private static int ScanEscape(ReadOnlySpan<char> source, int i)
         {
             i++;
-            int length = source.Length;
+            var length = source.Length;
             if (i >= length)
             {
                 return i;
@@ -563,7 +563,7 @@ namespace Ignite.Parser
                 return i + 1;
             }
 
-            int digits = 0;
+            var digits = 0;
             while (i < length && digits < 6 && IsHex(source[i]))
             {
                 i++;
@@ -581,7 +581,7 @@ namespace Ignite.Parser
 
         private static int ScanNumber(ReadOnlySpan<char> source, int i)
         {
-            int length = source.Length;
+            var length = source.Length;
 
             if (i < length && (source[i] == '+' || source[i] == '-'))
             {
@@ -604,7 +604,7 @@ namespace Ignite.Parser
 
             if (i < length && (source[i] == 'e' || source[i] == 'E'))
             {
-                int exponent = i + 1;
+                var exponent = i + 1;
                 if (exponent < length && (source[exponent] == '+' || source[exponent] == '-'))
                 {
                     exponent++;
@@ -626,7 +626,7 @@ namespace Ignite.Parser
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static bool IsNumberStart(ReadOnlySpan<char> source, int i)
         {
-            char c = source[i];
+            var c = source[i];
 
             if (IsDigit(c))
             {

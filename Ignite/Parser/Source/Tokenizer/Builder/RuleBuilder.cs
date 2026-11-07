@@ -13,7 +13,7 @@ namespace Ignite.Parser.Builder
         /// <param name="kind"></param>
         public static void Exact(string sequence, TokenKind kind)
         {
-            int id = InternTable.Intern(sequence);
+            var id = InternTable.Intern(sequence);
 
             // Some names are both a property and a function, for example
             // 'color', 'rotate' and 'scale'. A lexer can only tell them apart
