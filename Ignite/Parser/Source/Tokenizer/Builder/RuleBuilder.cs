@@ -49,5 +49,23 @@ namespace Ignite.Parser.Builder
                 Exact(string.Join('-', baseName, property), TokenKind.PropertyName);
             }
         }
+
+        /// <summary>
+        /// Add a pseudo class in CSS, you don't need to specify the ':'
+        /// </summary>
+        /// <param name="name"></param>
+        public static void CssPseudoClass(string name)
+        {
+            Exact($":{name}", TokenKind.PseudoClass);
+        }
+        
+        /// <summary>
+        /// Add a pseudo class in CSS, you don't need to specify the ':'
+        /// </summary>
+        /// <param name="name"></param>
+        public static void CssPseudoElement(string name)
+        {
+            Exact($"::{name}", TokenKind.PseudoClass);
+        }
     }
 }

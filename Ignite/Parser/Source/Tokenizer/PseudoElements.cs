@@ -1,0 +1,42 @@
+﻿using static Ignite.Parser.Builder.RuleBuilder;
+
+namespace Ignite.Parser
+{
+    public static partial class Tokenizer
+    {
+        private static void PseudoElements()
+        {
+            CssPseudoElement("after");
+            CssPseudoElement("backdrop");
+            CssPseudoElement("before");
+            CssPseudoElement("checkmark");
+            CssPseudoElement("column");
+            CssPseudoElement("cue");
+            CssPseudoElement("details-content");
+            CssPseudoElement("file-selector-button");
+            CssPseudoElement("first-letter");
+            CssPseudoElement("first-line");
+            CssPseudoElement("grammar-error");
+            CssPseudoElement("highlight");
+            CssPseudoElement("marker");
+            CssPseudoElement("part");
+            CssPseudoElement("picker-icon");
+            CssPseudoElement("picker");
+            CssPseudoElement("placeholder");
+            CssPseudoElement("scroll-button");
+            CssPseudoElement("scroll-marker");
+            CssPseudoElement("scroll-marker-group");
+            CssPseudoElement("search-text");
+            CssPseudoElement("selection");
+            CssPseudoElement("slotted");
+            CssPseudoElement("spelling-error");
+            CssPseudoElement("target-text");
+            CssPseudoElement("view-transition");
+            CssPseudoElement("view-transition-group");
+            CssPseudoElement("view-transition-image-pair");
+            CssPseudoElement("view-transition-new");
+            CssPseudoElement("view-transition-old");
+
+        }
+    }
+}

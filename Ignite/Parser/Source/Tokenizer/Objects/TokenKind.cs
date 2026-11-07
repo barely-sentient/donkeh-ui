@@ -58,10 +58,7 @@
         #endregion
         #region Special functionality
             
-        /// <summary>
-        /// the '::' character
-        /// </summary>
-        PseudoElementColon
+        PseudoClass
         #endregion
     }
 }

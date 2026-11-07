@@ -30,6 +30,8 @@
             PropertiesX();
             PropertiesY();
             PropertiesZ();
+            PseudoClasses();
+            PseudoElements();
         }
     }
 }
