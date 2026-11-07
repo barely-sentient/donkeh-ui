@@ -11,6 +11,9 @@
             PropertiesD();
             PropertiesE();
             PropertiesF();
+            PropertiesG();
+            PropertiesH();
+            PropertiesI();
         }
     }
 }
