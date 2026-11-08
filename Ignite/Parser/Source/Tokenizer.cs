@@ -429,10 +429,36 @@ namespace Ignite.Parser
         {
             var length = end - start;
 
-            if ((uint)length > byte.MaxValue)
+            // The packed Token layout stores the length in a single byte, so a
+            // token can never be longer than 255 characters. Rather than throwing
+            // on the occasional long string (for example a data: URI), split it
+            // into consecutive chunks. Downstream code concatenates the chunk
+            // text, so the reconstructed value is identical to the original.
+            if (length <= byte.MaxValue)
             {
-                ThrowTokenTooLong(start, length);
+                EmitOne(source, buffer, kind, start, end, ref count);
+                return;
             }
+
+            var pos = start;
+            while (pos < end)
+            {
+                var chunkEnd = Math.Min(pos + byte.MaxValue, end);
+                EmitOne(source, buffer, kind, pos, chunkEnd, ref count);
+                pos = chunkEnd;
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void EmitOne(
+            ReadOnlySpan<char> source,
+            Span<Token> buffer,
+            TokenKind kind,
+            int start,
+            int end,
+            ref int count)
+        {
+            var length = end - start;
 
             // Directly pack Kind and Location. This skips the StartIndex /
             // EndIndex property setters, each of which would unpack and repack
@@ -451,14 +477,6 @@ namespace Ignite.Parser
             }
 
             count++;
-        }
-
-        [MethodImpl(MethodImplOptions.NoInlining)]
-        private static void ThrowTokenTooLong(int start, int length)
-        {
-            throw new InvalidOperationException(
-                $"Token at index {start} is {length} characters long; " +
-                "the packed Token layout supports at most 255 characters per token.");
         }
 
         private static int SkipComment(ReadOnlySpan<char> source, int i)

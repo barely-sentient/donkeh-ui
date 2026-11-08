@@ -1,3 +1,4 @@
+using System.Text;
 using BenchmarkDotNet.Attributes;
 using Ignite.Data;
 using Ignite.Parser;
