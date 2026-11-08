@@ -20,6 +20,24 @@ namespace Ignite.DataEngine
         private readonly ConditionCompiler _compiler;
         private readonly StreamContext _context;
 
+        // Cascade layer tracking.
+        private readonly List<int> _layerStack = new();
+
+        // Keyframes tracking.
+        private bool _inKeyframes;
+        private int _keyframesNameId = -1;
+
+        // Descriptor at-rule tracking (font-face, page, property, counter-style, ...).
+        private string? _descriptorAtRule;
+        private int _descriptorContextId = -1;
+
+        // Margin box tracking (inside @page).
+        private bool _inMarginBox;
+        private int _marginBoxId = -1;
+
+        // Scope tracking.
+        // (removed)
+
         // Reused for every composed (nested) selector.
         private readonly List<Token> _composer;
         private readonly List<int> _selectorScratch;
@@ -100,8 +118,10 @@ namespace Ignite.DataEngine
             var atKeyword = InternTable.GetString(_tokens[start].InternedId);
             var end = FindPreludeEnd(start + 1, out var terminator);
 
+            // Semicolon-terminated at-rules: @import, @charset, @namespace, @layer name;
             if (terminator == ';')
             {
+                RecordSemicolonAtRule(atKeyword, start, end);
                 _position = end + 1;
                 return;
             }
@@ -135,9 +155,73 @@ namespace Ignite.DataEngine
                 return;
             }
 
-            // @layer, @keyframes, @font-face, @page, unknown at-rules, etc. Their
-            // contents are still traversed, but they do not inherit the enclosing
-            // style selector.
+            if (IsKeyframes(atKeyword))
+            {
+                RecordKeyframes(atKeyword, start, end);
+                return;
+            }
+
+            if (IsScope(atKeyword))
+            {
+                RecordScope(start, end);
+                _context.PushContainer();
+                ParseBlock();
+                _context.Pop();
+                return;
+            }
+
+            if (IsLayer(atKeyword))
+            {
+                // @layer name { } or @layer a, b { }.
+                var layerId = RecordLayer(start, end);
+                if (layerId >= 0)
+                {
+                    _layerStack.Add(layerId);
+                }
+
+                _context.PushContainer();
+                ParseBlock();
+                _context.Pop();
+
+                if (layerId >= 0 && _layerStack.Count > 0)
+                {
+                    _layerStack.RemoveAt(_layerStack.Count - 1);
+                }
+
+                return;
+            }
+
+            if (IsMarginBox(atKeyword) && _descriptorAtRule is not null)
+            {
+                _inMarginBox = true;
+                _marginBoxId = InternTable.Intern(atKeyword!);
+
+                _context.PushContainer();
+                ParseBlock();
+                _context.Pop();
+
+                _inMarginBox = false;
+                _marginBoxId = -1;
+                return;
+            }
+            if (IsDescriptorAtRule(atKeyword))
+            {
+                _descriptorAtRule = atKeyword;
+                _descriptorContextId = RecordDescriptorContext(atKeyword, start, end);
+
+                // @page may contain margin boxes (@top-center { }).
+                _context.PushContainer();
+                ParseBlock();
+                _context.Pop();
+
+                _descriptorAtRule = null;
+                _descriptorContextId = -1;
+                return;
+            }
+
+            // Unknown at-rules and containers (font-face handled above, keyframes
+            // handled above). Their contents are still traversed, but they do not
+            // inherit the enclosing style selector.
             _context.PushContainer();
             ParseBlock();
             _context.Pop();
@@ -369,6 +453,71 @@ namespace Ignite.DataEngine
 
             var selectors = _context.CurrentSelectors;
 
+            // Descriptor at-rules (@font-face, @page, @property, ...) have no
+            // style selector. Record the descriptor and skip rule creation.
+            if (_descriptorAtRule is not null)
+            {
+                if (valueEnd > valueStart)
+                {
+                    var propertyLength = NormalizeTokens(start, colon, lowerCase: !customProperty);
+                    var propertyId = InternTable.Intern(_textBuffer.AsSpan(0, propertyLength));
+
+                    var valueLength = NormalizeTokens(valueStart, valueEnd, lowerCase: false);
+                    var valueId = InternTable.Intern(_textBuffer.AsSpan(0, valueLength));
+
+                    var contextId = _descriptorContextId;
+                    // Margin boxes: if inside a margin box, context is the box name.
+                    if (_inMarginBox)
+                    {
+                        _table.AddMarginBox(_marginBoxId, propertyId, valueId);
+                    }
+                    else
+                    {
+                        _table.AddDescriptor(
+                            InternTable.Intern(_descriptorAtRule),
+                            contextId,
+                            propertyId,
+                            valueId);
+                    }
+                }
+
+                _position = terminator.Kind == TokenKind.SemiColon
+                    ? terminator.Index + 1
+                    : terminator.Index;
+
+                return;
+            }
+
+            // Keyframes: record each declaration as a keyframe.
+            if (_inKeyframes)
+            {
+                if (valueEnd > valueStart && !selectors.IsEmpty)
+                {
+                    var propertyLength = NormalizeTokens(start, colon, lowerCase: !customProperty);
+                    var propertyId = InternTable.Intern(_textBuffer.AsSpan(0, propertyLength));
+
+                    var valueLength = NormalizeTokens(valueStart, valueEnd, lowerCase: false);
+                    var valueId = InternTable.Intern(_textBuffer.AsSpan(0, valueLength));
+
+                    var conditionId = _context.ConditionId;
+                    foreach (var selectorId in selectors)
+                    {
+                        _table.AddKeyframe(
+                            _keyframesNameId,
+                            selectorId,
+                            propertyId,
+                            valueId,
+                            conditionId);
+                    }
+                }
+
+                _position = terminator.Kind == TokenKind.SemiColon
+                    ? terminator.Index + 1
+                    : terminator.Index;
+
+                return;
+            }
+
             // Descriptor blocks (@font-face, @page, ...) have no style selector.
             // Do not pay to intern text that can never be matched.
             if (selectors.IsEmpty || valueEnd <= valueStart)
@@ -380,22 +529,25 @@ namespace Ignite.DataEngine
                 return;
             }
 
-            var propertyLength = NormalizeTokens(start, colon, lowerCase: !customProperty);
-            var propertyId = InternTable.Intern(_textBuffer.AsSpan(0, propertyLength));
+            var propertyLength2 = NormalizeTokens(start, colon, lowerCase: !customProperty);
+            var propertyId2 = InternTable.Intern(_textBuffer.AsSpan(0, propertyLength2));
 
-            var valueLength = NormalizeTokens(valueStart, valueEnd, lowerCase: false);
-            var valueId = InternTable.Intern(_textBuffer.AsSpan(0, valueLength));
+            var valueLength2 = NormalizeTokens(valueStart, valueEnd, lowerCase: false);
+            var valueId2 = InternTable.Intern(_textBuffer.AsSpan(0, valueLength2));
 
-            var conditionId = _context.ConditionId;
+            var conditionId2 = _context.ConditionId;
+            var layerId = CurrentLayerId;
 
             for (var i = 0; i < selectors.Length; i++)
             {
-                _table.AddRule(selectors[i], propertyId, valueId, conditionId);
+                _table.AddRule(selectors[i], propertyId2, valueId2, conditionId2, layerId);
             }
 
             _position = terminator.Kind == TokenKind.SemiColon
                 ? terminator.Index + 1
                 : terminator.Index;
+
+            return;
         }
 
         private int NormalizeTokens(int start, int endExclusive, bool lowerCase)
@@ -746,6 +898,241 @@ namespace Ignite.DataEngine
             return atKeyword is not null
                 && atKeyword.Equals("@nest", StringComparison.OrdinalIgnoreCase);
         }
+
+        private static bool IsKeyframes(string? atKeyword)
+        {
+            return atKeyword is not null
+                && (atKeyword.Equals("@keyframes", StringComparison.OrdinalIgnoreCase)
+                    || atKeyword.Equals("@-webkit-keyframes", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool IsScope(string? atKeyword)
+        {
+            return atKeyword is not null
+                && atKeyword.Equals("@scope", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsLayer(string? atKeyword)
+        {
+            return atKeyword is not null
+                && atKeyword.Equals("@layer", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsDescriptorAtRule(string? atKeyword)
+        {
+            if (atKeyword is null)
+            {
+                return false;
+            }
+
+            return atKeyword.Equals("@font-face", StringComparison.OrdinalIgnoreCase)
+                || atKeyword.Equals("@page", StringComparison.OrdinalIgnoreCase)
+                || atKeyword.Equals("@property", StringComparison.OrdinalIgnoreCase)
+                || atKeyword.Equals("@counter-style", StringComparison.OrdinalIgnoreCase)
+                || atKeyword.Equals("@font-palette-values", StringComparison.OrdinalIgnoreCase)
+                || atKeyword.Equals("@view-transition", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsMarginBox(string? atKeyword)
+        {
+            if (atKeyword is null || !atKeyword.StartsWith("@", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            return atKeyword.Equals("@top-left-corner", StringComparison.OrdinalIgnoreCase)
+                || atKeyword.Equals("@top-left", StringComparison.OrdinalIgnoreCase)
+                || atKeyword.Equals("@top-center", StringComparison.OrdinalIgnoreCase)
+                || atKeyword.Equals("@top-right", StringComparison.OrdinalIgnoreCase)
+                || atKeyword.Equals("@top-right-corner", StringComparison.OrdinalIgnoreCase)
+                || atKeyword.Equals("@bottom-left-corner", StringComparison.OrdinalIgnoreCase)
+                || atKeyword.Equals("@bottom-left", StringComparison.OrdinalIgnoreCase)
+                || atKeyword.Equals("@bottom-center", StringComparison.OrdinalIgnoreCase)
+                || atKeyword.Equals("@bottom-right", StringComparison.OrdinalIgnoreCase)
+                || atKeyword.Equals("@bottom-right-corner", StringComparison.OrdinalIgnoreCase)
+                || atKeyword.Equals("@left-top", StringComparison.OrdinalIgnoreCase)
+                || atKeyword.Equals("@left-middle", StringComparison.OrdinalIgnoreCase)
+                || atKeyword.Equals("@left-bottom", StringComparison.OrdinalIgnoreCase)
+                || atKeyword.Equals("@right-top", StringComparison.OrdinalIgnoreCase)
+                || atKeyword.Equals("@right-middle", StringComparison.OrdinalIgnoreCase)
+                || atKeyword.Equals("@right-bottom", StringComparison.OrdinalIgnoreCase);
+        }
+
+        // ------------------------------------------------------------------
+        // Recording helpers
+        // ------------------------------------------------------------------
+
+        private int InternPreludeText(int start, int end)
+        {
+            var length = 0;
+            // Rough capacity.
+            var buffer = new char[Math.Max(16, (end - start) * 8)];
+            var previousEnd = -1;
+
+            for (var i = start; i < end; i++)
+            {
+                var token = _tokens[i];
+                if (previousEnd >= 0 && token.StartIndex > previousEnd)
+                {
+                    if (length < buffer.Length)
+                    {
+                        buffer[length++] = ' ';
+                    }
+                }
+
+                var text = InternTable.GetString(token.InternedId);
+                if (text is not null)
+                {
+                    foreach (var ch in text)
+                    {
+                        if (length < buffer.Length)
+                        {
+                            buffer[length++] = ch;
+                        }
+                    }
+                }
+
+                previousEnd = token.EndIndex;
+            }
+
+            return InternTable.Intern(buffer.AsSpan(0, length));
+        }
+
+        private int ExtractUrlId(int start, int end)
+        {
+            for (var i = start; i < end; i++)
+            {
+                if (_tokens[i].Kind == TokenKind.String)
+                {
+                    return _tokens[i].InternedId;
+                }
+
+                if (_tokens[i].Kind == TokenKind.Function)
+                {
+                    // url(...) — find string inside parens.
+                    // Fall through to text extraction.
+                }
+            }
+
+            // Fall back to the whole prelude text.
+            return InternPreludeText(start, end);
+        }
+
+        private void RecordSemicolonAtRule(string? atKeyword, int start, int end)
+        {
+            if (atKeyword is null)
+            {
+                return;
+            }
+
+            if (atKeyword.Equals("@import", StringComparison.OrdinalIgnoreCase))
+            {
+                var urlId = ExtractUrlId(start + 1, end);
+                _table.AddImport(urlId, CurrentLayerId, _context.ConditionId, -1);
+                return;
+            }
+
+            if (atKeyword.Equals("@charset", StringComparison.OrdinalIgnoreCase))
+            {
+                var charsetId = InternPreludeText(start + 1, end);
+                _table.AddCharset(charsetId);
+                return;
+            }
+
+            if (atKeyword.Equals("@namespace", StringComparison.OrdinalIgnoreCase))
+            {
+                // Optional prefix followed by a url.
+                int prefixId = -1;
+                int uriId = -1;
+
+                // Find url/string token.
+                for (var i = start + 1; i < end; i++)
+                {
+                    if (_tokens[i].Kind == TokenKind.String)
+                    {
+                        uriId = _tokens[i].InternedId;
+                        // Prefix is the token before it, if an identifier.
+                        if (i > start + 1 && _tokens[i - 1].Kind is TokenKind.Identifier or TokenKind.PropertyName)
+                        {
+                            prefixId = _tokens[i - 1].InternedId;
+                        }
+                        break;
+                    }
+                }
+
+                if (uriId < 0)
+                {
+                    uriId = InternPreludeText(start + 1, end);
+                }
+
+                _table.AddNamespace(prefixId, uriId);
+                return;
+            }
+
+            if (atKeyword.Equals("@layer", StringComparison.OrdinalIgnoreCase))
+            {
+                // @layer a, b; (statement) — record each layer name.
+                RecordLayerNames(start + 1, end);
+                return;
+            }
+        }
+
+        private void RecordLayerNames(int start, int end)
+        {
+            var nameStart = start;
+            for (var i = start; i <= end; i++)
+            {
+                var isComma = i < end && _tokens[i].Kind == TokenKind.Comma;
+                var isEnd = i == end;
+
+                if (isComma || isEnd)
+                {
+                    if (i > nameStart)
+                    {
+                        var nameId = InternPreludeText(nameStart, i);
+                        _table.GetOrAddLayer(nameId);
+                    }
+                    nameStart = i + 1;
+                }
+            }
+        }
+
+        private int RecordLayer(int start, int end)
+        {
+            // Single name (or first name) for block push.
+            var nameId = InternPreludeText(start + 1, end);
+            // Handle comma: record all, return first.
+            RecordLayerNames(start + 1, end);
+            return _table.GetOrAddLayer(nameId);
+        }
+
+        private void RecordKeyframes(string? atKeyword, int start, int end)
+        {
+            _inKeyframes = true;
+            var nameId = InternPreludeText(start + 1, end);
+            _keyframesNameId = nameId;
+
+            _context.PushContainer();
+            ParseBlock();
+            _context.Pop();
+
+            _inKeyframes = false;
+            _keyframesNameId = -1;
+        }
+
+        private void RecordScope(int start, int end)
+        {
+            var preludeId = InternPreludeText(start + 1, end);
+            _table.AddScope(preludeId);
+        }
+
+        private int RecordDescriptorContext(string? atKeyword, int start, int end)
+        {
+            var contextId = InternPreludeText(start + 1, end);
+            return contextId;
+        }
+
+        private int CurrentLayerId => _layerStack.Count > 0 ? _layerStack[^1] : -1;
 
         private readonly record struct DeclarationTerminator(TokenKind Kind, int Index);
     }

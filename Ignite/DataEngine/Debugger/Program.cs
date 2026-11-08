@@ -196,6 +196,41 @@ internal static class Program
             uniqueTuples.Add((rule.SelectorId, rule.PropertyId, rule.ValueId, rule.ConditionId));
         }
 
+        var uniquePropertyIds = new HashSet<int>();
+        var uniqueValueIds = new HashSet<int>();
+        foreach (var rule in Enumerable.Range(0, table.RuleCount).Select(i => table.GetRule(i)))
+        {
+            uniquePropertyIds.Add(rule.PropertyId);
+            uniqueValueIds.Add(rule.ValueId);
+        }
+
+        long propertyStringBytes = 0;
+        foreach (var id in uniquePropertyIds)
+        {
+            var s = InternTable.GetString(id);
+            propertyStringBytes += (s is null ? 0 : s.Length * 2) + 40;
+        }
+
+        long valueStringBytes = 0;
+        foreach (var id in uniqueValueIds)
+        {
+            var s = InternTable.GetString(id);
+            valueStringBytes += (s is null ? 0 : s.Length * 2) + 40;
+        }
+
+        long selectorTokenBytes = 0;
+        for (var i = 0; i < table.SelectorCount; i++)
+        {
+            selectorTokenBytes += (long)table.GetSelector(i).TokenLength * 12;
+        }
+
+        var memoryStats = new MemoryStats(
+            UniqueDeclBlockBytes: (long)declarationBlockCounts.Count * 8,
+            DeclBlockBytesNoDedup: (long)table.RuleCount * 8,
+            PropertyStringBytes: propertyStringBytes,
+            ValueStringBytes: valueStringBytes,
+            SelectorTokenBytes: selectorTokenBytes);
+
         if (options.Json)
         {
             WriteJson(loaded.Name, loaded.ByteLength, source.Length, tokens.Count, table, elapsed, allocated, gen0, gen1, gen2, tokenizeWatch.Elapsed, tokenizeAllocated, buildWatch.Elapsed, buildAllocated, options, selectorText!, ruleCounts!);
@@ -204,7 +239,7 @@ internal static class Program
 
         var color = !options.NoColor && !Console.IsOutputRedirected;
 
-        WriteSummary(loaded.Name, loaded.ByteLength, source.Length, tokens.Count, table, elapsed, allocated, gen0, gen1, gen2, tokenizeWatch.Elapsed, tokenizeAllocated, buildWatch.Elapsed, buildAllocated, propertyCounts.Count, valueCounts.Count, uniqueTuples.Count, declarationBlockCounts.Count, color);
+        WriteSummary(loaded.Name, loaded.ByteLength, source.Length, tokens.Count, table, elapsed, allocated, gen0, gen1, gen2, tokenizeWatch.Elapsed, tokenizeAllocated, buildWatch.Elapsed, buildAllocated, propertyCounts.Count, valueCounts.Count, uniqueTuples.Count, declarationBlockCounts.Count, memoryStats, color);
 
         if (options.ShowOccurrences)
         {
@@ -342,6 +377,7 @@ internal static class Program
         int uniqueValues,
         int uniqueTuples,
         int uniqueDeclarationBlocks,
+        MemoryStats memoryStats,
         bool color)
     {
         var throughput = elapsed.TotalMilliseconds > 0
@@ -375,6 +411,25 @@ internal static class Program
         Console.WriteLine($"  unique decl blocks   {uniqueDeclarationBlocks:N0}   of {table.RuleCount:N0} stored  ({table.RuleCount - uniqueDeclarationBlocks:N0} reused)");
         Console.WriteLine($"  collapsed adjacent   {table.RuleCount - uniqueTuples:N0}  (distinct-tuple delta)");
         Console.WriteLine($"  discriminators       {table.DiscriminatorCount:N0}   (candidate groups)");
+        Console.WriteLine($"  imports              {table.ImportCount:N0}");
+        Console.WriteLine($"  namespaces           {table.NamespaceCount:N0}");
+        Console.WriteLine($"  layers               {table.LayerCount:N0}");
+        Console.WriteLine($"  scopes               {table.ScopeCount:N0}");
+        Console.WriteLine($"  keyframes            {table.KeyframeCount:N0}");
+        Console.WriteLine($"  descriptors          {table.DescriptorCount:N0}");
+        Console.WriteLine($"  margin boxes         {table.MarginBoxCount:N0}");
+        Console.WriteLine($"  charsets             {table.CharsetCount:N0}");
+        Console.WriteLine();
+
+        Console.WriteLine(Header("Memory estimate (steady state)", color));
+        Console.WriteLine($"  decl blocks          {memoryStats.UniqueDeclBlockBytes:N0} B   ({uniqueDeclarationBlocks:N0} unique x 8 B)");
+        Console.WriteLine($"  without dedup        {memoryStats.DeclBlockBytesNoDedup:N0} B   ({table.RuleCount:N0} rules x 8 B)");
+        Console.WriteLine($"  saved by reuse       {memoryStats.DeclBlockBytesNoDedup - memoryStats.UniqueDeclBlockBytes:N0} B");
+        Console.WriteLine($"  property strings     {memoryStats.PropertyStringBytes:N0} B   ({uniqueProperties:N0} interned)");
+        Console.WriteLine($"  value strings        {memoryStats.ValueStringBytes:N0} B   ({uniqueValues:N0} interned)");
+        Console.WriteLine($"  selector token arena {memoryStats.SelectorTokenBytes:N0} B   ({table.SelectorCount:N0} selectors)");
+        Console.WriteLine($"  rule storage         {table.RuleCount * 16:N0} B   ({table.RuleCount:N0} rules x 16 B)");
+        Console.WriteLine($"  total (est.)         {memoryStats.UniqueDeclBlockBytes + memoryStats.PropertyStringBytes + memoryStats.ValueStringBytes + memoryStats.SelectorTokenBytes + (long)table.RuleCount * 16:N0} B");
         Console.WriteLine();
     }
 
@@ -780,7 +835,8 @@ internal static class Program
             or TokenKind.Plus
             or TokenKind.Tilde
             or TokenKind.Equals
-            or TokenKind.Comma;
+            or TokenKind.Comma
+            or TokenKind.ColumnCombinator;
     }
 
     private static string DiscriminatorText(in Token token)
@@ -877,6 +933,13 @@ internal static class Program
 
         public bool NoColor { get; set; }
     }
+
+    private readonly record struct MemoryStats(
+        long UniqueDeclBlockBytes,
+        long DeclBlockBytesNoDedup,
+        long PropertyStringBytes,
+        long ValueStringBytes,
+        long SelectorTokenBytes);
 
     private readonly record struct LoadedSource(string Name, string Text, long ByteLength);
 }

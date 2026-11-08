@@ -132,7 +132,12 @@
         /// <summary>
         /// Any other single character that has no dedicated token kind.
         /// </summary>
-        Delimiter
+        Delimiter,
+
+        /// <summary>
+        /// The '||' column combinator.
+        /// </summary>
+        ColumnCombinator,
         
         #endregion
     }

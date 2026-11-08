@@ -17,6 +17,14 @@ namespace Ignite.Data
         private readonly List<SelectorRecord> _selectors;
         private readonly List<Rule> _rules;
         private readonly List<Condition> _conditions;
+        private readonly List<CssImport> _imports = new();
+        private readonly List<CssNamespace> _namespaces = new();
+        private readonly List<CssLayer> _layers = new();
+        private readonly List<CssScope> _scopes = new();
+        private readonly List<CssKeyframe> _keyframes = new();
+        private readonly List<CssDescriptor> _descriptors = new();
+        private readonly List<CssMarginBox> _marginBoxes = new();
+        private readonly List<CssCharset> _charsets = new();
 
         // Flat selector token arena. SelectorRecord stores an offset and length.
         private Token[] _selectorTokens;
@@ -107,6 +115,24 @@ namespace Ignite.Data
         public int RuleCount => _rules.Count;
 
         public int ConditionCount => _conditions.Count;
+
+        public IReadOnlyList<CssImport> Imports => _imports;
+        public IReadOnlyList<CssNamespace> Namespaces => _namespaces;
+        public IReadOnlyList<CssLayer> Layers => _layers;
+        public IReadOnlyList<CssScope> Scopes => _scopes;
+        public IReadOnlyList<CssKeyframe> Keyframes => _keyframes;
+        public IReadOnlyList<CssDescriptor> Descriptors => _descriptors;
+        public IReadOnlyList<CssMarginBox> MarginBoxes => _marginBoxes;
+        public IReadOnlyList<CssCharset> Charsets => _charsets;
+
+        public int ImportCount => _imports.Count;
+        public int NamespaceCount => _namespaces.Count;
+        public int LayerCount => _layers.Count;
+        public int ScopeCount => _scopes.Count;
+        public int KeyframeCount => _keyframes.Count;
+        public int DescriptorCount => _descriptors.Count;
+        public int MarginBoxCount => _marginBoxes.Count;
+        public int CharsetCount => _charsets.Count;
 
         public SelectorRecord GetSelector(int id) => _selectors[id];
 
@@ -281,7 +307,7 @@ namespace Ignite.Data
         /// selector more than once, while preserving cascade order for anything
         /// separated by another declaration.
         /// </summary>
-        public int AddRule(int selectorId, int propertyId, int valueId, int conditionId)
+        public int AddRule(int selectorId, int propertyId, int valueId, int conditionId, int layerId = -1)
         {
             var key = new RuleKey(selectorId, propertyId, valueId, conditionId);
 
@@ -295,12 +321,95 @@ namespace Ignite.Data
                 SelectorId = selectorId,
                 PropertyId = propertyId,
                 ValueId = valueId,
-                ConditionId = conditionId
+                ConditionId = conditionId,
+                LayerId = layerId
             });
 
             _lastRule = key;
             _hasLastRule = true;
             return _rules.Count - 1;
+        }
+
+        /// <summary>
+        /// Records a stylesheet import for the host to resolve.
+        /// </summary>
+        public int AddImport(int urlId, int layerId = -1, int conditionId = -1, int supportsConditionId = -1)
+        {
+            var import = new CssImport(urlId, layerId, conditionId, supportsConditionId);
+            _imports.Add(import);
+            return _imports.Count - 1;
+        }
+
+        /// <summary>
+        /// Records a namespace declaration.
+        /// </summary>
+        public int AddNamespace(int prefixId, int uriId)
+        {
+            _namespaces.Add(new CssNamespace(prefixId, uriId));
+            return _namespaces.Count - 1;
+        }
+
+        /// <summary>
+        /// Records (or reuses) a cascade layer, returning its layer id.
+        /// </summary>
+        public int GetOrAddLayer(int nameId)
+        {
+            for (var i = 0; i < _layers.Count; i++)
+            {
+                if (_layers[i].NameId == nameId)
+                {
+                    return i;
+                }
+            }
+
+            var id = _layers.Count;
+            _layers.Add(new CssLayer(nameId, id));
+            return id;
+        }
+
+        /// <summary>
+        /// Records a scope boundary.
+        /// </summary>
+        public int AddScope(int preludeId)
+        {
+            _scopes.Add(new CssScope(preludeId));
+            return _scopes.Count - 1;
+        }
+
+        /// <summary>
+        /// Records a keyframe declaration.
+        /// </summary>
+        public int AddKeyframe(int nameId, int keyId, int propertyId, int valueId, int conditionId = -1)
+        {
+            _keyframes.Add(new CssKeyframe(nameId, keyId, propertyId, valueId, conditionId));
+            return _keyframes.Count - 1;
+        }
+
+        /// <summary>
+        /// Records a descriptor inside an at-rule.
+        /// </summary>
+        public int AddDescriptor(int atRuleId, int contextId, int propertyId, int valueId)
+        {
+            _descriptors.Add(new CssDescriptor(atRuleId, contextId, propertyId, valueId));
+            return _descriptors.Count - 1;
+        }
+
+        /// <summary>
+        /// Records a margin box declaration.
+        /// </summary>
+        public int AddMarginBox(int boxId, int propertyId, int valueId)
+        {
+            _marginBoxes.Add(new CssMarginBox(boxId, propertyId, valueId));
+            return _marginBoxes.Count - 1;
+        }
+
+        /// <summary>
+        /// Records a charset declaration.
+        /// </summary>
+        public int AddCharset(int charsetId)
+        {
+            _charsets.Add(new CssCharset(charsetId));
+            return _charsets.Count - 1;
         }
 
         /// <summary>
@@ -561,7 +670,8 @@ namespace Ignite.Data
                 or TokenKind.Plus
                 or TokenKind.Tilde
                 or TokenKind.Equals
-                or TokenKind.Comma;
+                or TokenKind.Comma
+                or TokenKind.ColumnCombinator;
         }
 
         private static int HashSelector(ReadOnlySpan<Token> selector)

@@ -247,9 +247,17 @@ namespace Ignite.Parser
                         Emit(source, buffer, TokenKind.Asterisk, start, i, ref count);
                         break;
 
-                    case '=':
-                        i++;
-                        Emit(source, buffer, TokenKind.Equals, start, i, ref count);
+                    case '|':
+                        if (i + 1 < length && source[i + 1] == '|')
+                        {
+                            i += 2;
+                            Emit(source, buffer, TokenKind.ColumnCombinator, start, i, ref count);
+                        }
+                        else
+                        {
+                            i++;
+                            Emit(source, buffer, TokenKind.Delimiter, start, i, ref count);
+                        }
                         break;
 
                     default:

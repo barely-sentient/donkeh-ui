@@ -12,6 +12,7 @@
             PropertyId = -1;
             ValueId = -1;
             ConditionId = -1;
+            LayerId = -1;
         }
 
         public required int SelectorId { get; init; }
@@ -25,5 +26,10 @@
         /// Ancestor conditions are reached through <see cref="Condition.ParentId"/>.
         /// </summary>
         public int ConditionId { get; init; } = -1;
+
+        /// <summary>
+        /// The cascade layer this rule belongs to, or -1 when unlayered.
+        /// </summary>
+        public int LayerId { get; init; } = -1;
     }
 }
