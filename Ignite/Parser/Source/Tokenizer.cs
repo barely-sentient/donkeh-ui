@@ -137,7 +137,7 @@ namespace Ignite.Parser
                     && source[i + 1] == '!' && source[i + 2] == '-' && source[i + 3] == '-')
                 {
                     i += 4;
-                    Emit(buffer, TokenKind.Delimiter, start, i, ref count);
+                    Emit(source, buffer, TokenKind.Delimiter, start, i, ref count);
                     continue;
                 }
 
@@ -145,7 +145,7 @@ namespace Ignite.Parser
                     && source[i + 1] == '-' && source[i + 2] == '>')
                 {
                     i += 3;
-                    Emit(buffer, TokenKind.Delimiter, start, i, ref count);
+                    Emit(source, buffer, TokenKind.Delimiter, start, i, ref count);
                     continue;
                 }
 
@@ -154,7 +154,7 @@ namespace Ignite.Parser
                     case '"':
                     case '\'':
                         i = ScanString(source, i);
-                        Emit(buffer, TokenKind.String, start, i, ref count);
+                        Emit(source, buffer, TokenKind.String, start, i, ref count);
                         break;
 
                     case '@':
@@ -162,11 +162,11 @@ namespace Ignite.Parser
                         if (i < length && IsNameStart(source[i]))
                         {
                             i = ScanName(source, i);
-                            Emit(buffer, TokenKind.AtKeyword, start, i, ref count);
+                            Emit(source, buffer, TokenKind.AtKeyword, start, i, ref count);
                         }
                         else
                         {
-                            Emit(buffer, TokenKind.Delimiter, start, i, ref count);
+                            Emit(source, buffer, TokenKind.Delimiter, start, i, ref count);
                         }
                         break;
 
@@ -174,12 +174,12 @@ namespace Ignite.Parser
                         if (i + 1 < length && (IsNameChar(source[i + 1]) || source[i + 1] == '\\'))
                         {
                             i = ScanName(source, i + 1);
-                            Emit(buffer, TokenKind.Hash, start, i, ref count);
+                            Emit(source, buffer, TokenKind.Hash, start, i, ref count);
                         }
                         else
                         {
                             i++;
-                            Emit(buffer, TokenKind.Delimiter, start, i, ref count);
+                            Emit(source, buffer, TokenKind.Delimiter, start, i, ref count);
                         }
                         break;
 
@@ -189,67 +189,67 @@ namespace Ignite.Parser
 
                     case ';':
                         i++;
-                        Emit(buffer, TokenKind.SemiColon, start, i, ref count);
+                        Emit(source, buffer, TokenKind.SemiColon, start, i, ref count);
                         break;
 
                     case '{':
                         i++;
-                        Emit(buffer, TokenKind.LeftCurlyBrace, start, i, ref count);
+                        Emit(source, buffer, TokenKind.LeftCurlyBrace, start, i, ref count);
                         break;
 
                     case '}':
                         i++;
-                        Emit(buffer, TokenKind.RightCurlyBrace, start, i, ref count);
+                        Emit(source, buffer, TokenKind.RightCurlyBrace, start, i, ref count);
                         break;
 
                     case '[':
                         i++;
-                        Emit(buffer, TokenKind.LeftSquareBracket, start, i, ref count);
+                        Emit(source, buffer, TokenKind.LeftSquareBracket, start, i, ref count);
                         break;
 
                     case ']':
                         i++;
-                        Emit(buffer, TokenKind.RightSquareBracket, start, i, ref count);
+                        Emit(source, buffer, TokenKind.RightSquareBracket, start, i, ref count);
                         break;
 
                     case '(':
                         i++;
-                        Emit(buffer, TokenKind.LeftParenthesis, start, i, ref count);
+                        Emit(source, buffer, TokenKind.LeftParenthesis, start, i, ref count);
                         break;
 
                     case ')':
                         i++;
-                        Emit(buffer, TokenKind.RightParenthesis, start, i, ref count);
+                        Emit(source, buffer, TokenKind.RightParenthesis, start, i, ref count);
                         break;
 
                     case '>':
                         i++;
-                        Emit(buffer, TokenKind.DirectChildBracket, start, i, ref count);
+                        Emit(source, buffer, TokenKind.DirectChildBracket, start, i, ref count);
                         break;
 
                     case ',':
                         i++;
-                        Emit(buffer, TokenKind.Comma, start, i, ref count);
+                        Emit(source, buffer, TokenKind.Comma, start, i, ref count);
                         break;
 
                     case '+':
                         i++;
-                        Emit(buffer, TokenKind.Plus, start, i, ref count);
+                        Emit(source, buffer, TokenKind.Plus, start, i, ref count);
                         break;
 
                     case '~':
                         i++;
-                        Emit(buffer, TokenKind.Tilde, start, i, ref count);
+                        Emit(source, buffer, TokenKind.Tilde, start, i, ref count);
                         break;
 
                     case '*':
                         i++;
-                        Emit(buffer, TokenKind.Asterisk, start, i, ref count);
+                        Emit(source, buffer, TokenKind.Asterisk, start, i, ref count);
                         break;
 
                     case '=':
                         i++;
-                        Emit(buffer, TokenKind.Equals, start, i, ref count);
+                        Emit(source, buffer, TokenKind.Equals, start, i, ref count);
                         break;
 
                     default:
@@ -263,7 +263,7 @@ namespace Ignite.Parser
                                 ? TokenKind.Delimiter
                                 : ClassifyName(source, start, i);
 
-                            Emit(buffer, kind, start, i, ref count);
+                            Emit(source, buffer, kind, start, i, ref count);
                         }
                         else if (IsNumberStart(source, i))
                         {
@@ -273,7 +273,7 @@ namespace Ignite.Parser
                         else
                         {
                             i++;
-                            Emit(buffer, TokenKind.Delimiter, start, i, ref count);
+                            Emit(source, buffer, TokenKind.Delimiter, start, i, ref count);
                         }
                         break;
                 }
@@ -324,18 +324,18 @@ namespace Ignite.Parser
             if (i < source.Length && source[i] == '%')
             {
                 i++;
-                Emit(buffer, TokenKind.Percentage, start, i, ref count);
+                Emit(source, buffer, TokenKind.Percentage, start, i, ref count);
                 return i;
             }
 
             if (i < source.Length && IsNameStart(source[i]))
             {
                 i = ScanName(source, i);
-                Emit(buffer, TokenKind.Dimension, start, i, ref count);
+                Emit(source, buffer, TokenKind.Dimension, start, i, ref count);
                 return i;
             }
 
-            Emit(buffer, TokenKind.Number, start, i, ref count);
+            Emit(source, buffer, TokenKind.Number, start, i, ref count);
             return i;
         }
 
@@ -388,38 +388,39 @@ namespace Ignite.Parser
                 {
                     if (kind == (int)TokenKind.PseudoElement)
                     {
-                        Emit(buffer, TokenKind.PseudoElement, start, end, ref count);
+                        Emit(source, buffer, TokenKind.PseudoElement, start, end, ref count);
                         return end;
                     }
 
                     // '::' on its own, or an unknown pseudo-element. Emit the
                     // colon pair and let the identifier scanner handle the name.
-                    Emit(buffer, TokenKind.PseudoElementColon, start, start + 2, ref count);
+                    Emit(source, buffer, TokenKind.PseudoElementColon, start, start + 2, ref count);
                     return start + 2;
                 }
 
                 if (kind == (int)TokenKind.PseudoClass)
                 {
-                    Emit(buffer, TokenKind.PseudoClass, start, end, ref count);
+                    Emit(source, buffer, TokenKind.PseudoClass, start, end, ref count);
                     return end;
                 }
 
-                Emit(buffer, TokenKind.Colon, start, start + 1, ref count);
+                Emit(source, buffer, TokenKind.Colon, start, start + 1, ref count);
                 return start + 1;
             }
 
             if (isElement)
             {
-                Emit(buffer, TokenKind.PseudoElementColon, start, start + 2, ref count);
+                Emit(source, buffer, TokenKind.PseudoElementColon, start, start + 2, ref count);
                 return start + 2;
             }
 
-            Emit(buffer, TokenKind.Colon, start, start + 1, ref count);
+            Emit(source, buffer, TokenKind.Colon, start, start + 1, ref count);
             return start + 1;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void Emit(
+            ReadOnlySpan<char> source,
             Span<Token> buffer,
             TokenKind kind,
             int start,
@@ -438,9 +439,13 @@ namespace Ignite.Parser
             // the location field.
             if ((uint)count < (uint)buffer.Length)
             {
+                // Intern the token's source text and keep the id on the token.
+                var internedId = InternTable.Intern(source.Slice(start, length));
+
                 buffer[count] = new Token
                 {
                     Kind = kind,
+                    InternedId = internedId,
                     Location = (length << 24) | (start & 0x00FFFFFF)
                 };
             }

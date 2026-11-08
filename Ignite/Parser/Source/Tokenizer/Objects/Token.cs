@@ -22,6 +22,11 @@
         /// Gets or sets the kind of token (identifier, keyword, punctuation, etc.).
         /// </summary>
         public TokenKind Kind { get; set; }
+        
+        /// <summary>
+        /// Interned string ID
+        /// </summary>
+        public int InternedId { get; set; }
 
         /// <summary>
         /// Gets or sets the raw packed position data for this token.
