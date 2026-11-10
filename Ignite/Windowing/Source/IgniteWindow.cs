@@ -30,6 +30,7 @@ public sealed class IgniteWindow : IDisposable
     private readonly FontManager _fonts = new();
     private readonly ImageCache _images = new();
     private readonly Renderer _ui = new();
+    private readonly TrueTypeTextMeasurer _measurer;
 
     private IWindow? _window;
     private IInputContext? _input;
@@ -61,6 +62,7 @@ public sealed class IgniteWindow : IDisposable
     public IgniteWindow(WindowSettings settings)
     {
         _settings = settings;
+        _measurer = new TrueTypeTextMeasurer(_fonts);
         RebuildStyles();
     }
 
@@ -358,7 +360,7 @@ public sealed class IgniteWindow : IDisposable
             ViewportHeight = height,
             DevicePixelRatio = dpi,
             Context = _context,
-            TextMeasurer = new TrueTypeTextMeasurer(_fonts),
+            TextMeasurer = _measurer,
             TextProvider = GetDisplayText,
             IntrinsicSizeProvider = GetIntrinsicSize,
             ImageProvider = GetImage,

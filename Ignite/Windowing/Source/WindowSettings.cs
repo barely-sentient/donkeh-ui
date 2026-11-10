@@ -3,6 +3,20 @@
     /// <summary>Creation options for an <see cref="IgniteWindow"/>.</summary>
     public struct WindowSettings
     {
+        /// <summary>Creates settings with sensible desktop defaults.</summary>
+        public WindowSettings()
+        {
+            Width = 1280;
+            Height = 800;
+            Frameless = false;
+            FullScreen = false;
+            Title = "Ignite";
+            VSync = true;
+            ClearColor = 0xFFFFFFFF;
+            Samples = 4;
+            Resizable = true;
+        }
+
         /// <summary>The logical window width in CSS pixels. Zero uses the default.</summary>
         public int Width;
 

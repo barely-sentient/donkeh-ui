@@ -564,11 +564,6 @@ public sealed partial class LayoutEngine
         var showHorizontal = box.ScrollWidth > box.ClientWidth + 0.5f
             && (style.ShowScrollbars || style.OverflowX is Overflow.Scroll or Overflow.Auto);
 
-        if (box.ScrollHeight > box.ClientHeight + 0.5f || box.ScrollWidth > box.ClientWidth + 0.5f)
-        {
-            Console.WriteLine($"scrollbox [{string.Join(' ', box.Node.ClassName)}] h={box.ScrollHeight}/{box.ClientHeight} w={box.ScrollWidth}/{box.ClientWidth} showV={showVertical} showH={showHorizontal} overflow={style.OverflowX}/{style.OverflowY} rect={box.PaddingBox}");
-        }
-
         if (!showVertical && !showHorizontal)
         {
             return;

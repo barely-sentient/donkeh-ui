@@ -70,12 +70,10 @@ if (args.Contains("--minimal", StringComparer.OrdinalIgnoreCase))
     window.Run(H("div", new Props { ClassName = "minimal" },
         H("h1", Text("Hello Ignite")),
         H("p", Text("The quick brown fox jumps over the lazy dog. 0123456789")),
-        H("div", new Props { ClassName = "swatch" }),
         H("button", new Props { ClassName = "primary" }, Text("A button"))), """
         .minimal { width: 100%; height: 100vh; padding: 40px; background-color: #ffffff; }
         .minimal h1 { font-size: 42px; margin: 0 0 20px 0; color: #1f2328; }
         .minimal p { font-size: 18px; color: #343a46; }
-        .swatch { display: block; width: 400px; height: 100px; background: linear-gradient(90deg, #ff0000 0%, #0000ff 100%); }
         .minimal button { margin-top: 20px; background-color: #2f81f7; color: #ffffff; border-color: #2f81f7; }
         """);
     return;

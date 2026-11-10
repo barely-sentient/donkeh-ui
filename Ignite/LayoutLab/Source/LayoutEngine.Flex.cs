@@ -227,7 +227,10 @@ public sealed partial class LayoutEngine
         {
             if (lineCross.Length == 1)
             {
-                lineCross[0] = MathF.Max(lineCross[0], crossAvailable);
+                // A single flex line fills the container's definite cross size.
+                // Items that establish their own scroll container then overflow
+                // internally instead of stretching the line past the container.
+                lineCross[0] = MathF.Max(0, crossAvailable);
             }
             else if (style.AlignContent == AlignContent.Stretch)
             {

@@ -373,7 +373,7 @@ public sealed unsafe class FontManager : IDisposable
 
         foreach (var face in _allFaces)
         {
-            face.Dispose();
+            face.Dispose(_gl);
         }
 
         _allFaces.Clear();
@@ -431,7 +431,7 @@ internal readonly record struct Glyph(
 
 internal readonly record struct CssFontMetrics(float Ascent, float Descent, float Scale);
 
-internal sealed unsafe class FontFace : IDisposable
+internal sealed unsafe class FontFace
 {
     private readonly byte[] _data;
     private readonly StbTrueType.stbtt_fontinfo _info;
@@ -592,7 +592,7 @@ internal sealed unsafe class FontFace : IDisposable
         return created;
     }
 
-    public void Dispose()
+    public void Dispose(GL? gl)
     {
         if (_disposed)
         {
@@ -603,7 +603,7 @@ internal sealed unsafe class FontFace : IDisposable
 
         foreach (var atlas in _atlases)
         {
-            atlas.Dispose();
+            atlas.Dispose(gl);
         }
 
         _atlases.Clear();
@@ -613,7 +613,7 @@ internal sealed unsafe class FontFace : IDisposable
     }
 }
 
-internal sealed unsafe class FontAtlas : IDisposable
+internal sealed unsafe class FontAtlas
 {
     public const int Size = 1024;
 
@@ -700,7 +700,7 @@ internal sealed unsafe class FontAtlas : IDisposable
             bitmap);
     }
 
-    public void Dispose()
+    public void Dispose(GL? gl)
     {
         if (_disposed)
         {
@@ -708,5 +708,6 @@ internal sealed unsafe class FontAtlas : IDisposable
         }
 
         _disposed = true;
+        gl?.DeleteTexture(_texture);
     }
 }
