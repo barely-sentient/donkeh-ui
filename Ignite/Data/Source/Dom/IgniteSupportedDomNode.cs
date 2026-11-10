@@ -28,6 +28,12 @@ namespace Ignite.Data.Dom
 
         private readonly Dictionary<int, int> _attributes = [];
 
+        private bool _isHovered;
+        private bool _isFocused;
+        private bool _isFocusVisible;
+        private bool _isActive;
+        private bool _isChecked;
+
         private IgniteSupportedDomNode? _parent;
         private IgniteSupportedDomNode[] _children = [];
         private int _indexInParent = -1;
@@ -71,6 +77,72 @@ namespace Ignite.Data.Dom
 
         /// <summary>Marks the node as changed when the host mutates state the setters cannot see.</summary>
         public void Invalidate() => _revision++;
+
+        /// <summary>
+        /// True while the pointer is over this element or one of its descendants.
+        /// The host normally applies hover to the whole ancestor chain so
+        /// <c>:hover</c> matches the same way it does in a browser.
+        /// </summary>
+        public bool IsHovered
+        {
+            get => _isHovered;
+            set => SetState(ref _isHovered, value);
+        }
+
+        /// <summary>True while this element owns keyboard focus.</summary>
+        public bool IsFocused
+        {
+            get => _isFocused;
+            set => SetState(ref _isFocused, value);
+        }
+
+        /// <summary>
+        /// True when focus should be visibly indicated. Keyboard focus sets this
+        /// on all elements; pointer focus sets it for text fields.
+        /// </summary>
+        public bool IsFocusVisible
+        {
+            get => _isFocusVisible;
+            set => SetState(ref _isFocusVisible, value);
+        }
+
+        /// <summary>True while the pointer button is held on this element or an ancestor.</summary>
+        public bool IsActive
+        {
+            get => _isActive;
+            set => SetState(ref _isActive, value);
+        }
+
+        /// <summary>
+        /// Host-maintained checked state for checkboxes, radios and selectable
+        /// options. Attribute-based <c>checked</c> is also honoured by the matcher.
+        /// </summary>
+        public bool IsChecked
+        {
+            get => _isChecked;
+            set => SetState(ref _isChecked, value);
+        }
+
+        /// <summary>Clears every interaction state without touching attributes or text.</summary>
+        public void ClearInteractionState()
+        {
+            IsHovered = false;
+            IsFocused = false;
+            IsFocusVisible = false;
+            IsActive = false;
+            IsChecked = false;
+        }
+
+        private void SetState(ref bool field, bool value)
+        {
+            if (field == value)
+            {
+                return;
+            }
+
+            field = value;
+            _revision++;
+        }
 
         /// <summary>
         /// Horizontal scroll position in CSS pixels for this element when it is

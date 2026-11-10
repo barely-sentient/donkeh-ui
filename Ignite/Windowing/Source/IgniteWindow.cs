@@ -21,9 +21,6 @@ public sealed class IgniteWindow : IDisposable
 {
     private static readonly int ValueAttribute = InternTable.Intern("value");
     private static readonly int CheckedAttribute = InternTable.Intern("checked");
-    private const string HoverClassName = "is-hover";
-    private const string FocusClassName = "is-focus";
-    private const string ActiveClassName = "is-active";
 
     private readonly WindowSettings _settings;
     private readonly List<string> _stylesheets = [];
@@ -52,6 +49,8 @@ public sealed class IgniteWindow : IDisposable
 
     private string? _screenshotPath;
 
+    private readonly List<ElementNode> _hoverChain = [];
+    private readonly List<ElementNode> _activeChain = [];
     private ElementNode? _hovered;
     private ElementNode? _pressed;
     private ElementNode? _focused;
@@ -734,11 +733,11 @@ public sealed class IgniteWindow : IDisposable
     {
         var element = HitTest(_mouseX, _mouseY);
         _pressed = element;
+        SetActive(element);
 
         if (element is not null)
         {
-            ApplyClass(element, ActiveClassName, true);
-            Focus(element);
+            Focus(element, focusVisible: false);
         }
 
         Invoke(element, "mousedown");
@@ -748,11 +747,7 @@ public sealed class IgniteWindow : IDisposable
     {
         var element = HitTest(_mouseX, _mouseY);
 
-        if (_pressed is not null)
-        {
-            ApplyClass(_pressed, ActiveClassName, false);
-        }
-
+        SetActive(null);
         Invoke(_pressed, "mouseup");
 
         if (ReferenceEquals(element, _pressed)
@@ -786,13 +781,17 @@ public sealed class IgniteWindow : IDisposable
 
         if (type == "checkbox")
         {
-            if (element.TryGetAttribute(CheckedAttribute, out var ignoredChecked))
+            var checkedState = !element.IsChecked
+                && !element.TryGetAttribute(CheckedAttribute, out var ignoredChecked);
+            element.IsChecked = checkedState;
+
+            if (checkedState)
             {
-                element.RemoveAttribute(CheckedAttribute);
+                element.SetAttribute(CheckedAttribute, InternTable.Intern(string.Empty));
             }
             else
             {
-                element.SetAttribute(CheckedAttribute, InternTable.Intern(string.Empty));
+                element.RemoveAttribute(CheckedAttribute);
             }
 
             Invoke(element, "change");
@@ -814,11 +813,13 @@ public sealed class IgniteWindow : IDisposable
                         && GetAttribute(sibling, "name") is { } name
                         && name == GetAttribute(element, "name"))
                     {
+                        sibling.IsChecked = false;
                         sibling.RemoveAttribute(CheckedAttribute);
                     }
                 }
             }
 
+            element.IsChecked = true;
             element.SetAttribute(CheckedAttribute, InternTable.Intern(string.Empty));
             Invoke(element, "change");
             _needsLayout = true;
@@ -927,21 +928,31 @@ public sealed class IgniteWindow : IDisposable
         _needsLayout = true;
     }
 
-    private void Focus(ElementNode? element)
+    private void Focus(ElementNode? element, bool focusVisible = false)
     {
         if (element is not null && element.TryGetAttribute("disabled", out var ignoredDisabled))
         {
             return;
         }
 
+        var visible = focusVisible
+            || element is not null && element.Tag is "input" or "textarea";
+
         if (ReferenceEquals(_focused, element))
         {
+            if (element is not null && element.IsFocusVisible != visible)
+            {
+                element.IsFocusVisible = visible;
+                _needsLayout = true;
+            }
+
             return;
         }
 
         if (_focused is not null)
         {
-            ApplyClass(_focused, FocusClassName, false);
+            _focused.IsFocused = false;
+            _focused.IsFocusVisible = false;
 
             if (_focused.Tag is "input" or "textarea")
             {
@@ -956,7 +967,8 @@ public sealed class IgniteWindow : IDisposable
 
         if (element is not null)
         {
-            ApplyClass(element, FocusClassName, true);
+            element.IsFocused = true;
+            element.IsFocusVisible = visible;
             _editText = GetAttribute(element, "value") ?? element.TextContent ?? string.Empty;
 
             if (element.TryGetEventHandler("focus", out var handler) && handler is Action action)
@@ -983,7 +995,7 @@ public sealed class IgniteWindow : IDisposable
         }
 
         var index = _focused is null ? -1 : focusable.IndexOf(_focused);
-        Focus(focusable[(index + 1) % focusable.Count]);
+        Focus(focusable[(index + 1) % focusable.Count], focusVisible: true);
     }
 
     private static void CollectFocusable(Node? node, List<ElementNode> result)
@@ -1029,28 +1041,40 @@ public sealed class IgniteWindow : IDisposable
             return;
         }
 
-        if (_hovered is not null)
-        {
-            ApplyClass(_hovered, HoverClassName, false);
-        }
+        SetChainState(_hoverChain, element, static node => node.IsHovered = true,
+            static node => node.IsHovered = false);
 
         _hovered = element;
-
-        if (element is not null)
-        {
-            ApplyClass(element, HoverClassName, true);
-        }
+        _needsLayout = true;
     }
 
-    private static void ApplyClass(ElementNode element, string className, bool add)
+    private void SetActive(ElementNode? element)
     {
-        if (add)
+        SetChainState(_activeChain, element, static node => node.IsActive = true,
+            static node => node.IsActive = false);
+        _needsLayout = true;
+    }
+
+    private static void SetChainState(
+        List<ElementNode> chain,
+        ElementNode? element,
+        Action<ElementNode> apply,
+        Action<ElementNode> clear)
+    {
+        for (var i = 0; i < chain.Count; i++)
         {
-            element.AddClass(className);
+            clear(chain[i]);
         }
-        else if (element.HasClass(className))
+
+        chain.Clear();
+
+        var node = element;
+
+        while (node is not null)
         {
-            element.RemoveClass(className);
+            chain.Add(node);
+            apply(node);
+            node = node.Parent as ElementNode;
         }
     }
 

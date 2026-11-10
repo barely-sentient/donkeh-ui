@@ -27,10 +27,12 @@ namespace Ignite.Data
     /// <see cref="IgniteSupportedDomNode.Children"/>.
     /// </para>
     /// <para>
-    /// State driven pseudo classes (<c>:hover</c>, <c>:focus</c>, ...), the logical
+    /// State driven pseudo classes are read from the node's interaction flags
+    /// (<c>:hover</c>, <c>:focus</c>, <c>:active</c>, <c>:focus-visible</c>) or
+    /// from its attributes (<c>:checked</c>, <c>:disabled</c>, ...). The logical
     /// pseudo classes (<c>:not()</c>, <c>:is()</c>, <c>:where()</c>, <c>:has()</c>)
-    /// and pseudo elements are not evaluated; those selectors are flagged as
-    /// unsupported when stored and never matched, rather than matched wrongly.
+    /// and pseudo elements are still flagged as unsupported when stored and never
+    /// matched, rather than matched wrongly.
     /// </para>
     /// <para>
     /// The returned order is the cascade application order: weakest first, so
@@ -42,6 +44,13 @@ namespace Ignite.Data
     public sealed partial class DataTable
     {
         private static readonly int UniversalSelectorId = InternTable.Intern("*");
+        private static readonly int DisabledAttributeId = InternTable.Intern("disabled");
+        private static readonly int CheckedAttributeId = InternTable.Intern("checked");
+        private static readonly int SelectedAttributeId = InternTable.Intern("selected");
+        private static readonly int HrefAttributeId = InternTable.Intern("href");
+        private static readonly int PlaceholderAttributeId = InternTable.Intern("placeholder");
+        private static readonly int ValueAttributeId = InternTable.Intern("value");
+        private static readonly int ReadOnlyAttributeId = InternTable.Intern("readonly");
 
         // Scratch reused by matching. Like the condition cache and the
         // discriminator buffer, matching is not re-entrant.
@@ -448,9 +457,111 @@ namespace Ignite.Data
                 case PseudoClassKind.NthLastOfType:
                     return MatchesAnB(pseudo.A, pseudo.B, TypePosition(node, fromEnd: true));
 
+                case PseudoClassKind.Hover:
+                    return node.IsHovered;
+
+                case PseudoClassKind.Focus:
+                    return node.IsFocused;
+
+                case PseudoClassKind.FocusVisible:
+                    return node.IsFocusVisible;
+
+                case PseudoClassKind.FocusWithin:
+                    return node.IsFocused || HasFocusedDescendant(node);
+
+                case PseudoClassKind.Active:
+                    return node.IsActive;
+
+                case PseudoClassKind.Checked:
+                    return node.IsChecked
+                        || node.TryGetAttribute(CheckedAttributeId, out _)
+                        || node.TryGetAttribute(SelectedAttributeId, out _);
+
+                case PseudoClassKind.Disabled:
+                    return IsDisableable(node)
+                        && node.TryGetAttribute(DisabledAttributeId, out _);
+
+                case PseudoClassKind.Enabled:
+                    return IsDisableable(node)
+                        && !node.TryGetAttribute(DisabledAttributeId, out _);
+
+                case PseudoClassKind.Link:
+                case PseudoClassKind.AnyLink:
+                    return IsLink(node);
+
+                case PseudoClassKind.PlaceholderShown:
+                    return IsTextControl(node)
+                        && node.TryGetAttribute(PlaceholderAttributeId, out _)
+                        && !HasNonEmptyValue(node);
+
+                case PseudoClassKind.ReadOnly:
+                    return IsTextControl(node)
+                        && (node.TryGetAttribute(ReadOnlyAttributeId, out _)
+                            || node.TryGetAttribute(DisabledAttributeId, out _));
+
+                case PseudoClassKind.ReadWrite:
+                    return IsTextControl(node)
+                        && !node.TryGetAttribute(ReadOnlyAttributeId, out _)
+                        && !node.TryGetAttribute(DisabledAttributeId, out _);
+
                 default:
                     return false;
             }
+        }
+
+        private static bool HasFocusedDescendant(IgniteSupportedDomNode node)
+        {
+            var children = node.Children;
+
+            for (var i = 0; i < children.Length; i++)
+            {
+                var child = children[i];
+
+                if (child is null)
+                {
+                    continue;
+                }
+
+                if (child.IsFocused || HasFocusedDescendant(child))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsDisableable(IgniteSupportedDomNode node)
+        {
+            var tag = node.TagName;
+
+            return tag is "button" or "input" or "select" or "textarea"
+                or "option" or "optgroup" or "fieldset";
+        }
+
+        private static bool IsTextControl(IgniteSupportedDomNode node)
+        {
+            var tag = node.TagName;
+            return tag is "input" or "textarea";
+        }
+
+        private static bool IsLink(IgniteSupportedDomNode node)
+        {
+            var tag = node.TagName;
+
+            return (tag is "a" or "area" or "link")
+                && node.TryGetAttribute(HrefAttributeId, out _);
+        }
+
+        private static bool HasNonEmptyValue(IgniteSupportedDomNode node)
+        {
+            if (node.TryGetAttribute(ValueAttributeId, out var valueId))
+            {
+                var value = InternTable.GetString(valueId);
+                return !string.IsNullOrEmpty(value);
+            }
+
+            return !string.IsNullOrEmpty(node.TextContent);
         }
 
         private static bool MatchesAnB(int a, int b, int position)

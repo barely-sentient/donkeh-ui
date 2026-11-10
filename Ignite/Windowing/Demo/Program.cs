@@ -253,7 +253,9 @@ internal static class DemoStyles
             color: #57606a;
             font-weight: 600;
         }
-        .nav-link:hover, .nav-link.is-hover { background-color: #eef3f9; color: #1f2328; }
+        .nav-link:hover { background-color: #eef3f9; color: #1f2328; }
+        .nav-link:focus-visible { outline-width: 2px; outline-style: solid; outline-color: #0969da; outline-offset: 2px; }
+        .nav-link:active { background-color: #dbe8f8; }
         .nav-link.active { background-color: #0969da; color: #ffffff; }
 
         .search {
@@ -261,6 +263,7 @@ internal static class DemoStyles
             background-color: #f6f8fa;
             border-color: #d8e0ea;
         }
+        .search:focus { border-color: #0969da; background-color: #ffffff; outline-width: 3px; outline-style: solid; outline-color: rgba(9, 105, 218, 0.16); outline-offset: 0; }
 
         .body { display: flex; flex-direction: row; flex: 1; min-height: 0; }
 
@@ -288,7 +291,8 @@ internal static class DemoStyles
             color: #3d4652;
             font-size: 13px;
         }
-        .tree-item:hover, .tree-item.is-hover { background-color: #f0f5fb; color: #0969da; }
+        .tree-item:hover { background-color: #f0f5fb; color: #0969da; }
+        .tree-item:active { background-color: #e2ecf9; }
 
         .control-row { display: flex; align-items: center; gap: 10px; margin: 10px 0; font-size: 13px; }
         .control-row input[type="checkbox"] { width: 18px; height: 18px; min-height: 18px; padding: 0; }
@@ -311,7 +315,9 @@ internal static class DemoStyles
             border-color: #2f81f7;
             color: #ffffff;
         }
-        .primary:hover, .primary.is-hover { background-color: #1f6fe5; }
+        .primary:hover { background-color: #1f6fe5; }
+        .primary:active { background-color: #1559bd; }
+        .primary:focus-visible, .ghost:focus-visible { outline-width: 2px; outline-style: solid; outline-color: #9cc4f5; outline-offset: 2px; }
         .ghost {
             background-color: rgba(255, 255, 255, 0.08);
             border-color: rgba(255, 255, 255, 0.22);
@@ -333,9 +339,13 @@ internal static class DemoStyles
             padding: 18px;
             box-shadow: 0 8px 22px rgba(31, 35, 40, 0.05);
         }
-        .card:hover, .card.is-hover {
+        .card:hover {
             border-color: #9cc4f5;
             box-shadow: 0 12px 30px rgba(9, 105, 218, 0.12);
+        }
+        .card:focus-within {
+            border-color: #0969da;
+            box-shadow: 0 0 0 3px rgba(9, 105, 218, 0.14);
         }
         .card h3 { margin: 0 0 4px 0; font-size: 15px; }
         .card .muted { margin: 0 0 12px 0; color: #697586; font-size: 13px; }

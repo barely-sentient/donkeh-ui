@@ -102,21 +102,33 @@ DejaVu/Liberation on Linux, Arial on macOS), caches faces and glyph atlases per
 pixel size, and exposes the same metrics to layout and painting. Missing
 codepoints fall back through a small system-font list.
 
-## Input
+## Input and pseudo classes
 
-`IgniteWindow` adds non-CSS helper classes while interacting:
+Interaction state is written onto the live DOM node, so it participates in the
+normal cascade and style cache:
 
-| Class | Meaning |
+| Pseudo class | State source |
 | --- | --- |
-| `is-hover` | pointer is over the element |
-| `is-active` | pointer button is held on the element |
-| `is-focus` | element has keyboard focus |
+| `:hover` | pointer chain (`IgniteSupportedDomNode.IsHovered`) |
+| `:active` | pointer-button chain (`IsActive`) |
+| `:focus` | the focused element (`IsFocused`) |
+| `:focus-visible` | keyboard focus, and all text fields (`IsFocusVisible`) |
+| `:focus-within` | focused element or any focused descendant |
+| `:checked` | `IsChecked`, `checked`, or `selected` |
+| `:disabled` / `:enabled` | `disabled` on a form control |
+| `:link` / `:any-link` | `a`/`area`/`link` with `href` |
+| `:placeholder-shown` | empty text control with a placeholder |
+| `:read-only` / `:read-write` | text control with/without `readonly` or `disabled` |
 
-Use them in author CSS:
+Hover and active are applied to the whole ancestor chain, exactly like a
+browser, so variant selectors work naturally:
 
 ```css
-.nav-link.is-hover { background: #eef3f9; }
-.nav-link.is-focus { outline: 2px solid #0969da; }
+.nav-link:hover { background: #eef3f9; }
+.nav-link:focus-visible { outline: 2px solid #0969da; outline-offset: 2px; }
+.nav-link:active { background: #dbe8f8; }
+.card:focus-within { border-color: #0969da; }
+input:focus { border-color: #0969da; }
 ```
 
 Mouse wheel scrolling walks up to the nearest scroll container and updates its

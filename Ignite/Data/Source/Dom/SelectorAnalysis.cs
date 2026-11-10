@@ -13,9 +13,11 @@ namespace Ignite.Data.Dom
     /// Compounds are split on explicit combinators and on descendant gaps, with
     /// bracket and parenthesis depth tracked so operators inside
     /// <c>[attr^=v]</c> and <c>:nth-child()</c> are not treated as combinators.
-    /// Pseudo classes and pseudo elements that need state or generated content
-    /// (<c>:hover</c>, <c>::before</c>, <c>:not()</c>, ...) mark the compound
-    /// unsupported, so the selector is never matched rather than matched wrongly.
+    /// Structural and host-driven pseudo classes (<c>:first-child</c>,
+    /// <c>:hover</c>, <c>:focus</c>, <c>:active</c>, <c>:checked</c>, ...) are
+    /// evaluated at match time. Pseudo elements and logical functions that need
+    /// generated content (<c>::before</c>, <c>:not()</c>, ...) still mark the
+    /// compound unsupported, so the selector is never matched wrongly.
     /// </remarks>
     internal static class SelectorAnalysis
     {
@@ -41,6 +43,20 @@ namespace Ignite.Data.Dom
         private static readonly int NthLastChildId = InternTable.Intern(":nth-last-child");
         private static readonly int NthOfTypeId = InternTable.Intern(":nth-of-type");
         private static readonly int NthLastOfTypeId = InternTable.Intern(":nth-last-of-type");
+
+        private static readonly int HoverId = InternTable.Intern(":hover");
+        private static readonly int FocusId = InternTable.Intern(":focus");
+        private static readonly int FocusVisibleId = InternTable.Intern(":focus-visible");
+        private static readonly int FocusWithinId = InternTable.Intern(":focus-within");
+        private static readonly int ActiveId = InternTable.Intern(":active");
+        private static readonly int CheckedId = InternTable.Intern(":checked");
+        private static readonly int DisabledId = InternTable.Intern(":disabled");
+        private static readonly int EnabledId = InternTable.Intern(":enabled");
+        private static readonly int LinkId = InternTable.Intern(":link");
+        private static readonly int AnyLinkId = InternTable.Intern(":any-link");
+        private static readonly int PlaceholderShownId = InternTable.Intern(":placeholder-shown");
+        private static readonly int ReadOnlyId = InternTable.Intern(":read-only");
+        private static readonly int ReadWriteId = InternTable.Intern(":read-write");
 
         private const int MaxAnBLength = 32;
 
@@ -464,6 +480,84 @@ namespace Ignite.Data.Dom
             if (id == OnlyOfTypeId)
             {
                 pseudo.Kind = PseudoClassKind.OnlyOfType;
+                return true;
+            }
+
+            if (id == HoverId)
+            {
+                pseudo.Kind = PseudoClassKind.Hover;
+                return true;
+            }
+
+            if (id == FocusId)
+            {
+                pseudo.Kind = PseudoClassKind.Focus;
+                return true;
+            }
+
+            if (id == FocusVisibleId)
+            {
+                pseudo.Kind = PseudoClassKind.FocusVisible;
+                return true;
+            }
+
+            if (id == FocusWithinId)
+            {
+                pseudo.Kind = PseudoClassKind.FocusWithin;
+                return true;
+            }
+
+            if (id == ActiveId)
+            {
+                pseudo.Kind = PseudoClassKind.Active;
+                return true;
+            }
+
+            if (id == CheckedId)
+            {
+                pseudo.Kind = PseudoClassKind.Checked;
+                return true;
+            }
+
+            if (id == DisabledId)
+            {
+                pseudo.Kind = PseudoClassKind.Disabled;
+                return true;
+            }
+
+            if (id == EnabledId)
+            {
+                pseudo.Kind = PseudoClassKind.Enabled;
+                return true;
+            }
+
+            if (id == LinkId)
+            {
+                pseudo.Kind = PseudoClassKind.Link;
+                return true;
+            }
+
+            if (id == AnyLinkId)
+            {
+                pseudo.Kind = PseudoClassKind.AnyLink;
+                return true;
+            }
+
+            if (id == PlaceholderShownId)
+            {
+                pseudo.Kind = PseudoClassKind.PlaceholderShown;
+                return true;
+            }
+
+            if (id == ReadOnlyId)
+            {
+                pseudo.Kind = PseudoClassKind.ReadOnly;
+                return true;
+            }
+
+            if (id == ReadWriteId)
+            {
+                pseudo.Kind = PseudoClassKind.ReadWrite;
                 return true;
             }
 

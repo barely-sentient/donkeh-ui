@@ -35,7 +35,22 @@ namespace Ignite.Data.Dom
         NthChild,
         NthLastChild,
         NthOfType,
-        NthLastOfType
+        NthLastOfType,
+
+        // Host-driven interaction state.
+        Hover,
+        Focus,
+        FocusVisible,
+        FocusWithin,
+        Active,
+        Checked,
+        Disabled,
+        Enabled,
+        Link,
+        AnyLink,
+        PlaceholderShown,
+        ReadOnly,
+        ReadWrite
     }
 
     /// <summary>
