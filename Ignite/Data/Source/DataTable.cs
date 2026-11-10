@@ -1,3 +1,5 @@
+using Ignite.Data.Dom;
+using Ignite.Parser;
 using Ignite.Parser.Objects;
 
 namespace Ignite.Data
@@ -12,7 +14,7 @@ namespace Ignite.Data
     /// linked lists over the same records, avoiding a <see cref="List{T}"/> per
     /// hash value.
     /// </remarks>
-    public sealed class DataTable
+    public sealed partial class DataTable
     {
         private readonly List<SelectorRecord> _selectors;
         private readonly List<Rule> _rules;
@@ -58,6 +60,38 @@ namespace Ignite.Data
         private readonly List<int> _discriminatorNext;
         private int[] _discriminatorBuffer = new int[64];
 
+        // Selector id -> most recent rule index for that selector, and the previous
+        // rule index with the same selector. Rules are linked in source order, so a
+        // matched selector yields its rules without scanning _rules.
+        private readonly List<int> _ruleHead;
+        private readonly List<int> _ruleNext;
+
+        // Right-most attribute selector name -> selectors whose discriminator is
+        // ']'. Those cannot be found from the node's tag/id/class keys, so they get
+        // their own name based index. _attributeSelectorNext is parallel to
+        // _selectors.
+        private readonly Dictionary<int, int> _attributeSelectorHeads;
+        private readonly List<int> _attributeSelectorNext;
+
+        // Attribute filters parsed once at selector store time. SelectorRecord
+        // stores the slice; the scratch list collects a selector's filters before
+        // they are appended.
+        private readonly List<AttributeFilter> _attributeFilters;
+        private readonly List<AttributeFilter> _filterScratch = [];
+
+        // Compound plan and structural pseudo classes, shared arenas. SelectorRecord
+        // stores the compound slice; each compound stores its own filter/pseudo
+        // slice, so matching never re-parses selector tokens.
+        private readonly List<CompoundRecord> _compounds;
+        private readonly List<CompoundRecord> _compoundScratch = [];
+        private readonly List<PseudoRecord> _pseudoRecords;
+        private readonly List<PseudoRecord> _pseudoScratch = [];
+
+        // Selectors whose subject discriminator is a structural pseudo class. They
+        // cannot be reached from the node's tag/id/class/attribute keys, so they
+        // are verified on every query. The list is small by construction.
+        private readonly List<int> _unkeyedSelectors = [];
+
         // Conditions are evaluated at most once per (context, environment
         // version). These arrays are parallel to _conditions.
         private uint[] _conditionStamp = [];
@@ -96,6 +130,15 @@ namespace Ignite.Data
 
             _discriminatorHeads = new Dictionary<DiscriminatorKey, int>(capacity);
             _discriminatorNext = new List<int>(capacity);
+
+            _ruleHead = new List<int>(capacity);
+            _ruleNext = new List<int>(capacity);
+
+            _attributeSelectorHeads = new Dictionary<int, int>(capacity);
+            _attributeSelectorNext = new List<int>(capacity);
+            _attributeFilters = new List<AttributeFilter>(capacity);
+            _compounds = new List<CompoundRecord>(capacity);
+            _pseudoRecords = new List<PseudoRecord>(capacity);
 
             // Start with a small arena; it grows geometrically and is shared by
             // every selector/condition in the table.
@@ -173,6 +216,12 @@ namespace Ignite.Data
                 throw new ArgumentException("A selector cannot be empty.", nameof(selector));
             }
 
+            // Attribute values are tokenized as quoted strings, e.g. [type="text"],
+            // but a dom node carries the value without quotes. Storing the unquoted
+            // text here makes both sides agree on one interned id, and also makes
+            // [type="text"] and [type=text] the same selector.
+            selector = NormalizeAttributeValues(selector);
+
             var hash = HashSelector(selector);
 
             if (TryFindSelector(hash, selector, out var existing))
@@ -184,6 +233,45 @@ namespace Ignite.Data
             var discriminator = NormalizeDiscriminator(selector[^1]);
             var tokenOffset = AppendSelectorTokens(selector);
 
+            // One pass splits the selector into compounds, computes the specificity
+            // and parses attribute filters and structural pseudo classes.
+            _compoundScratch.Clear();
+            _filterScratch.Clear();
+            _pseudoScratch.Clear();
+
+            var specificity = SelectorAnalysis.Analyze(
+                selector,
+                _compoundScratch,
+                _filterScratch,
+                _pseudoScratch,
+                out var matchable);
+
+            var compoundOffset = _compounds.Count;
+            var filterBase = _attributeFilters.Count;
+            var pseudoBase = _pseudoRecords.Count;
+
+            // Compound slices are relative to the scratch lists, so shift them onto
+            // the shared arenas before storing.
+            for (var i = 0; i < _compoundScratch.Count; i++)
+            {
+                var compound = _compoundScratch[i];
+
+                if (compound.FilterCount != 0)
+                {
+                    compound.FilterOffset += filterBase;
+                }
+
+                if (compound.PseudoCount != 0)
+                {
+                    compound.PseudoOffset += pseudoBase;
+                }
+
+                _compounds.Add(compound);
+            }
+
+            _attributeFilters.AddRange(_filterScratch);
+            _pseudoRecords.AddRange(_pseudoScratch);
+
             _selectors.Add(new SelectorRecord
             {
                 TokenOffset = tokenOffset,
@@ -191,8 +279,16 @@ namespace Ignite.Data
                 // The right-most element is the subject of the selector. Matching
                 // starts there, which lets the overwhelmingly common mismatches
                 // be rejected before walking the rest of the selector.
-                PrimaryDiscriminator = discriminator
+                PrimaryDiscriminator = discriminator,
+                Specificity = specificity,
+                CompoundOffset = compoundOffset,
+                CompoundCount = _compoundScratch.Count,
+                IsMatchable = matchable
             });
+
+            // Both lists are parallel to _selectors.
+            _ruleHead.Add(-1);
+            _attributeSelectorNext.Add(-1);
 
             Link(_selectorHeads, _selectorNext, hash, newId);
 
@@ -202,6 +298,35 @@ namespace Ignite.Data
                     ? discriminatorHead
                     : -1);
             _discriminatorHeads[discriminatorKey] = newId;
+
+            if (matchable)
+            {
+                var subject = _compounds[compoundOffset + _compoundScratch.Count - 1];
+
+                if (discriminator.Kind == TokenKind.RightSquareBracket && subject.FilterCount != 0)
+                {
+                    // A selector whose subject is an attribute selector has a ']'
+                    // discriminator, which the node cannot produce from its own
+                    // keys. Index those by the right-most attribute name instead.
+                    var attributeNameId = _attributeFilters[
+                        subject.FilterOffset + subject.FilterCount - 1].NameId;
+
+                    _attributeSelectorNext[newId] = _attributeSelectorHeads.TryGetValue(
+                        attributeNameId,
+                        out var attributeHead)
+                        ? attributeHead
+                        : -1;
+
+                    _attributeSelectorHeads[attributeNameId] = newId;
+                }
+                else if (discriminator.Kind is not (
+                    TokenKind.Identifier or TokenKind.Hash or TokenKind.Asterisk))
+                {
+                    // Structural pseudo class subjects have no node key; verify
+                    // them on every query.
+                    _unkeyedSelectors.Add(newId);
+                }
+            }
 
             return newId;
         }
@@ -325,9 +450,20 @@ namespace Ignite.Data
                 LayerId = layerId
             });
 
+            var ruleIndex = _rules.Count - 1;
+
+            // Link the rule into its selector's chain, newest first. Keeping this
+            // index means a matched selector exposes its rules without a scan.
+            _ruleNext.Add((uint)selectorId < (uint)_ruleHead.Count ? _ruleHead[selectorId] : -1);
+
+            if ((uint)selectorId < (uint)_ruleHead.Count)
+            {
+                _ruleHead[selectorId] = ruleIndex;
+            }
+
             _lastRule = key;
             _hasLastRule = true;
-            return _rules.Count - 1;
+            return ruleIndex;
         }
 
         /// <summary>
@@ -624,6 +760,65 @@ namespace Ignite.Data
             }
         }
 
+        /// <summary>
+        /// Replaces quoted string tokens with their unquoted text, so an attribute
+        /// value in a selector and the same value on a dom node intern to one id.
+        /// Returns <paramref name="selector"/> itself when it holds no strings,
+        /// which keeps the common selector allocation free.
+        /// </summary>
+        private static ReadOnlySpan<Token> NormalizeAttributeValues(ReadOnlySpan<Token> selector)
+        {
+            var hasString = false;
+
+            for (var i = 0; i < selector.Length; i++)
+            {
+                if (selector[i].Kind == TokenKind.String)
+                {
+                    hasString = true;
+                    break;
+                }
+            }
+
+            if (!hasString)
+            {
+                return selector;
+            }
+
+            var tokens = selector.ToArray();
+
+            for (var i = 0; i < tokens.Length; i++)
+            {
+                if (tokens[i].Kind != TokenKind.String)
+                {
+                    continue;
+                }
+
+                // A string longer than 255 characters is emitted as consecutive
+                // String tokens; only the complete text can be unquoted.
+                if ((i > 0 && tokens[i - 1].Kind == TokenKind.String)
+                    || (i + 1 < tokens.Length && tokens[i + 1].Kind == TokenKind.String))
+                {
+                    continue;
+                }
+
+                var text = InternTable.GetString(tokens[i].InternedId);
+
+                if (text is null || text.Length < 2)
+                {
+                    continue;
+                }
+
+                var quote = text[0];
+
+                if ((quote == '"' || quote == '\'') && text[^1] == quote)
+                {
+                    tokens[i].InternedId = InternTable.Intern(text.AsSpan(1, text.Length - 2));
+                }
+            }
+
+            return tokens;
+        }
+
         private static Token NormalizeDiscriminator(in Token token)
         {
             var kind = token.Kind switch
@@ -648,7 +843,7 @@ namespace Ignite.Data
         /// simple selectors is significant: <c>.a .b</c> and <c>.a.b</c> have
         /// identical token kind/id sequences but different meanings.
         /// </summary>
-        private static bool HasGap(ReadOnlySpan<Token> tokens, int index)
+        internal static bool HasGap(ReadOnlySpan<Token> tokens, int index)
         {
             if (index <= 0)
             {

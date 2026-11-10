@@ -62,6 +62,63 @@
             }
         }
 
+        /// <summary>
+        /// Resolves an interned id back to its original string without throwing
+        /// for ids that were never handed out.
+        /// </summary>
+        public static bool TryGetString(int id, out string? value)
+        {
+            lock (Sync)
+            {
+                if ((uint)id < (uint)InternedValues.Count)
+                {
+                    value = InternedValues[id];
+                    return true;
+                }
+
+                value = null;
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Interns <paramref name="prefix"/> immediately followed by
+        /// <paramref name="s"/>, for example '#' + "username". This yields the same
+        /// id the tokenizer hands out for that selector text, and the already
+        /// interned path allocates nothing.
+        /// </summary>
+        public static int Intern(char prefix, ReadOnlySpan<char> s)
+        {
+            if (s.Length < MaxStackPrefixedLength)
+            {
+                Span<char> buffer = stackalloc char[s.Length + 1];
+                buffer[0] = prefix;
+                s.CopyTo(buffer[1..]);
+
+                return Intern(buffer);
+            }
+
+            return Intern(string.Concat(prefix.ToString(), s));
+        }
+
+        /// <summary>
+        /// Looks up the id of <paramref name="s"/> without interning it, so a miss
+        /// does not grow the table. Returns false when the text has never been seen.
+        /// </summary>
+        public static bool TryGetId(ReadOnlySpan<char> s, out int id)
+        {
+            lock (Sync)
+            {
+                return AlternateLookup.TryGetValue(s, out id);
+            }
+        }
+
+        /// <summary>
+        /// Longest prefixed name that is built on the stack. Longer names take the
+        /// allocating path, which keeps the stack usage of the hot path bounded.
+        /// </summary>
+        private const int MaxStackPrefixedLength = 128;
+
         private static int InternCore(string s)
         {
             // If it exists, return the index without storing it further.
