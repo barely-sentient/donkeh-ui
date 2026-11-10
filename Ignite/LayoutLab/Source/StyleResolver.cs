@@ -51,6 +51,17 @@ public sealed partial class StyleResolver
         ApplyMatches(style, parent, matches, important: false);
         ApplyMatches(style, parent, matches, important: true);
 
+        // Text nodes and fragments are framework concepts, not CSS elements.
+        // Text flows inline and a fragment is transparent to layout.
+        if (node.IsTextNode)
+        {
+            style.Display = Display.Inline;
+        }
+        else if (node.IsFragment)
+        {
+            style.Display = Display.Contents;
+        }
+
         return style;
     }
 

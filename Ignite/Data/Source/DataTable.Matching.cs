@@ -86,6 +86,13 @@ namespace Ignite.Data
 
         private int MatchCore(IgniteSupportedDomNode node, RendererContext? context)
         {
+            // Text nodes and fragments are not elements and never match selectors.
+            // They inherit their style from the element that owns them.
+            if (node.IsTextNode || node.IsFragment)
+            {
+                return 0;
+            }
+
             CollectCandidates(node);
 
             var matched = _matchedRules;

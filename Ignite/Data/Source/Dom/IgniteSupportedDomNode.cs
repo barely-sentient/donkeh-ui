@@ -31,6 +31,20 @@ namespace Ignite.Data.Dom
         private IgniteSupportedDomNode? _parent;
         private IgniteSupportedDomNode[] _children = [];
         private int _indexInParent = -1;
+        private int _elementIndexInParent = -1;
+        private int _elementChildCount;
+
+        /// <summary>
+        /// True when this node is a framework text node. Text nodes do not match
+        /// selectors and are laid out as inline content.
+        /// </summary>
+        public bool IsTextNode { get; set; }
+
+        /// <summary>
+        /// True when this node is a transparent fragment. Fragments do not match
+        /// selectors and generate no box of their own.
+        /// </summary>
+        public bool IsFragment { get; set; }
 
         /// <summary>
         /// Optional text carried by the element. The engine has no text nodes,
@@ -103,14 +117,43 @@ namespace Ignite.Data.Dom
                 _children = value ?? [];
                 _revision++;
 
+                var elementIndex = 0;
+
                 for (var i = 0; i < _children.Length; i++)
                 {
                     if (_children[i] is { } child)
                     {
+                        var previousParent = child._parent;
+                        var previousIndex = child._indexInParent;
+                        var previousElementIndex = child._elementIndexInParent;
+
                         child._parent = this;
                         child._indexInParent = i;
+
+                        // Text nodes and fragments are not elements, so they do
+                        // not participate in :nth-child or sibling combinators.
+                        if (child.IsTextNode || child.IsFragment)
+                        {
+                            child._elementIndexInParent = -1;
+                        }
+                        else
+                        {
+                            child._elementIndexInParent = elementIndex++;
+                        }
+
+                        // A moved or reparented child can match different
+                        // structural and sibling selectors, so its cached style
+                        // has to be rejected.
+                        if (!ReferenceEquals(previousParent, this)
+                            || previousIndex != child._indexInParent
+                            || previousElementIndex != child._elementIndexInParent)
+                        {
+                            child._revision++;
+                        }
                     }
                 }
+
+                _elementChildCount = elementIndex;
             }
         }
 
@@ -225,6 +268,16 @@ namespace Ignite.Data.Dom
 
                 _revision++;
             }
+        }
+
+        /// <summary>
+        /// Replaces the whole class list from already interned ids. This is the
+        /// fast path for frameworks that cache class ids between renders.
+        /// </summary>
+        public void SetInternedClassName(ReadOnlySpan<int> classIds)
+        {
+            _className = classIds.ToArray();
+            _revision++;
         }
 
         /// <summary>
@@ -416,20 +469,75 @@ namespace Ignite.Data.Dom
 
                 var siblings = _parent._children;
 
-                return (uint)_indexInParent < (uint)siblings.Length
-                    && ReferenceEquals(siblings[_indexInParent], this)
-                    ? _indexInParent
-                    : Array.IndexOf(siblings, this);
+                if ((uint)_indexInParent < (uint)siblings.Length
+                    && ReferenceEquals(siblings[_indexInParent], this))
+                {
+                    return _elementIndexInParent >= 0 ? _elementIndexInParent : 0;
+                }
+
+                return FindElementIndex(siblings, this);
             }
         }
 
         /// <summary>
-        /// Number of elements in the sibling list, or 1 for the root.
+        /// Number of elements in the sibling list, or 1 for the root. Text nodes
+        /// and fragments are not elements and do not count.
         /// </summary>
-        internal int SiblingCount => _parent?._children.Length ?? 1;
+        internal int SiblingCount => _parent?._elementChildCount ?? 1;
 
-        internal IgniteSupportedDomNode SiblingAt(int index) =>
-            _parent is null ? this : _parent._children[index];
+        internal IgniteSupportedDomNode SiblingAt(int index)
+        {
+            if (_parent is null)
+            {
+                return this;
+            }
+
+            var siblings = _parent._children;
+            var elementIndex = 0;
+
+            for (var i = 0; i < siblings.Length; i++)
+            {
+                var sibling = siblings[i];
+
+                if (sibling is null || sibling.IsTextNode || sibling.IsFragment)
+                {
+                    continue;
+                }
+
+                if (elementIndex == index)
+                {
+                    return sibling;
+                }
+
+                elementIndex++;
+            }
+
+            return this;
+        }
+
+        private static int FindElementIndex(IgniteSupportedDomNode[] siblings, IgniteSupportedDomNode node)
+        {
+            var elementIndex = 0;
+
+            for (var i = 0; i < siblings.Length; i++)
+            {
+                var sibling = siblings[i];
+
+                if (sibling is null || sibling.IsTextNode || sibling.IsFragment)
+                {
+                    continue;
+                }
+
+                if (ReferenceEquals(sibling, node))
+                {
+                    return elementIndex;
+                }
+
+                elementIndex++;
+            }
+
+            return 0;
+        }
 
         internal ReadOnlySpan<IgniteSupportedDomNode> ChildNodes => _children;
 
