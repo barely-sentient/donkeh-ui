@@ -516,25 +516,14 @@ public sealed class IgniteWindow : IDisposable
                     HtmlDefaults.AttributeLength(element, "height", 150));
 
             case "input":
-                return new Size(
-                    HtmlDefaults.AttributeLength(element, "width", 220),
-                    MathF.Max(24, HtmlDefaults.AttributeLength(element, "height", 32)));
-
             case "textarea":
-                return new Size(
-                    HtmlDefaults.AttributeLength(element, "width", 320),
-                    HtmlDefaults.AttributeLength(element, "height", 96));
-
             case "select":
-                return new Size(
-                    HtmlDefaults.AttributeLength(element, "width", 180),
-                    HtmlDefaults.AttributeLength(element, "height", 32));
-
             case "progress":
             case "meter":
-                return new Size(
-                    HtmlDefaults.AttributeLength(element, "width", 180),
-                    HtmlDefaults.AttributeLength(element, "height", 14));
+                // Form controls are sized by their CSS width/min-height and their
+                // text line box. Supplying an "intrinsic height" here would be
+                // interpreted as a border-box height and clip the line box.
+                return null;
         }
 
         return null;
@@ -829,15 +818,30 @@ public sealed class IgniteWindow : IDisposable
     private void OnScroll(float vertical, float horizontal)
     {
         var box = HitTestBox(_mouseX, _mouseY);
-        var scroll = FindScrollContainer(box);
+        var scroll = FindScrollContainer(box, vertical, horizontal);
 
         if (scroll is null)
         {
             return;
         }
 
-        scroll.Node.ScrollOffsetY = MathF.Max(0, scroll.Node.ScrollOffsetY - vertical * 48);
-        scroll.Node.ScrollOffsetX = MathF.Max(0, scroll.Node.ScrollOffsetX - horizontal * 48);
+        // Only adjust the axes the chosen container can actually scroll, so a
+        // nested non-scrolling container (such as a horizontally scrolling
+        // table wrapper) never swallows vertical wheel input. Clamp to the
+        // scrollable range so the stored offset cannot grow past the end and
+        // make subsequent scrolls in the other direction feel stuck.
+        if (vertical != 0 && scroll.ScrollHeight > scroll.ClientHeight + 0.5f)
+        {
+            var maxScrollY = MathF.Max(0, scroll.ScrollHeight - scroll.ClientHeight);
+            scroll.Node.ScrollOffsetY = Math.Clamp(scroll.Node.ScrollOffsetY - vertical * 48, 0, maxScrollY);
+        }
+
+        if (horizontal != 0 && scroll.ScrollWidth > scroll.ClientWidth + 0.5f)
+        {
+            var maxScrollX = MathF.Max(0, scroll.ScrollWidth - scroll.ClientWidth);
+            scroll.Node.ScrollOffsetX = Math.Clamp(scroll.Node.ScrollOffsetX - horizontal * 48, 0, maxScrollX);
+        }
+
         _needsLayout = true;
     }
 
@@ -1089,29 +1093,42 @@ public sealed class IgniteWindow : IDisposable
             return null;
         }
 
-        return HitTestBox(root, x, y);
+        return HitTestBox(root, x, y, 0, 0);
     }
 
-    private static LayoutBox? HitTestBox(LayoutBox box, float x, float y)
+    private static LayoutBox? HitTestBox(LayoutBox box, float x, float y, float scrollX, float scrollY)
     {
         if (box.Style.Display == Display.None || box.Style.Visibility is Visibility.Hidden or Visibility.Collapse)
         {
             return null;
         }
 
-        if (!box.BorderBox.Contains(x, y))
+        // Layout boxes keep unscrolled absolute coordinates. The display list
+        // translates a scroll container's descendants by -ScrollOffset, so hit
+        // testing has to apply the same accumulated translation.
+        var painted = box.BorderBox.Translate(-scrollX, -scrollY);
+
+        if (!painted.Contains(x, y))
         {
             return null;
         }
 
-        if (box.IsScrollContainer && !box.PaddingBox.Contains(x, y))
+        if (box.IsScrollContainer)
         {
-            return null;
+            var clip = box.PaddingBox.Translate(-scrollX, -scrollY);
+
+            if (!clip.Contains(x, y))
+            {
+                return null;
+            }
+
+            scrollX += box.ScrollOffsetX;
+            scrollY += box.ScrollOffsetY;
         }
 
         for (var i = box.Children.Count - 1; i >= 0; i--)
         {
-            var hit = HitTestBox(box.Children[i], x, y);
+            var hit = HitTestBox(box.Children[i], x, y, scrollX, scrollY);
 
             if (hit is not null)
             {
@@ -1137,19 +1154,27 @@ public sealed class IgniteWindow : IDisposable
         return null;
     }
 
-    private static LayoutBox? FindScrollContainer(LayoutBox? box)
+    private static LayoutBox? FindScrollContainer(LayoutBox? box, float vertical, float horizontal)
     {
+        var firstScrollContainer = (LayoutBox?)null;
+
         while (box is not null)
         {
             if (box.IsScrollContainer)
             {
-                return box;
+                firstScrollContainer ??= box;
+
+                if ((vertical != 0 && box.ScrollHeight > box.ClientHeight + 0.5f)
+                    || (horizontal != 0 && box.ScrollWidth > box.ClientWidth + 0.5f))
+                {
+                    return box;
+                }
             }
 
             box = box.Parent;
         }
 
-        return null;
+        return firstScrollContainer;
     }
 
     private static void Invoke(ElementNode? element, string eventName, string? value = null)

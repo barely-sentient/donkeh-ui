@@ -88,12 +88,14 @@ public static class HtmlDefaults
         input { min-height: 32px; }
         textarea { min-height: 72px; }
         select { min-height: 32px; }
+        select option { display: none; }
         input[type="checkbox"], input[type="radio"] { min-height: 0; padding: 0; }
         button:disabled, input:disabled, select:disabled, textarea:disabled { color: #8c959f; background-color: #eff2f5; }
 
-        table { display: block; margin: 0.75em 0; border-collapse: collapse; }
-        thead, tbody, tfoot, tr { display: block; }
-        td, th { display: inline-block; padding: 6px 10px; border-width: 1px; border-style: solid; border-color: #d0d7de; }
+        table { display: table; width: 100%; margin: 0.75em 0; border-collapse: collapse; }
+        thead, tbody, tfoot { display: table-row-group; }
+        tr { display: table-row; }
+        td, th { display: table-cell; padding: 6px 10px; border-width: 1px; border-style: solid; border-color: #d0d7de; vertical-align: top; }
         th { font-weight: 700; background-color: #f6f8fa; }
         caption { display: block; font-weight: 600; }
 

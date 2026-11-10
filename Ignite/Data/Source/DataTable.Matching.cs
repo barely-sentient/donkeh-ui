@@ -424,7 +424,9 @@ namespace Ignite.Data
                     return node.Parent is null;
 
                 case PseudoClassKind.Empty:
-                    return node.ChildNodes.IsEmpty;
+                    // Text is folded into TextContent by the view layer, so an
+                    // element with a text run has no child nodes but is not empty.
+                    return node.ChildNodes.IsEmpty && string.IsNullOrEmpty(node.TextContent);
 
                 case PseudoClassKind.FirstChild:
                     return node.SiblingIndex == 0;

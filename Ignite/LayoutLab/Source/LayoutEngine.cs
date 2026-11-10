@@ -775,19 +775,22 @@ public sealed partial class LayoutEngine
 
     private float MeasureContentMaxWidth(LayoutBox box, in LengthContext context)
     {
-        var content = 0f;
+        var textWidth = 0f;
         var text = GetNodeText(box.Node);
 
         if (!string.IsNullOrEmpty(text))
         {
             var textStyle = CreateTextStyle(box.Style);
             var transformed = ApplyTextTransform(text, box.Style.TextTransform);
-            content = _measurer.Measure(transformed, in textStyle).Width;
+            textWidth = _measurer.Measure(transformed, in textStyle).Width;
         }
 
-        var isRow = (box.Style.IsFlexContainer
-            && box.Style.FlexDirection is FlexDirection.Row or FlexDirection.RowReverse)
-            || box.Style.IsGridContainer;
+        var style = box.Style;
+        var inlineFlow = style.Display is Display.Inline or Display.InlineBlock
+            or Display.InlineFlex or Display.InlineGrid or Display.InlineTable
+            || (style.IsFlexContainer
+                && style.FlexDirection is FlexDirection.Row or FlexDirection.RowReverse)
+            || style.IsGridContainer;
 
         var sum = 0f;
         var max = 0f;
@@ -809,8 +812,12 @@ public sealed partial class LayoutEngine
             max = MathF.Max(max, childWidth);
         }
 
-        content = MathF.Max(content, isRow ? sum : max);
-        return content;
+        // An inline-level container puts its text and inline children on one
+        // line, so their intrinsic widths add up. A block container's intrinsic
+        // width is the widest child instead.
+        return inlineFlow
+            ? textWidth + sum
+            : MathF.Max(textWidth, max);
     }
 
     // ------------------------------------------------------------------ text
@@ -840,8 +847,10 @@ public sealed partial class LayoutEngine
         text = ApplyTextTransform(text, style.TextTransform);
         textStyle = CreateTextStyle(style);
 
+        // Round the cache key up: rounding down makes a line that exactly fits
+        // re-wrap because the cached layout width is narrower than the box.
         var widthKey = float.IsFinite(maxWidth)
-            ? Math.Max(0, (int)MathF.Round(maxWidth * 4))
+            ? Math.Max(0, (int)MathF.Ceiling(maxWidth * 4))
             : int.MaxValue;
 
         var key = new TextLayoutKey(
@@ -959,6 +968,11 @@ public sealed partial class LayoutEngine
         if (box.IsContents)
         {
             return LayoutBlockChildren(box, content, definiteContentHeight);
+        }
+
+        if (box.Style.Display is Display.Table or Display.InlineTable)
+        {
+            return LayoutTable(box, content, definiteContentHeight);
         }
 
         if (box.Style.IsFlexContainer)

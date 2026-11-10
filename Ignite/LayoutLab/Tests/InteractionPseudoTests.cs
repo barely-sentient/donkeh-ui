@@ -56,6 +56,18 @@ public sealed class InteractionPseudoTests
     }
 
     [Fact]
+    public void EmptyIgnoresFoldedTextContent()
+    {
+        const string css = ":empty { color: #ff0000; }";
+
+        var empty = TestSupport.Node("span");
+        Assert.Equal(0xFFFF0000u, TestSupport.ResolveStyle(css, empty).Color);
+
+        var text = TestSupport.Node("span", text: "visible");
+        Assert.Equal(0xFF000000u, TestSupport.ResolveStyle(css, text).Color);
+    }
+
+    [Fact]
     public void CheckedDisabledAndLinkAreAttributeDriven()
     {
         const string css = "input:checked { color: #ff0000; }"

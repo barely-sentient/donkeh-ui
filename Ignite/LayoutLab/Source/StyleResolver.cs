@@ -67,6 +67,9 @@ public sealed partial class StyleResolver
 
     private void CollectCustomProperties(ComputedStyle style, ReadOnlySpan<MatchedRule> matches)
     {
+       // Matches arrive weakest first, so later declarations overwrite earlier
+        // ones. Normal custom properties are collected first, then important ones
+        // overwrite them regardless of where they appear in the cascade.
         for (var i = 0; i < matches.Length; i++)
         {
             var rule = matches[i].Rule;
@@ -79,33 +82,15 @@ public sealed partial class StyleResolver
 
             var value = InternTable.GetString(rule.ValueId);
 
-            if (value is null)
+            if (value is null || IsImportant(rule.ValueId, value))
             {
                 continue;
             }
 
-            // Important custom properties win even when they appear before a
-            // normal declaration in cascade order.
-            var important = IsImportant(rule.ValueId, value);
-
-            if (important)
-            {
-                style.CustomProperties ??= new Dictionary<string, string>(StringComparer.Ordinal);
-                style.CustomProperties[name] = CleanValue(rule.ValueId, value);
-            }
-            else
-            {
-                style.CustomProperties ??= new Dictionary<string, string>(StringComparer.Ordinal);
-
-                if (!style.CustomProperties.ContainsKey(name))
-                {
-                    style.CustomProperties[name] = CleanValue(rule.ValueId, value);
-                }
-            }
+            style.CustomProperties ??= new Dictionary<string, string>(StringComparer.Ordinal);
+            style.CustomProperties[name] = CleanValue(rule.ValueId, value);
         }
 
-        // The second pass lets important declarations overwrite normal ones even
-        // though they were collected in source/cascade order.
         for (var i = 0; i < matches.Length; i++)
         {
             var rule = matches[i].Rule;

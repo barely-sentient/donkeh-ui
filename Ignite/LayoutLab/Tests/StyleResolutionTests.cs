@@ -639,7 +639,8 @@ public class StyleResolutionTests
         var one = TestSupport.Style("flex: 2");
         Assert.Equal(2, one.FlexGrow, 3);
         Assert.Equal(1, one.FlexShrink, 3);
-        Assert.True(one.FlexBasis.IsAuto);
+        Assert.False(one.FlexBasis.IsAuto);
+        Assert.Equal(0, one.FlexBasis.Value, 3);
 
         var full = TestSupport.Style("flex: 1 0 100px");
         Assert.Equal(1, full.FlexGrow, 3);

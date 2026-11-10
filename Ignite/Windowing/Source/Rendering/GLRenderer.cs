@@ -510,7 +510,8 @@ public sealed unsafe class GLRenderer : IDisposable
         var style = command.Style;
         var key = _fonts.CreateKey(in style);
         var lineHeight = style.LineHeight > 0 ? style.LineHeight : style.FontSize * 1.2f;
-        var baseline = rect.Y + lineHeight * 0.8f;
+        var metrics = _fonts.Measure(string.Empty, in style);
+        var baseline = rect.Y + (lineHeight + metrics.Ascent - metrics.Descent) * 0.5f;
         var pen = rect.X;
         var color = ColorOf(style.Color, _opacity);
         var previousFace = (FontFace?)null;

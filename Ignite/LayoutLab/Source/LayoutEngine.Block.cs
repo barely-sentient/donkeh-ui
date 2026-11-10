@@ -106,7 +106,7 @@ public sealed partial class LayoutEngine
                 continue;
             }
 
-            LayoutBlockChild(child, content, ref flowY, ref previousMargin, floatContext);
+            LayoutBlockChild(child, content, ref flowY, ref previousMargin, floatContext, definiteContentHeight);
             hasFlow = true;
             index++;
         }
@@ -135,7 +135,8 @@ public sealed partial class LayoutEngine
         Rect content,
         ref float flowY,
         ref float previousMargin,
-        FloatContext floats)
+        FloatContext floats,
+        float containingBlockHeight)
     {
         // Resolve margins first: clearance and float avoidance both need them.
         PrepareBox(child, content.Width);
@@ -227,7 +228,7 @@ public sealed partial class LayoutEngine
             borderX,
             borderY,
             content.Width,
-            _options.ViewportHeight,
+            containingBlockHeight,
             forcedBorderHeight: null,
             fillHeight: false,
             definiteContentHeight: null);

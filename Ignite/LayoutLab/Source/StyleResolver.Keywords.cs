@@ -1031,6 +1031,7 @@ public sealed partial class StyleResolver
 
         var parts = CssValueParser.SplitTopLevel(text, ' ');
         var numbers = 0;
+        var hasBasis = false;
 
         foreach (var part in parts)
         {
@@ -1054,11 +1055,20 @@ public sealed partial class StyleResolver
             }
 
             style.FlexBasis = CssValueParser.ParseLength(part);
+            hasBasis = true;
         }
 
         if (numbers == 1)
         {
             style.FlexShrink = 1;
+        }
+
+        // CSS's one- and two-number forms imply a zero flex basis. Treating
+        // flex: 1 as "basis: auto" makes every sidebar/scroll area shrink the
+        // other flex items in the same container.
+        if (!hasBasis && numbers is 1 or 2)
+        {
+            style.FlexBasis = CssLength.Zero;
         }
     }
 

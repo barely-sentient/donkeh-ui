@@ -36,6 +36,7 @@ public sealed partial class LayoutEngine
 
         var bases = new float[count];
         var mains = new float[count];
+        var minMains = new float[count];
         var mainMargins = new float[count];
         var lineOf = new int[count];
         var lineStarts = new List<int>(4) { 0 };
@@ -45,6 +46,14 @@ public sealed partial class LayoutEngine
             var item = items[i];
             bases[i] = ResolveFlexBase(item, row, content.Width, content.Height, in context);
             mainMargins[i] = row ? item.Margin.Horizontal : item.Margin.Vertical;
+
+            // CSS gives a flex item with an automatic minimum size and visible
+            // overflow a min-content floor on the main axis. Without it buttons,
+            // inputs and cards get squashed by a busy column container.
+            if (!row && item.Style.MinHeight.IsAuto && !item.Style.IsScrollContainer)
+            {
+                minMains[i] = MeasureMaxContentHeight(item, content.Width);
+            }
 
             if (style.FlexWrap != FlexWrap.NoWrap
                 && i > lineStarts[^1]
@@ -145,7 +154,7 @@ public sealed partial class LayoutEngine
                     for (var i = start; i < end; i++)
                     {
                         var factor = MathF.Max(0, items[i].Style.FlexShrink) * bases[i] / shrink;
-                        mains[i] = MathF.Max(0, bases[i] + free * factor);
+                        mains[i] = MathF.Max(minMains[i], MathF.Max(0, bases[i] + free * factor));
                     }
                 }
                 else
@@ -445,19 +454,20 @@ public sealed partial class LayoutEngine
 
         if (!style.FlexBasis.IsAuto)
         {
-            if (style.FlexBasis.IsIntrinsic)
+            var intrinsicBasis = row
+                ? MeasureMaxContentWidth(item)
+                : MeasureMaxContentHeight(item, cbWidth);
+
+            var basis = style.FlexBasis.IsIntrinsic
+                ? intrinsicBasis
+                : style.FlexBasis.ResolveOr(in context, row ? cbWidth : cbHeight, 0);
+
+            if (!style.FlexBasis.IsIntrinsic && style.BoxSizing != BoxSizing.BorderBox)
             {
-                return row
-                    ? MeasureMaxContentWidth(item)
-                    : MeasureMaxContentHeight(item, cbWidth);
+                basis += mainExtra;
             }
 
-            var basis = style.FlexBasis.ResolveOr(
-                in context,
-                row ? cbWidth : cbHeight,
-                0);
-
-            return style.BoxSizing == BoxSizing.BorderBox ? basis : basis + mainExtra;
+            return ClampFlexBaseSize(item, row, cbWidth, cbHeight, in context, basis);
         }
 
         var mainStyle = row ? style.Width : style.Height;
@@ -465,12 +475,49 @@ public sealed partial class LayoutEngine
 
         if (float.IsFinite(resolved))
         {
-            return style.BoxSizing == BoxSizing.BorderBox ? resolved : resolved + mainExtra;
+            var size = style.BoxSizing == BoxSizing.BorderBox ? resolved : resolved + mainExtra;
+            return ClampFlexBaseSize(item, row, cbWidth, cbHeight, in context, size);
         }
 
-        return row
+        var measured = row
             ? MeasureMaxContentWidth(item)
             : MeasureMaxContentHeight(item, cbWidth);
+
+        return ClampFlexBaseSize(item, row, cbWidth, cbHeight, in context, measured);
+    }
+
+    private float ClampFlexBaseSize(
+        LayoutBox item,
+        bool row,
+        float cbWidth,
+        float cbHeight,
+        in LengthContext context,
+        float value)
+    {
+        var style = item.Style;
+
+        if (row)
+        {
+            return ClampBorderWidth(style, in context, cbWidth, value);
+        }
+
+        var extra = item.Padding.Vertical + item.Border.Vertical;
+        var min = style.MinHeight.ResolveOr(in context, cbHeight, 0);
+        var max = style.MaxHeight.IsAuto
+            ? float.PositiveInfinity
+            : style.MaxHeight.ResolveOr(in context, cbHeight, float.PositiveInfinity);
+
+        if (style.BoxSizing == BoxSizing.ContentBox)
+        {
+            min += extra;
+
+            if (float.IsFinite(max))
+            {
+                max += extra;
+            }
+        }
+
+        return MathF.Max(0, MathF.Max(min, MathF.Min(value, max)));
     }
 
     private float MeasureMaxContentHeight(LayoutBox box, float cbWidth)

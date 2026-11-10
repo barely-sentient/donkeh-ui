@@ -38,8 +38,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ignite.UILab.Tests", "Ignit
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ignite.Windowing", "Ignite\Windowing\Source\Ignite.Windowing.csproj", "{D73FEFA9-95D7-4FCD-8D37-6AABB84C6F86}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ignite.Windowing.Demo", "Ignite\Windowing\Demo\Ignite.Windowing.Demo.csproj", "{9EEB3848-B443-4FAD-94FE-AFE5D361F3F8}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -218,18 +216,6 @@ Global
 		{D73FEFA9-95D7-4FCD-8D37-6AABB84C6F86}.Release|x64.Build.0 = Release|Any CPU
 		{D73FEFA9-95D7-4FCD-8D37-6AABB84C6F86}.Release|x86.ActiveCfg = Release|Any CPU
 		{D73FEFA9-95D7-4FCD-8D37-6AABB84C6F86}.Release|x86.Build.0 = Release|Any CPU
-		{9EEB3848-B443-4FAD-94FE-AFE5D361F3F8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{9EEB3848-B443-4FAD-94FE-AFE5D361F3F8}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{9EEB3848-B443-4FAD-94FE-AFE5D361F3F8}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{9EEB3848-B443-4FAD-94FE-AFE5D361F3F8}.Debug|x64.Build.0 = Debug|Any CPU
-		{9EEB3848-B443-4FAD-94FE-AFE5D361F3F8}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{9EEB3848-B443-4FAD-94FE-AFE5D361F3F8}.Debug|x86.Build.0 = Debug|Any CPU
-		{9EEB3848-B443-4FAD-94FE-AFE5D361F3F8}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{9EEB3848-B443-4FAD-94FE-AFE5D361F3F8}.Release|Any CPU.Build.0 = Release|Any CPU
-		{9EEB3848-B443-4FAD-94FE-AFE5D361F3F8}.Release|x64.ActiveCfg = Release|Any CPU
-		{9EEB3848-B443-4FAD-94FE-AFE5D361F3F8}.Release|x64.Build.0 = Release|Any CPU
-		{9EEB3848-B443-4FAD-94FE-AFE5D361F3F8}.Release|x86.ActiveCfg = Release|Any CPU
-		{9EEB3848-B443-4FAD-94FE-AFE5D361F3F8}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -243,6 +229,5 @@ Global
 		{DC470C51-5FA2-4D38-B6AE-475F7C908DB1} = {08322980-AB5B-25D3-0FE5-D2B012A287E0}
 		{D7209754-2F4B-3283-923E-DC7C2A7E33B5} = {08322980-AB5B-25D3-0FE5-D2B012A287E0}
 		{EB9B16DA-EC8B-488A-A392-5F37ACB02C19} = {08322980-AB5B-25D3-0FE5-D2B012A287E0}
-		{9EEB3848-B443-4FAD-94FE-AFE5D361F3F8} = {363CFD22-2251-0B9A-0503-2D80BBB06170}
 	EndGlobalSection
 EndGlobal
