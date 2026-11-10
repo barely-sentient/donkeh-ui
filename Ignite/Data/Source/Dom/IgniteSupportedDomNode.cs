@@ -23,12 +23,52 @@ namespace Ignite.Data.Dom
         private int _tagName = -1;
         private int _id = -1;
         private int[] _className = [];
+        private int _revision;
+        private string? _textContent;
 
         private readonly Dictionary<int, int> _attributes = [];
 
         private IgniteSupportedDomNode? _parent;
         private IgniteSupportedDomNode[] _children = [];
         private int _indexInParent = -1;
+
+        /// <summary>
+        /// Optional text carried by the element. The engine has no text nodes,
+        /// so the host puts the element's text here for layout and painting.
+        /// </summary>
+        public string? TextContent
+        {
+            get => _textContent;
+            set
+            {
+                if (!string.Equals(_textContent, value, StringComparison.Ordinal))
+                {
+                    _textContent = value;
+                    _revision++;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Incremented whenever the element's identity, classes, attributes or
+        /// text change. Layout caches use it to reject stale subtrees cheaply.
+        /// </summary>
+        public int Revision => _revision;
+
+        /// <summary>Marks the node as changed when the host mutates state the setters cannot see.</summary>
+        public void Invalidate() => _revision++;
+
+        /// <summary>
+        /// Horizontal scroll position in CSS pixels for this element when it is
+        /// a scroll container. LayoutLab clamps it to the scrollable range.
+        /// </summary>
+        public float ScrollOffsetX { get; set; }
+
+        /// <summary>
+        /// Vertical scroll position in CSS pixels for this element when it is a
+        /// scroll container. LayoutLab clamps it to the scrollable range.
+        /// </summary>
+        public float ScrollOffsetY { get; set; }
 
         /// <summary>
         /// The parent element, or null for the root. Assigning
@@ -61,6 +101,7 @@ namespace Ignite.Data.Dom
             set
             {
                 _children = value ?? [];
+                _revision++;
 
                 for (var i = 0; i < _children.Length; i++)
                 {
@@ -80,13 +121,29 @@ namespace Ignite.Data.Dom
         public int InternedTagName
         {
             get => _tagName;
-            set => _tagName = value;
+            set
+            {
+                if (_tagName != value)
+                {
+                    _tagName = value;
+                    _revision++;
+                }
+            }
         }
 
         public string? TagName
         {
             get => InternTable.TryGetString(_tagName, out var tagName) ? tagName : null;
-            set => _tagName = value is null ? -1 : InternTable.Intern(value);
+            set
+            {
+                var id = value is null ? -1 : InternTable.Intern(value);
+
+                if (_tagName != id)
+                {
+                    _tagName = id;
+                    _revision++;
+                }
+            }
         }
 
         /// <summary>
@@ -96,7 +153,14 @@ namespace Ignite.Data.Dom
         public int InternedId
         {
             get => _id;
-            set => _id = value;
+            set
+            {
+                if (_id != value)
+                {
+                    _id = value;
+                    _revision++;
+                }
+            }
         }
 
         public string? Id
@@ -104,15 +168,17 @@ namespace Ignite.Data.Dom
             get => InternTable.TryGetString(_id, out var id) ? id : null;
             set
             {
-                if (string.IsNullOrEmpty(value))
-                {
-                    _id = -1;
-                    return;
-                }
+                var id = string.IsNullOrEmpty(value)
+                    ? -1
+                    : value[0] == '#'
+                        ? InternTable.Intern(value)
+                        : InternTable.Intern('#', value);
 
-                _id = value[0] == '#'
-                    ? InternTable.Intern(value)
-                    : InternTable.Intern('#', value);
+                if (_id != id)
+                {
+                    _id = id;
+                    _revision++;
+                }
             }
         }
 
@@ -145,6 +211,7 @@ namespace Ignite.Data.Dom
 
                 if (value is null)
                 {
+                    _revision++;
                     return;
                 }
 
@@ -155,6 +222,8 @@ namespace Ignite.Data.Dom
                         AddClass(name);
                     }
                 }
+
+                _revision++;
             }
         }
 
@@ -191,6 +260,7 @@ namespace Ignite.Data.Dom
 
             Array.Copy(_className, index + 1, _className, index, _className.Length - index - 1);
             Array.Resize(ref _className, _className.Length - 1);
+            _revision++;
 
             return true;
         }
@@ -218,6 +288,7 @@ namespace Ignite.Data.Dom
         public void SetAttribute(int nameId, int valueId)
         {
             _attributes[nameId] = valueId;
+            _revision++;
         }
 
         /// <summary>
@@ -244,6 +315,7 @@ namespace Ignite.Data.Dom
             }
 
             _attributes[nameId] = InternAttributeValue(value);
+            _revision++;
         }
 
         public bool TryGetAttribute(int nameId, out int valueId)
@@ -271,7 +343,13 @@ namespace Ignite.Data.Dom
 
         public bool RemoveAttribute(int nameId)
         {
-            return _attributes.Remove(nameId);
+            if (_attributes.Remove(nameId))
+            {
+                _revision++;
+                return true;
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -279,9 +357,15 @@ namespace Ignite.Data.Dom
         /// </summary>
         public bool RemoveAttribute(string name)
         {
-            return !string.IsNullOrEmpty(name)
+            if (!string.IsNullOrEmpty(name)
                 && InternTable.TryGetId(name, out var nameId)
-                && _attributes.Remove(nameId);
+                && _attributes.Remove(nameId))
+            {
+                _revision++;
+                return true;
+            }
+
+            return false;
         }
 
         private void AddClass(int id)
@@ -294,6 +378,7 @@ namespace Ignite.Data.Dom
             var length = _className.Length;
             Array.Resize(ref _className, length + 1);
             _className[length] = id;
+            _revision++;
         }
 
         private int IndexOfClass(int id)
