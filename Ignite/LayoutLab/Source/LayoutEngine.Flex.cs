@@ -398,18 +398,32 @@ public sealed partial class LayoutEngine
     private List<LayoutBox> CollectFlowChildren(LayoutBox box)
     {
         var items = new List<LayoutBox>(box.Children.Count);
+        Collect(box, items);
+        return items;
 
-        for (var i = 0; i < box.Children.Count; i++)
+        // display: contents generates no box, so its children are direct
+        // participants in the parent's flex/grid formatting context. Flattening
+        // here is what makes <Fragment>/Each(...) work inside a flex container.
+        static void Collect(LayoutBox parent, List<LayoutBox> items)
         {
-            var child = box.Children[i];
-
-            if (!child.IsOutOfFlow)
+            for (var i = 0; i < parent.Children.Count; i++)
             {
+                var child = parent.Children[i];
+
+                if (child.IsOutOfFlow)
+                {
+                    continue;
+                }
+
+                if (child.IsContents)
+                {
+                    Collect(child, items);
+                    continue;
+                }
+
                 items.Add(child);
             }
         }
-
-        return items;
     }
 
     private float ResolveFlexBase(

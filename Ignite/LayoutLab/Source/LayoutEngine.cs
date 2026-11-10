@@ -324,6 +324,12 @@ public sealed partial class LayoutEngine
                     ? resolved
                     : resolved + paddingWidth + borderWidth;
             }
+            else if (_options.IntrinsicSizeProvider?.Invoke(box.Node) is { } intrinsic)
+            {
+                width = style.BoxSizing == BoxSizing.BorderBox
+                    ? intrinsic.Width
+                    : intrinsic.Width + paddingWidth + borderWidth;
+            }
             else if (fillWidth)
             {
                 width = MathF.Max(0, cbWidth - marginWidth);
@@ -372,6 +378,12 @@ public sealed partial class LayoutEngine
                 height = style.BoxSizing == BoxSizing.BorderBox
                     ? resolved
                     : resolved + verticalExtra;
+            }
+            else if (_options.IntrinsicSizeProvider?.Invoke(box.Node) is { } intrinsic)
+            {
+                height = style.BoxSizing == BoxSizing.BorderBox
+                    ? intrinsic.Height
+                    : intrinsic.Height + verticalExtra;
             }
             else if (fillHeight && float.IsFinite(cbHeight))
             {
@@ -746,6 +758,10 @@ public sealed partial class LayoutEngine
         if (float.IsFinite(width))
         {
             content = width;
+        }
+        else if (_options.IntrinsicSizeProvider?.Invoke(box.Node) is { } intrinsic)
+        {
+            content = intrinsic.Width;
         }
         else
         {

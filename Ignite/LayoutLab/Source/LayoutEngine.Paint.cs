@@ -132,6 +132,8 @@ public sealed partial class LayoutEngine
             PaintBorder(box, rect);
             PaintInsetShadows(box, rect);
             PaintOutline(box, rect);
+            PaintReplacedContent(box, rect);
+            _options.CustomPainter?.Invoke(box, _instructions, _constants);
         }
 
         var scrollX = box.ScrollOffsetX;
@@ -366,6 +368,28 @@ public sealed partial class LayoutEngine
         }
     }
 
+    private void PaintReplacedContent(LayoutBox box, in Rect rect)
+    {
+        if (_options.ImageProvider?.Invoke(box) is not { } image)
+        {
+            return;
+        }
+
+        var id = _constants.AddImage(image);
+        var flags = image.Opacity < 0.9999f
+            ? InstructionFlags.None
+            : InstructionFlags.Opaque;
+
+        _instructions.Add(new Instruction(
+            InstructionOpCode.DrawImage,
+            rect.X,
+            rect.Y,
+            rect.Width,
+            rect.Height,
+            id,
+            flags: flags));
+    }
+
     private static Rect BackgroundArea(LayoutBox box, in Rect rect)
     {
         return box.Style.BackgroundClip switch
@@ -539,6 +563,11 @@ public sealed partial class LayoutEngine
 
         var showHorizontal = box.ScrollWidth > box.ClientWidth + 0.5f
             && (style.ShowScrollbars || style.OverflowX is Overflow.Scroll or Overflow.Auto);
+
+        if (box.ScrollHeight > box.ClientHeight + 0.5f || box.ScrollWidth > box.ClientWidth + 0.5f)
+        {
+            Console.WriteLine($"scrollbox [{string.Join(' ', box.Node.ClassName)}] h={box.ScrollHeight}/{box.ClientHeight} w={box.ScrollWidth}/{box.ClientWidth} showV={showVertical} showH={showHorizontal} overflow={style.OverflowX}/{style.OverflowY} rect={box.PaddingBox}");
+        }
 
         if (!showVertical && !showHorizontal)
         {

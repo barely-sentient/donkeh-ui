@@ -181,7 +181,11 @@ namespace Ignite.Data.Dom
                 switch (token.Kind)
                 {
                     case TokenKind.Identifier:
-                        // A class name is counted with its '.'.
+                    case TokenKind.PropertyName:
+                        // A class name is counted with its '.'. Names that happen
+                        // to be CSS property keywords (".content", ".color", ...)
+                        // are tokenised as PropertyName, but they are still valid
+                        // class/type names in a selector.
                         if (i > start && IsClassDelimiter(selector, i - 1))
                         {
                             break;
@@ -206,7 +210,8 @@ namespace Ignite.Data.Dom
 
                         classCount++;
 
-                        if (i + 1 >= end || selector[i + 1].Kind != TokenKind.Identifier)
+                        if (i + 1 >= end
+                            || selector[i + 1].Kind is not (TokenKind.Identifier or TokenKind.PropertyName))
                         {
                             compoundSupported = false;
                         }
@@ -371,7 +376,7 @@ namespace Ignite.Data.Dom
 
             var value = inner[valueIndex];
 
-            if (value.Kind != TokenKind.Identifier && value.Kind != TokenKind.String)
+            if (value.Kind is not (TokenKind.Identifier or TokenKind.PropertyName or TokenKind.String))
             {
                 return false;
             }

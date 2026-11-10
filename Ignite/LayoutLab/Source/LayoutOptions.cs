@@ -35,6 +35,27 @@ public sealed class LayoutOptions
     /// <summary>Provider for the text carried by a node. Defaults to the node's TextContent.</summary>
     public Func<IgniteSupportedDomNode, string?>? TextProvider { get; set; }
 
+    /// <summary>
+    /// Supplies the intrinsic (content) size of a replaced element such as an
+    /// image. When a width or height is auto the returned value is used instead
+    /// of filling the containing block.
+    /// </summary>
+    public Func<IgniteSupportedDomNode, Size?>? IntrinsicSizeProvider { get; set; }
+
+    /// <summary>
+    /// Supplies the bitmap drawn for a replaced element. The instruction is
+    /// emitted after the element's background, border and outline and before
+    /// its children, so overlays keep their natural paint order.
+    /// </summary>
+    public Func<LayoutBox, ImageSpec?>? ImageProvider { get; set; }
+
+    /// <summary>
+    /// Optional host painter for element-specific content such as form controls,
+    /// progress bars and media placeholders. It runs once per visible box in
+    /// paint order.
+    /// </summary>
+    public Action<LayoutBox, InstructionBuffer, ConstantPool>? CustomPainter { get; set; }
+
     public float GetScrollOffsetX(IgniteSupportedDomNode node)
     {
         if (!ApplyScrollOffsets)

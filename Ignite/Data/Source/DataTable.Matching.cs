@@ -330,6 +330,7 @@ namespace Ignite.Data
                 switch (token.Kind)
                 {
                     case TokenKind.Identifier:
+                    case TokenKind.PropertyName:
                         // A class name is consumed together with its '.' below.
                         if (i > 0 && IsClassDelimiter(tokens[i - 1]))
                         {

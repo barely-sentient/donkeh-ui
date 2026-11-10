@@ -41,6 +41,12 @@ namespace Ignite.UILab
         public bool IsFlushing => _flushing;
 
         /// <summary>
+        /// Incremented whenever a mount or flush actually changed the live tree.
+        /// Hosts can use it to avoid re-laying out an unchanged frame.
+        /// </summary>
+        public int Version { get; private set; }
+
+        /// <summary>
         /// Mounts a virtual tree and returns its live root. A renderer can only be
         /// mounted once.
         /// </summary>
@@ -78,6 +84,7 @@ namespace Ignite.UILab
                 Flush();
             }
 
+            Version++;
             return _rootLive!;
         }
 
@@ -96,6 +103,7 @@ namespace Ignite.UILab
             try
             {
                 var iterations = 0;
+                var changed = false;
 
                 while (true)
                 {
@@ -112,10 +120,17 @@ namespace Ignite.UILab
                         }
 
                         UpdateComponent(component);
+                        changed = true;
                     }
 
                     CommitEffects();
                     iterations++;
+
+                    if (changed)
+                    {
+                        Version++;
+                        changed = false;
+                    }
 
                     if (_dirty.Count == 0)
                     {
