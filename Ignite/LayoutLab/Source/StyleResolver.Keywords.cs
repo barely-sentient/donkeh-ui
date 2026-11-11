@@ -327,6 +327,7 @@ public sealed partial class StyleResolver
                 dest.ScrollbarThumbColor = source.ScrollbarThumbColor;
                 break;
             case CssProperty.ScrollbarWidth: dest.ShowScrollbars = source.ShowScrollbars; break;
+            case CssProperty.ScrollBehavior: dest.ScrollBehavior = source.ScrollBehavior; break;
         }
     }
 

@@ -107,6 +107,7 @@ public sealed class ComputedStyle
 
     public Overflow OverflowX { get; set; } = Overflow.Visible;
     public Overflow OverflowY { get; set; } = Overflow.Visible;
+    public ScrollBehavior ScrollBehavior { get; set; } = ScrollBehavior.Auto;
     public uint ScrollbarTrackColor { get; set; } = 0xFFE0E0E0;
     public uint ScrollbarThumbColor { get; set; } = 0xFF909090;
     public bool ShowScrollbars { get; set; }
@@ -316,6 +317,7 @@ public sealed class ComputedStyle
         JustifyItemsBlock = source.JustifyItemsBlock;
         OverflowX = source.OverflowX;
         OverflowY = source.OverflowY;
+        ScrollBehavior = source.ScrollBehavior;
         ScrollbarTrackColor = source.ScrollbarTrackColor;
         ScrollbarThumbColor = source.ScrollbarThumbColor;
         ShowScrollbars = source.ShowScrollbars;

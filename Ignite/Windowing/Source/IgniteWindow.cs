@@ -64,6 +64,8 @@ public sealed class IgniteWindow : IDisposable
     private LengthContext _lengthContext;
     private float _mouseX;
     private float _mouseY;
+    private readonly Dictionary<IgniteSupportedDomNode, ScrollAnimation> _scrollAnimations = [];
+    private ScrollbarDrag? _scrollDrag;
 
     public IgniteWindow(WindowSettings settings)
     {
@@ -236,6 +238,7 @@ public sealed class IgniteWindow : IDisposable
             return;
         }
 
+        AdvanceScrollAnimations(delta);
         _ui.Flush();
 
         var size = _window.Size;
@@ -1290,6 +1293,12 @@ public sealed class IgniteWindow : IDisposable
         _mouseX = x;
         _mouseY = y;
 
+        if (_scrollDrag is not null)
+        {
+            UpdateScrollbarDrag(x, y);
+            return;
+        }
+
         if (_openSelect is not null)
         {
             var overOption = TryHitSelectOption(_openSelect, x, y, out var optionIndex);
@@ -1308,6 +1317,11 @@ public sealed class IgniteWindow : IDisposable
 
     private void OnMouseDown(MouseButton button)
     {
+        if (TryBeginScrollbarInteraction(_mouseX, _mouseY))
+        {
+            return;
+        }
+
         var element = HitTest(_mouseX, _mouseY);
 
         if (_openSelect is not null)
@@ -1359,6 +1373,14 @@ public sealed class IgniteWindow : IDisposable
 
     private void OnMouseUp(MouseButton button)
     {
+        if (_scrollDrag is not null)
+        {
+            _scrollDrag = null;
+            _pressed = null;
+            SetActive(null);
+            return;
+        }
+
         var element = HitTest(_mouseX, _mouseY);
 
         SetActive(null);
@@ -1457,19 +1479,340 @@ public sealed class IgniteWindow : IDisposable
         // table wrapper) never swallows vertical wheel input. Clamp to the
         // scrollable range so the stored offset cannot grow past the end and
         // make subsequent scrolls in the other direction feel stuck.
+        var dx = 0f;
+        var dy = 0f;
+
         if (vertical != 0 && scroll.ScrollHeight > scroll.ClientHeight + 0.5f)
         {
-            var maxScrollY = MathF.Max(0, scroll.ScrollHeight - scroll.ClientHeight);
-            scroll.Node.ScrollOffsetY = Math.Clamp(scroll.Node.ScrollOffsetY - vertical * 48, 0, maxScrollY);
+            dy = -vertical * 48;
         }
 
         if (horizontal != 0 && scroll.ScrollWidth > scroll.ClientWidth + 0.5f)
         {
-            var maxScrollX = MathF.Max(0, scroll.ScrollWidth - scroll.ClientWidth);
-            scroll.Node.ScrollOffsetX = Math.Clamp(scroll.Node.ScrollOffsetX - horizontal * 48, 0, maxScrollX);
+            dx = -horizontal * 48;
         }
 
+        if (dx != 0 || dy != 0)
+        {
+            ScrollBy(scroll, dx, dy);
+        }
+    }
+
+    private void ScrollBy(LayoutBox scroll, float dx, float dy)
+    {
+        var node = scroll.Node;
+
+        // Build on the pending target while an animation is running so a fast
+        // train of wheel events accumulates instead of fighting the current
+        // interpolation.
+        var animating = _scrollAnimations.TryGetValue(node, out var animation);
+        var baseX = animating ? animation!.ToX : node.ScrollOffsetX;
+        var baseY = animating ? animation!.ToY : node.ScrollOffsetY;
+
+        var maxX = MathF.Max(0, scroll.ScrollWidth - scroll.ClientWidth);
+        var maxY = MathF.Max(0, scroll.ScrollHeight - scroll.ClientHeight);
+
+        ScrollTo(scroll, Math.Clamp(baseX + dx, 0, maxX), Math.Clamp(baseY + dy, 0, maxY));
+    }
+
+    private void ScrollTo(LayoutBox scroll, float x, float y)
+    {
+        var maxX = MathF.Max(0, scroll.ScrollWidth - scroll.ClientWidth);
+        var maxY = MathF.Max(0, scroll.ScrollHeight - scroll.ClientHeight);
+        x = Math.Clamp(x, 0, maxX);
+        y = Math.Clamp(y, 0, maxY);
+
+        if (!IsSmoothScrolling(scroll))
+        {
+            SetScrollOffset(scroll.Node, x, y);
+            return;
+        }
+
+        var node = scroll.Node;
+        var fromX = node.ScrollOffsetX;
+        var fromY = node.ScrollOffsetY;
+
+        if (MathF.Abs(x - fromX) < 0.5f && MathF.Abs(y - fromY) < 0.5f)
+        {
+            _scrollAnimations.Remove(node);
+            return;
+        }
+
+        var distance = MathF.Sqrt((x - fromX) * (x - fromX) + (y - fromY) * (y - fromY));
+        var duration = Math.Clamp(0.18 + distance * 0.0004, 0.18, 0.45);
+
+        _scrollAnimations[node] = new ScrollAnimation
+        {
+            FromX = fromX,
+            FromY = fromY,
+            ToX = x,
+            ToY = y,
+            Elapsed = 0,
+            Duration = duration
+        };
+    }
+
+    private bool IsSmoothScrolling(LayoutBox scroll)
+    {
+        if (scroll.Style.ScrollBehavior == ScrollBehavior.Smooth)
+        {
+            return true;
+        }
+
+        if (scroll.Style.ScrollBehavior != ScrollBehavior.Auto
+            || _layoutResult?.Root is not { } root
+            || root.Style.ScrollBehavior != ScrollBehavior.Smooth)
+        {
+            return false;
+        }
+
+        // Browsers apply a root scroll-behavior to the viewport. The engine has
+        // no viewport scroller, so the outermost scrollable container stands in
+        // for it (this keeps Bootstrap's :root rule effective). Hidden overflow
+        // boxes are scroll containers too, but they cannot actually scroll, so
+        // they do not make a nested container less "outermost" here.
+        for (var parent = scroll.Parent; parent is not null; parent = parent.Parent)
+        {
+            if (parent.IsScrollContainer
+                && (parent.ScrollHeight > parent.ClientHeight + 0.5f
+                    || parent.ScrollWidth > parent.ClientWidth + 0.5f))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private void SetScrollOffset(IgniteSupportedDomNode node, float x, float y)
+    {
+        _scrollAnimations.Remove(node);
+
+        if (MathF.Abs(node.ScrollOffsetX - x) < 0.001f
+            && MathF.Abs(node.ScrollOffsetY - y) < 0.001f)
+        {
+            return;
+        }
+
+        node.ScrollOffsetX = x;
+        node.ScrollOffsetY = y;
         _needsLayout = true;
+    }
+
+    private void AdvanceScrollAnimations(double delta)
+    {
+        if (_scrollAnimations.Count == 0)
+        {
+            return;
+        }
+
+        List<IgniteSupportedDomNode>? finished = null;
+        var changed = false;
+
+        foreach (var (node, animation) in _scrollAnimations)
+        {
+            animation.Elapsed += delta;
+            var progress = animation.Duration <= 0
+                ? 1
+                : Math.Clamp(animation.Elapsed / animation.Duration, 0, 1);
+            var eased = 1 - Math.Pow(1 - progress, 3);
+
+            var x = (float)(animation.FromX + (animation.ToX - animation.FromX) * eased);
+            var y = (float)(animation.FromY + (animation.ToY - animation.FromY) * eased);
+
+            if (progress >= 1)
+            {
+                x = animation.ToX;
+                y = animation.ToY;
+                (finished ??= []).Add(node);
+            }
+
+            if (MathF.Abs(node.ScrollOffsetX - x) > 0.01f
+                || MathF.Abs(node.ScrollOffsetY - y) > 0.01f)
+            {
+                node.ScrollOffsetX = x;
+                node.ScrollOffsetY = y;
+                changed = true;
+            }
+        }
+
+        if (finished is not null)
+        {
+            foreach (var node in finished)
+            {
+                _scrollAnimations.Remove(node);
+            }
+        }
+
+        if (changed)
+        {
+            _needsLayout = true;
+        }
+    }
+
+    private bool TryBeginScrollbarInteraction(float x, float y)
+    {
+        var hit = FindScrollbarAt(x, y);
+
+        if (hit is null)
+        {
+            return false;
+        }
+
+        CloseSelectMenu();
+        _pressed = null;
+        SetActive(null);
+
+        var box = hit.Value.Box;
+        var metrics = hit.Value.Metrics;
+        var node = box.Node;
+
+        if (metrics.ThumbRect.Contains(x, y))
+        {
+            _scrollDrag = new ScrollbarDrag
+            {
+                Node = node,
+                Vertical = metrics.Vertical,
+                PointerStart = metrics.Vertical ? y : x,
+                ScrollStart = metrics.Vertical ? node.ScrollOffsetY : node.ScrollOffsetX
+            };
+            return true;
+        }
+
+        var maxScroll = metrics.Vertical
+            ? MathF.Max(0, box.ScrollHeight - box.ClientHeight)
+            : MathF.Max(0, box.ScrollWidth - box.ClientWidth);
+        var target = metrics.ScrollOffsetForPoint(
+            metrics.Vertical ? y : x,
+            maxScroll);
+
+        if (metrics.Vertical)
+        {
+            ScrollTo(box, node.ScrollOffsetX, target);
+        }
+        else
+        {
+            ScrollTo(box, target, node.ScrollOffsetY);
+        }
+
+        return true;
+    }
+
+    private void UpdateScrollbarDrag(float x, float y)
+    {
+        if (_scrollDrag is not { } drag
+            || _layoutResult?.TryGetBox(drag.Node, out var box) != true)
+        {
+            return;
+        }
+
+        ScrollbarMetrics metrics;
+
+        if (drag.Vertical)
+        {
+            if (!ScrollbarLayout.TryGetVertical(box, out metrics))
+            {
+                return;
+            }
+        }
+        else if (!ScrollbarLayout.TryGetHorizontal(box, out metrics))
+        {
+            return;
+        }
+
+        var maxScroll = drag.Vertical
+            ? MathF.Max(0, box.ScrollHeight - box.ClientHeight)
+            : MathF.Max(0, box.ScrollWidth - box.ClientWidth);
+        var offset = metrics.ScrollOffsetForDrag(
+            drag.ScrollStart,
+            (drag.Vertical ? y : x) - drag.PointerStart,
+            maxScroll);
+
+        SetScrollOffset(
+            drag.Node,
+            drag.Vertical ? drag.Node.ScrollOffsetX : offset,
+            drag.Vertical ? offset : drag.Node.ScrollOffsetY);
+    }
+
+    private ScrollbarHit? FindScrollbarAt(float x, float y)
+    {
+        return _layoutResult?.Root is { } root
+            ? FindScrollbarAt(root, x, y, 0, 0)
+            : null;
+    }
+
+    private static ScrollbarHit? FindScrollbarAt(
+        LayoutBox box,
+        float x,
+        float y,
+        float scrollX,
+        float scrollY)
+    {
+        if (box.Style.Display == Display.None
+            || box.Style.Visibility is Visibility.Hidden or Visibility.Collapse)
+        {
+            return null;
+        }
+
+        var painted = box.BorderBox.Translate(-scrollX, -scrollY);
+
+        if (!painted.Contains(x, y))
+        {
+            return null;
+        }
+
+        var childScrollX = scrollX;
+        var childScrollY = scrollY;
+
+        if (box.IsScrollContainer)
+        {
+            var clip = box.PaddingBox.Translate(-scrollX, -scrollY);
+
+            if (!clip.Contains(x, y))
+            {
+                return null;
+            }
+
+            childScrollX += box.ScrollOffsetX;
+            childScrollY += box.ScrollOffsetY;
+        }
+
+        for (var i = box.Children.Count - 1; i >= 0; i--)
+        {
+            var hit = FindScrollbarAt(box.Children[i], x, y, childScrollX, childScrollY);
+
+            if (hit is not null)
+            {
+                return hit;
+            }
+        }
+
+        if (!box.IsScrollContainer)
+        {
+            return null;
+        }
+
+        if (ScrollbarLayout.TryGetVertical(box, out var vertical))
+        {
+            var track = vertical.Track.Translate(-scrollX, -scrollY);
+
+            if (track.Contains(x, y))
+            {
+                return new ScrollbarHit(box, vertical with { Track = track });
+            }
+        }
+
+        if (ScrollbarLayout.TryGetHorizontal(box, out var horizontal))
+        {
+            var track = horizontal.Track.Translate(-scrollX, -scrollY);
+
+            if (track.Contains(x, y))
+            {
+                return new ScrollbarHit(box, horizontal with { Track = track });
+            }
+        }
+
+        return null;
     }
 
     private void OnKeyDown(Key key)
@@ -2053,4 +2396,24 @@ public sealed class IgniteWindow : IDisposable
         DisposeGpu();
         _window?.Dispose();
     }
+
+    private sealed class ScrollAnimation
+    {
+        public float FromX;
+        public float FromY;
+        public float ToX;
+        public float ToY;
+        public double Elapsed;
+        public double Duration;
+    }
+
+    private sealed class ScrollbarDrag
+    {
+        public required IgniteSupportedDomNode Node;
+        public bool Vertical;
+        public float PointerStart;
+        public float ScrollStart;
+    }
+
+    private readonly record struct ScrollbarHit(LayoutBox Box, ScrollbarMetrics Metrics);
 }

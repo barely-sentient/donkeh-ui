@@ -990,6 +990,14 @@ public class StyleResolutionTests
     }
 
     [Fact]
+    public void ScrollBehaviorIsSupported()
+    {
+        Assert.Equal(ScrollBehavior.Auto, new ComputedStyle().ScrollBehavior);
+        Assert.Equal(ScrollBehavior.Smooth, TestSupport.Style("scroll-behavior: smooth").ScrollBehavior);
+        Assert.Equal(ScrollBehavior.Auto, TestSupport.Style("scroll-behavior: auto").ScrollBehavior);
+    }
+
+    [Fact]
     public void IgnoredPropertiesDoNotBecomeUnsupported()
     {
         var style = TestSupport.Style(

@@ -558,42 +558,20 @@ public sealed partial class LayoutEngine
     private void PaintScrollbars(LayoutBox box, float tx, float ty)
     {
         var style = box.Style;
-        var showVertical = box.ScrollHeight > box.ClientHeight + 0.5f
-            && (style.ShowScrollbars || style.OverflowY is Overflow.Scroll or Overflow.Auto);
 
-        var showHorizontal = box.ScrollWidth > box.ClientWidth + 0.5f
-            && (style.ShowScrollbars || style.OverflowX is Overflow.Scroll or Overflow.Auto);
-
-        if (!showVertical && !showHorizontal)
+        if (ScrollbarLayout.TryGetVertical(box, out var vertical))
         {
-            return;
-        }
-
-        const float thickness = 10;
-
-        if (showVertical)
-        {
-            var trackLength = MathF.Max(0, box.PaddingBox.Height);
-            var client = MathF.Max(1, box.ClientHeight);
-            var thumbLength = MathF.Max(12, trackLength * (client / MathF.Max(client, box.ScrollHeight)));
-            var maxScroll = MathF.Max(1, box.ScrollHeight - client);
-            var thumbOffset = Math.Clamp(box.ScrollOffsetY / maxScroll, 0, 1) * (trackLength - thumbLength);
-
             var spec = new ScrollbarSpec(
                 Vertical: true,
-                ThumbOffset: thumbOffset,
-                ThumbLength: thumbLength,
-                TrackLength: trackLength,
+                ThumbOffset: vertical.ThumbOffset,
+                ThumbLength: vertical.ThumbLength,
+                TrackLength: vertical.TrackLength,
                 TrackColor: style.ScrollbarTrackColor,
                 ThumbColor: style.ScrollbarThumbColor,
-                Width: thickness);
+                Width: ScrollbarLayout.Thickness);
 
             var id = _constants.AddScrollbar(spec);
-            var rect = new Rect(
-                box.PaddingBox.Right - thickness + tx,
-                box.PaddingBox.Y + ty,
-                thickness,
-                trackLength);
+            var rect = vertical.Track.Translate(tx, ty);
 
             _instructions.Add(new Instruction(
                 InstructionOpCode.DrawScrollbar,
@@ -604,29 +582,19 @@ public sealed partial class LayoutEngine
                 id));
         }
 
-        if (showHorizontal)
+        if (ScrollbarLayout.TryGetHorizontal(box, out var horizontal))
         {
-            var trackLength = MathF.Max(0, box.PaddingBox.Width);
-            var client = MathF.Max(1, box.ClientWidth);
-            var thumbLength = MathF.Max(12, trackLength * (client / MathF.Max(client, box.ScrollWidth)));
-            var maxScroll = MathF.Max(1, box.ScrollWidth - client);
-            var thumbOffset = Math.Clamp(box.ScrollOffsetX / maxScroll, 0, 1) * (trackLength - thumbLength);
-
             var spec = new ScrollbarSpec(
                 Vertical: false,
-                ThumbOffset: thumbOffset,
-                ThumbLength: thumbLength,
-                TrackLength: trackLength,
+                ThumbOffset: horizontal.ThumbOffset,
+                ThumbLength: horizontal.ThumbLength,
+                TrackLength: horizontal.TrackLength,
                 TrackColor: style.ScrollbarTrackColor,
                 ThumbColor: style.ScrollbarThumbColor,
-                Width: thickness);
+                Width: ScrollbarLayout.Thickness);
 
             var id = _constants.AddScrollbar(spec);
-            var rect = new Rect(
-                box.PaddingBox.X + tx,
-                box.PaddingBox.Bottom - thickness + ty,
-                trackLength,
-                thickness);
+            var rect = horizontal.Track.Translate(tx, ty);
 
             _instructions.Add(new Instruction(
                 InstructionOpCode.DrawScrollbar,

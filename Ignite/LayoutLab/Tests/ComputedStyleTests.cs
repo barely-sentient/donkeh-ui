@@ -545,6 +545,7 @@ public class ComputedStyleTests
             JustifyItemsBlock = AlignItems.Center,
             OverflowX = Overflow.Hidden,
             OverflowY = Overflow.Auto,
+            ScrollBehavior = ScrollBehavior.Smooth,
             ScrollbarTrackColor = 5,
             ScrollbarThumbColor = 6,
             ShowScrollbars = true,
@@ -653,6 +654,7 @@ public class ComputedStyleTests
         Assert.Equal(source.JustifyItemsBlock, target.JustifyItemsBlock);
         Assert.Equal(source.OverflowX, target.OverflowX);
         Assert.Equal(source.OverflowY, target.OverflowY);
+        Assert.Equal(source.ScrollBehavior, target.ScrollBehavior);
         Assert.Equal(source.ScrollbarTrackColor, target.ScrollbarTrackColor);
         Assert.Equal(source.ScrollbarThumbColor, target.ScrollbarThumbColor);
         Assert.Equal(source.ShowScrollbars, target.ShowScrollbars);

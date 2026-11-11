@@ -895,6 +895,12 @@ public sealed partial class StyleResolver
                 style.ShowScrollbars = !value.Equals("none", StringComparison.OrdinalIgnoreCase);
                 break;
 
+            case CssProperty.ScrollBehavior:
+                style.ScrollBehavior = value.Equals("smooth", StringComparison.OrdinalIgnoreCase)
+                    ? ScrollBehavior.Smooth
+                    : ScrollBehavior.Auto;
+                break;
+
             case CssProperty.PointerEvents:
             case CssProperty.Cursor:
             case CssProperty.UserSelect:

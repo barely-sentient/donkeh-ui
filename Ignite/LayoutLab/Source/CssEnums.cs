@@ -59,6 +59,12 @@ public enum Overflow : byte
     Auto
 }
 
+public enum ScrollBehavior : byte
+{
+    Auto,
+    Smooth
+}
+
 public enum BoxSizing : byte
 {
     ContentBox,
