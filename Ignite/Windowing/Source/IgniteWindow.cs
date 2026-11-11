@@ -18,7 +18,7 @@ namespace Ignite.Windowing;
 /// display-list renderer. A UI tree is mounted once and patched by UILab; frames
 /// only relayout when the tree, stylesheet, viewport or scroll state changed.
 /// </summary>
-public sealed class IgniteWindow : IDisposable
+public sealed partial class IgniteWindow : IDisposable
 {
     private static readonly int ValueAttribute = InternTable.Intern("value");
     private static readonly int CheckedAttribute = InternTable.Intern("checked");
@@ -1532,6 +1532,7 @@ public sealed class IgniteWindow : IDisposable
         if (_focused is null
             || !IsTextControl(_focused)
             || !IsCaretVisible
+            || HasControlSelection
             || boxLayout is null
             || !boxLayout.TryGetBox(_focused, out var box))
         {
@@ -1687,6 +1688,8 @@ public sealed class IgniteWindow : IDisposable
         InstructionBuffer instructions,
         ConstantPool constants)
     {
+        PaintSelection(box, instructions);
+
         if (box.Node is not ElementNode element)
         {
             return;
@@ -1827,6 +1830,8 @@ public sealed class IgniteWindow : IDisposable
 
     private void PaintElementContent(LayoutBox box, InstructionBuffer instructions, ConstantPool constants)
     {
+        PaintSelection(box, instructions);
+
         if (box.Node is not ElementNode element)
         {
             return;
@@ -2028,6 +2033,12 @@ public sealed class IgniteWindow : IDisposable
         _devTools.PointerX = x;
         _devTools.PointerY = y;
 
+        if (_selectionDragging)
+        {
+            UpdateSelectionDrag(x, y);
+            return;
+        }
+
         if (_scrollDrag is not null)
         {
             UpdateScrollbarDrag(x, y);
@@ -2081,6 +2092,11 @@ public sealed class IgniteWindow : IDisposable
             }
         }
 
+        if (!IsShiftPressed())
+        {
+            ClearSelection();
+        }
+
         var pointerTarget = FindPointerTarget(HitTest(_mouseX, _mouseY), "pointerdown");
 
         if (pointerTarget is not null)
@@ -2128,14 +2144,77 @@ public sealed class IgniteWindow : IDisposable
         _pressed = element;
         SetActive(element);
 
+        var shift = IsShiftPressed();
+
+        if (element is not null && IsTextControl(element))
+        {
+            Focus(element, focusVisible: false, preserveSelection: shift);
+            PlaceCaretFromPoint(element, _mouseX);
+
+            var anchor = shift && HasControlSelection
+                ? _selection!.AnchorOffset
+                : _caretIndex;
+            SetControlSelection(anchor, _caretIndex);
+            BeginSelectionDrag();
+
+            var clicks = RegisterClick(element, _mouseX, _mouseY);
+
+            if (clicks == 2)
+            {
+                SelectWordInControl(_caretIndex);
+            }
+            else if (clicks >= 3)
+            {
+                SelectAllInControl();
+            }
+
+            Invoke(element, "mousedown");
+            return;
+        }
+
+        if (element is not null
+            && TryHitText(_mouseX, _mouseY, IsInDevToolsTree(element), out var run, out var offset))
+        {
+            var previous = _selection;
+            Focus(element, focusVisible: false, preserveSelection: shift);
+
+            if (shift
+                && previous is { IsControl: false } preserved
+                && preserved.IsDevTools == run.IsDevTools)
+            {
+                _selection = preserved;
+                SetTextSelectionFocus(run, offset);
+            }
+            else
+            {
+                StartTextSelection(run, offset);
+            }
+
+            BeginSelectionDrag();
+
+            var clicks = RegisterClick(element, _mouseX, _mouseY);
+
+            if (clicks == 2)
+            {
+                SelectWord(run, offset);
+            }
+            else if (clicks >= 3)
+            {
+                SelectAllInRun(run);
+            }
+
+            Invoke(element, "mousedown");
+            return;
+        }
+
+        if (!shift)
+        {
+            ClearSelection();
+        }
+
         if (element is not null)
         {
             Focus(element, focusVisible: false);
-
-            if (IsTextControl(element))
-            {
-                PlaceCaretFromPoint(element, _mouseX);
-            }
         }
 
         if (element is { Tag: "select" })
@@ -2162,6 +2241,25 @@ public sealed class IgniteWindow : IDisposable
             }
 
             return;
+        }
+
+        if (_selectionDragging)
+        {
+            _selectionDragging = false;
+
+            if (_selectionDragged)
+            {
+                _selectionDragged = false;
+
+                if (_pressed is not null)
+                {
+                    SetActive(null);
+                    Invoke(_pressed, "mouseup");
+                    _pressed = null;
+                }
+
+                return;
+            }
         }
 
         if (_pointerTarget is not null)
@@ -2203,6 +2301,7 @@ public sealed class IgniteWindow : IDisposable
         }
 
         _pressed = null;
+        _selectionDragged = false;
     }
 
     private void ToggleInput(ElementNode element)
@@ -2641,6 +2740,22 @@ public sealed class IgniteWindow : IDisposable
             return;
         }
 
+        if (control && key == Key.C && CopySelection(keyboard))
+        {
+            return;
+        }
+
+        if (control && key == Key.X && CutSelection(keyboard))
+        {
+            return;
+        }
+
+        if (control && key == Key.A)
+        {
+            SelectAllText();
+            return;
+        }
+
         if (_focused is null)
         {
             return;
@@ -2659,6 +2774,8 @@ public sealed class IgniteWindow : IDisposable
                     return;
                 }
 
+                text = NormalizeEditText(_focused, text);
+                DeleteControlSelectionCore();
                 _editText ??= string.Empty;
                 _caretIndex = Math.Clamp(_caretIndex, 0, _editText.Length);
                 _editText = _editText.Insert(_caretIndex, text);
@@ -2724,9 +2841,18 @@ public sealed class IgniteWindow : IDisposable
         switch (key)
         {
             case Key.Backspace:
-                if (_editText is { Length: > 0 } && _caretIndex > 0)
+                if (HasControlSelection)
                 {
-                    var start = PreviousTextElement(_editText, _caretIndex);
+                    if (DeleteControlSelectionCore())
+                    {
+                        AfterControlEdit();
+                    }
+                }
+                else if (_editText is { Length: > 0 } && _caretIndex > 0)
+                {
+                    var start = control && IsTextControl(_focused)
+                        ? PreviousWord(_editText, _caretIndex)
+                        : PreviousTextElement(_editText, _caretIndex);
                     _editText = _editText.Remove(start, _caretIndex - start);
                     _caretIndex = start;
                     ResetCaretBlink();
@@ -2737,9 +2863,18 @@ public sealed class IgniteWindow : IDisposable
                 break;
 
             case Key.Delete:
-                if (_editText is { Length: > 0 } && _caretIndex < _editText.Length)
+                if (HasControlSelection)
                 {
-                    var end = NextTextElement(_editText, _caretIndex);
+                    if (DeleteControlSelectionCore())
+                    {
+                        AfterControlEdit();
+                    }
+                }
+                else if (_editText is { Length: > 0 } && _caretIndex < _editText.Length)
+                {
+                    var end = control && IsTextControl(_focused)
+                        ? NextWord(_editText, _caretIndex)
+                        : NextTextElement(_editText, _caretIndex);
                     _editText = _editText.Remove(_caretIndex, end - _caretIndex);
                     ResetCaretBlink();
                     CascadeEdit(_focused);
@@ -2749,31 +2884,78 @@ public sealed class IgniteWindow : IDisposable
                 break;
 
             case Key.Left:
-                if (_editText is { Length: > 0 })
+            case Key.Right:
+                if (IsTextControl(_focused) && _editText is { } editText)
                 {
-                    _caretIndex = PreviousTextElement(_editText, _caretIndex);
+                    var current = Math.Clamp(_caretIndex, 0, editText.Length);
+                    var target = key == Key.Left
+                        ? control
+                            ? PreviousWord(editText, current)
+                            : PreviousTextElement(editText, current)
+                        : control
+                            ? NextWord(editText, current)
+                            : NextTextElement(editText, current);
+
+                    if (shift)
+                    {
+                        ExtendControlSelection(target);
+                    }
+                    else if (HasControlSelection)
+                    {
+                        CollapseControlSelection(toStart: key == Key.Left);
+                    }
+                    else
+                    {
+                        _caretIndex = target;
+                        ResetCaretBlink();
+                    }
+                }
+                else if (_editText is { Length: > 0 })
+                {
+                    _caretIndex = key == Key.Left
+                        ? PreviousTextElement(_editText, _caretIndex)
+                        : NextTextElement(_editText, _caretIndex);
+
+                    if (!shift)
+                    {
+                        ClearSelection();
+                    }
+
                     ResetCaretBlink();
                 }
-
-                break;
-
-            case Key.Right:
-                if (_editText is { Length: > 0 })
+                else if (!shift)
                 {
-                    _caretIndex = NextTextElement(_editText, _caretIndex);
-                    ResetCaretBlink();
+                    ClearSelection();
                 }
 
                 break;
 
             case Key.Home:
-                _caretIndex = 0;
-                ResetCaretBlink();
+                if (IsTextControl(_focused) && shift)
+                {
+                    ExtendControlSelection(0);
+                }
+                else
+                {
+                    _caretIndex = 0;
+                    ClearSelection();
+                    ResetCaretBlink();
+                }
+
                 break;
 
             case Key.End:
-                _caretIndex = _editText?.Length ?? 0;
-                ResetCaretBlink();
+                if (IsTextControl(_focused) && shift)
+                {
+                    ExtendControlSelection(_editText?.Length ?? 0);
+                }
+                else
+                {
+                    _caretIndex = _editText?.Length ?? 0;
+                    ClearSelection();
+                    ResetCaretBlink();
+                }
+
                 break;
 
             case Key.Enter:
@@ -2782,6 +2964,7 @@ public sealed class IgniteWindow : IDisposable
                     _devTools.AdvanceAfterCommit = true;
                 }
 
+                ClearSelection();
                 CommitEdit(_focused);
                 Invoke(_focused, "change", _editText ?? string.Empty);
                 _needsLayout = true;
@@ -2873,6 +3056,12 @@ public sealed class IgniteWindow : IDisposable
             }
         }
 
+        if (_selection is { IsControl: false })
+        {
+            ClearSelection();
+        }
+
+        DeleteControlSelectionCore();
         _editText ??= string.Empty;
         _caretIndex = Math.Clamp(_caretIndex, 0, _editText.Length);
         _editText = _editText.Insert(_caretIndex, character.ToString());
@@ -2934,7 +3123,7 @@ public sealed class IgniteWindow : IDisposable
         }
     }
 
-    private void Focus(ElementNode? element, bool focusVisible = false)
+    private void Focus(ElementNode? element, bool focusVisible = false, bool preserveSelection = false)
     {
         if (element is not null && element.TryGetAttribute("disabled", out var ignoredDisabled))
         {
@@ -2961,6 +3150,11 @@ public sealed class IgniteWindow : IDisposable
             return;
         }
 
+        if (!preserveSelection)
+        {
+            ClearSelection();
+        }
+
         if (_focused is not null)
         {
             _focused.IsFocused = false;
@@ -2981,7 +3175,9 @@ public sealed class IgniteWindow : IDisposable
         {
             element.IsFocused = true;
             element.IsFocusVisible = visible;
-            _editText = GetAttribute(element, "value") ?? element.TextContent ?? string.Empty;
+            _editText = NormalizeEditText(
+                element,
+                GetAttribute(element, "value") ?? element.TextContent ?? string.Empty);
             _caretIndex = _editText.Length;
             ResetCaretBlink();
 
@@ -3075,6 +3271,11 @@ public sealed class IgniteWindow : IDisposable
             SetCursor(element.HasClass("dt-splitter-bottom")
                 ? StandardCursor.VResize
                 : StandardCursor.HResize);
+        }
+        else if (element is not null
+            && (IsTextControl(element) || HasSelectableText(element)))
+        {
+            SetCursor(StandardCursor.IBeam);
         }
         else
         {
