@@ -9,6 +9,30 @@ public sealed partial class LayoutEngine
     /// with a forced border-box width so text wraps inside the column instead of
     /// reflowing the rest of the row.
     /// </summary>
+    /// <param name="box">Table or inline-table box whose rows are laid out.</param>
+    /// <param name="content">Content box of the table in absolute coordinates.</param>
+    /// <param name="definiteContentHeight">
+    /// Definite content height passed to cell layout for percentage heights.
+    /// </param>
+    /// <returns>The total used row height in CSS pixels.</returns>
+    /// <remarks>
+    /// <para>
+    /// Column sizing is max-content based: the widest cell in each column wins.
+    /// A column with no measurable content gets ten percent of an equal share so
+    /// it stays visible. When the columns are narrower than the table the spare
+    /// width is divided equally; when they are wider they are scaled down
+    /// proportionally to fit. There is no per-cell explicit column width or
+    /// colspan handling.
+    /// </para>
+    /// <para>
+    /// Each row is laid out twice: once to discover its height and once with that
+    /// height forced on every cell, so borders and backgrounds cover the full
+    /// row. Row groups then receive a bounding box spanning their descendant
+    /// rows. Cells are positioned in document order and rows stack vertically
+    /// without margin collapsing. The algorithm allocates row and cell lists plus
+    /// a column-width array per table.
+    /// </para>
+    /// </remarks>
     private float LayoutTable(LayoutBox box, Rect content, float definiteContentHeight)
     {
         var rows = new List<LayoutBox>();
@@ -203,6 +227,14 @@ public sealed partial class LayoutEngine
         return usedHeight;
     }
 
+    /// <summary>Collects table rows in document order, descending through row groups.</summary>
+    /// <param name="box">Table, row group or wrapper box to search.</param>
+    /// <param name="rows">List that receives row boxes.</param>
+    /// <remarks>
+    /// Descends into row groups, block wrappers and <c>display:contents</c>
+    /// boxes. Rows inside table cells are not collected, so a nested table is
+    /// treated as cell content rather than as additional rows of the outer table.
+    /// </remarks>
     private static void CollectTableRows(LayoutBox box, List<LayoutBox> rows)
     {
         for (var i = 0; i < box.Children.Count; i++)
@@ -226,6 +258,14 @@ public sealed partial class LayoutEngine
         }
     }
 
+    /// <summary>Collects the cells of one row in document order.</summary>
+    /// <param name="row">Table row box to inspect.</param>
+    /// <param name="cells">List that receives cell boxes.</param>
+    /// <remarks>
+    /// A child counts as a cell when its computed display is
+    /// <c>table-cell</c> or its tag is <c>td</c>/<c>th</c>. The tag fallback
+    /// covers markup whose cell display was not resolved.
+    /// </remarks>
     private static void CollectTableCells(LayoutBox row, List<LayoutBox> cells)
     {
         for (var i = 0; i < row.Children.Count; i++)
@@ -240,6 +280,17 @@ public sealed partial class LayoutEngine
         }
     }
 
+    /// <summary>Tests whether a box is a descendant of another box.</summary>
+    /// <param name="box">Box whose ancestor chain is walked.</param>
+    /// <param name="ancestor">Candidate ancestor.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="ancestor"/> appears in the
+    /// parent chain of <paramref name="box"/>.
+    /// </returns>
+    /// <remarks>
+    /// Comparison is by reference and starts at the parent, so a box is not its
+    /// own descendant. The walk cost is proportional to the depth of the box.
+    /// </remarks>
     private static bool IsDescendantOf(LayoutBox box, LayoutBox ancestor)
     {
         for (var current = box.Parent; current is not null; current = current.Parent)

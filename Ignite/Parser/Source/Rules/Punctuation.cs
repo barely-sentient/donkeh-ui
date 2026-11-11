@@ -5,6 +5,15 @@ namespace Ignite.Parser
 {
     public static partial class Tokenizer
     {
+        /// <summary>
+        /// Registers the punctuation tokens that have a dedicated
+        /// <see cref="Objects.TokenKind"/>.
+        /// </summary>
+        /// <remarks>
+        /// The double colon is registered as one two-character rule so the
+        /// tokenizer can emit <see cref="Objects.TokenKind.PseudoElementColon"/>
+        /// without lookahead.
+        /// </remarks>
         private static void Punctuation()
         {
             // punctuation.

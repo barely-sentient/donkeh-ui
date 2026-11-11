@@ -3,28 +3,98 @@ using System.Globalization;
 namespace Ignite.LayoutLab;
 
 /// <summary>Packed ARGB colour helpers and CSS colour parsing.</summary>
+/// <remarks>
+/// <para>
+/// Colours are stored in a single <see cref="uint"/> as <c>0xAARRGGBB</c>:
+/// alpha in bits 24–31 and red, green and blue in bits 16–23, 8–15 and 0–7
+/// respectively. Channels are straight (non-premultiplied) sRGB bytes in the
+/// range 0–255.
+/// </para>
+/// <para>
+/// The type is stateless apart from the immutable named-colour table, so all
+/// members are thread safe.
+/// </para>
+/// </remarks>
+/// <seealso cref="CssColor.TryParse(string?, uint, out uint)"/>
 public static class CssColor
 {
+    /// <summary>Fully transparent black, <c>0x00000000</c>.</summary>
     public const uint Transparent = 0x00000000;
+
+    /// <summary>Opaque black, <c>0xFF000000</c>.</summary>
     public const uint Black = 0xFF000000;
+
+    /// <summary>Opaque white, <c>0xFFFFFFFF</c>.</summary>
     public const uint White = 0xFFFFFFFF;
 
+    /// <summary>Packs sRGB channels and alpha into a single ARGB value.</summary>
+    /// <param name="r">Red channel, 0–255.</param>
+    /// <param name="g">Green channel, 0–255.</param>
+    /// <param name="b">Blue channel, 0–255.</param>
+    /// <param name="a">Alpha channel, 0–255; defaults to 255 (opaque).</param>
+    /// <returns>The packed <c>0xAARRGGBB</c> value.</returns>
+    /// <remarks>
+    /// The parameters are bytes, so callers must clamp wider channel values
+    /// before calling.
+    /// </remarks>
     public static uint Pack(byte r, byte g, byte b, byte a = 255)
         => ((uint)a << 24) | ((uint)r << 16) | ((uint)g << 8) | b;
 
+    /// <summary>Extracts the alpha channel.</summary>
+    /// <param name="color">Packed ARGB colour.</param>
+    /// <returns>Alpha in the range 0–255, where 255 is opaque.</returns>
     public static byte Alpha(uint color) => (byte)(color >> 24);
+
+    /// <summary>Extracts the red channel.</summary>
+    /// <param name="color">Packed ARGB colour.</param>
+    /// <returns>Red in the range 0–255.</returns>
     public static byte Red(uint color) => (byte)(color >> 16);
+
+    /// <summary>Extracts the green channel.</summary>
+    /// <param name="color">Packed ARGB colour.</param>
+    /// <returns>Green in the range 0–255.</returns>
     public static byte Green(uint color) => (byte)(color >> 8);
+
+    /// <summary>Extracts the blue channel.</summary>
+    /// <param name="color">Packed ARGB colour.</param>
+    /// <returns>Blue in the range 0–255.</returns>
     public static byte Blue(uint color) => (byte)color;
 
+    /// <summary>Returns a copy of a colour with the alpha channel replaced.</summary>
+    /// <param name="color">Packed ARGB colour whose RGB channels are preserved.</param>
+    /// <param name="alpha">New alpha, 0–255.</param>
+    /// <returns>The repacked colour.</returns>
     public static uint WithAlpha(uint color, byte alpha) => (color & 0x00FFFFFFu) | ((uint)alpha << 24);
 
+    /// <summary>Multiplies a colour's alpha by a factor and clamps the result.</summary>
+    /// <param name="color">Packed ARGB colour; RGB channels are unchanged.</param>
+    /// <param name="factor">
+    /// Multiplier applied to the existing alpha. 0 clears the colour, 1 leaves
+    /// it unchanged.
+    /// </param>
+    /// <returns>The colour with its scaled, rounded alpha.</returns>
+    /// <remarks>
+    /// Used for opacity inheritance and group alpha. The result is rounded to
+    /// the nearest integer rather than truncated so repeated multiplication
+    /// does not drift towards transparent.
+    /// </remarks>
     public static uint MultiplyAlpha(uint color, float factor)
     {
         var alpha = (byte)Math.Clamp((int)MathF.Round(Alpha(color) * factor), 0, 255);
         return WithAlpha(color, alpha);
     }
 
+    /// <summary>Composites one colour over another using source-over alpha blending.</summary>
+    /// <param name="top">Foreground colour.</param>
+    /// <param name="bottom">Background colour.</param>
+    /// <returns>The resulting straight-alpha colour.</returns>
+    /// <remarks>
+    /// Implements the Porter–Duff source-over operator per sRGB channel:
+    /// <c>out = (top·αt + bottom·αb·(1−αt)) / αout</c>. The fast paths return
+    /// <paramref name="top"/> when it is opaque and <paramref name="bottom"/>
+    /// when it is fully transparent. Both fully transparent inputs produce
+    /// <see cref="Transparent"/>.
+    /// </remarks>
     public static uint Blend(uint top, uint bottom)
     {
         var topAlpha = Alpha(top) / 255f;
@@ -57,6 +127,51 @@ public static class CssColor
             (byte)Math.Clamp((int)MathF.Round(outAlpha * 255), 0, 255));
     }
 
+    /// <summary>Attempts to parse a CSS colour value.</summary>
+    /// <param name="value">
+    /// Colour text: a hex literal such as <c>#rgb</c>, <c>#rgba</c>, <c>#rrggbb</c>
+    /// or <c>#rrggbbaa</c>; an <c>rgb()</c>/<c>rgba()</c> or
+    /// <c>hsl()</c>/<c>hsla()</c> function; a named colour; or the keywords
+    /// <c>transparent</c> and <c>currentcolor</c>.
+    /// </param>
+    /// <param name="currentColor">
+    /// Colour substituted for <c>currentcolor</c>, normally the computed
+    /// value of the <c>color</c> property.
+    /// </param>
+    /// <param name="color">
+    /// Receives the packed ARGB colour on success, otherwise
+    /// <see cref="Transparent"/>.
+    /// </param>
+    /// <returns><see langword="true"/> when the value was recognised.</returns>
+    /// <remarks>
+    /// <para>
+    /// Parsing is trimmed and case-insensitive. Function arguments accept both
+    /// legacy comma syntax and modern space/slash syntax, and channel
+    /// percentages are scaled to 0–255.
+    /// </para>
+    /// <para>
+    /// <c>hsl()</c> accepts a <c>deg</c> suffix on the hue; a bare number is
+    /// treated as degrees, and the hue wraps modulo 360. Saturation and
+    /// lightness accept <c>%</c> or a bare number, both interpreted as
+    /// percentages. Hue interpolation is circular.
+    /// </para>
+    /// <para>
+    /// <c>transparent</c> succeeds and yields <see cref="Transparent"/>. This
+    /// method does not support <c>color()</c>, <c>lab()</c>, <c>lch()</c>,
+    /// <c>oklab()</c>, <c>oklch()</c> or relative colour syntax, and does not
+    /// resolve system colours. Allocations are limited to the argument split
+    /// for functional forms.
+    /// </para>
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// if (CssColor.TryParse("#ff8800", CssColor.Black, out var colour))
+    /// {
+    ///     // colour == 0xFFFF8800
+    /// }
+    /// </code>
+    /// </example>
+    /// <seealso cref="ParseOr(string?, uint, uint)"/>
     public static bool TryParse(string? value, uint currentColor, out uint color)
     {
         color = Transparent;
@@ -108,11 +223,35 @@ public static class CssColor
         return NamedColors.TryGetValue(text, out color);
     }
 
+    /// <summary>Parses a colour, returning a fallback when the value is invalid.</summary>
+    /// <param name="value">
+    /// Colour text in any form accepted by
+    /// <see cref="TryParse(string?, uint, out uint)"/>.
+    /// </param>
+    /// <param name="fallback">Colour to return when parsing fails.</param>
+    /// <param name="currentColor">
+    /// Colour substituted for <c>currentcolor</c>; defaults to
+    /// <see cref="Black"/>.
+    /// </param>
+    /// <returns>The parsed colour, or <paramref name="fallback"/>.</returns>
+    /// <remarks>
+    /// Convenience wrapper for declaration parsing, where an invalid colour
+    /// must not abort the rule.
+    /// </remarks>
     public static uint ParseOr(string? value, uint fallback, uint currentColor = Black)
     {
         return TryParse(value, currentColor, out var color) ? color : fallback;
     }
 
+    /// <summary>Parses the digits of a hex colour, without the leading <c>#</c>.</summary>
+    /// <param name="hex">Hex digits: 3, 4, 6 or 8 characters.</param>
+    /// <param name="color">Receives the packed colour on success.</param>
+    /// <returns><see langword="true"/> for a valid length with only hex digits.</returns>
+    /// <remarks>
+    /// Short forms expand each nibble by 17 (for example <c>#f00</c> becomes
+    /// <c>#ff0000</c>) and a missing alpha defaults to 255. Any other length,
+    /// or a non-hex character, fails the parse.
+    /// </remarks>
     private static bool TryParseHex(ReadOnlySpan<char> hex, out uint color)
     {
         color = Transparent;
@@ -169,6 +308,17 @@ public static class CssColor
         return false;
     }
 
+    /// <summary>Parses the argument list of <c>rgb()</c> or <c>rgba()</c>.</summary>
+    /// <param name="arguments">Text between the parentheses.</param>
+    /// <param name="color">Receives the packed colour on success.</param>
+    /// <returns><see langword="true"/> when at least three valid channels were found.</returns>
+    /// <remarks>
+    /// Commas, slashes and whitespace are all treated as separators, so legacy
+    /// and modern syntaxes are accepted interchangeably. Percentage channels
+    /// are scaled by 2.55; numeric channels are clamped to 0–255. The optional
+    /// fourth component is alpha. Extra components beyond the fourth are
+    /// ignored rather than rejected.
+    /// </remarks>
     private static bool TryParseRgb(string arguments, out uint color)
     {
         color = Transparent;
@@ -201,6 +351,18 @@ public static class CssColor
         return true;
     }
 
+    /// <summary>Parses the argument list of <c>hsl()</c> or <c>hsla()</c>.</summary>
+    /// <param name="arguments">Text between the parentheses.</param>
+    /// <param name="color">Receives the packed colour on success.</param>
+    /// <returns><see langword="true"/> when the hue, saturation and lightness were valid.</returns>
+    /// <remarks>
+    /// The hue may carry a <c>deg</c> suffix and wraps modulo 360. Saturation
+    /// and lightness are read as percentages (a trailing <c>%</c> is optional)
+    /// and clamped to 0–100. Conversion uses the standard HSL-to-RGB algorithm
+    /// with <c>q</c>/<c>p</c> helper values; the optional fourth component is
+    /// alpha. <c>rad</c>, <c>grad</c> and <c>turn</c> hue units are not
+    /// supported and fall back to the numeric prefix.
+    /// </remarks>
     private static bool TryParseHsl(string arguments, out uint color)
     {
         color = Transparent;
@@ -248,6 +410,11 @@ public static class CssColor
         return true;
     }
 
+    /// <summary>Converts one HSL hue offset to a normalised RGB channel.</summary>
+    /// <param name="p">The smaller intermediate lightness value.</param>
+    /// <param name="q">The larger intermediate lightness value.</param>
+    /// <param name="t">Hue offset in turns; wrapped into 0–1.</param>
+    /// <returns>A channel in the range 0–1.</returns>
     private static float HueToRgb(float p, float q, float t)
     {
         if (t < 0) t += 1;
@@ -258,6 +425,14 @@ public static class CssColor
         return p;
     }
 
+    /// <summary>Parses one <c>rgb()</c> channel, accepting a percentage or a number.</summary>
+    /// <param name="text">Channel text, optionally suffixed with <c>%</c>.</param>
+    /// <param name="value">Receives the channel in the range 0–255.</param>
+    /// <returns>Always <see langword="true"/>; invalid text is parsed as zero.</returns>
+    /// <remarks>
+    /// Percentages are multiplied by 2.55. The method is deliberately lenient
+    /// because the surrounding declaration is validated by the CSS parser.
+    /// </remarks>
     private static bool TryComponent(string text, out float value)
     {
         if (text.EndsWith('%'))
@@ -271,6 +446,11 @@ public static class CssColor
         return true;
     }
 
+    /// <summary>Parses an HSL saturation or lightness component.</summary>
+    /// <param name="text">Component text, optionally suffixed with <c>%</c>.</param>
+    /// <param name="value">Receives the percentage value, not normalised to 0–1.</param>
+    /// <returns>Always <see langword="true"/>; invalid text is parsed as zero.</returns>
+    /// <remarks>Clamping happens later in <see cref="TryParseHsl(string, out uint)"/>.</remarks>
     private static bool TryPercent(string text, out float value)
     {
         value = text.EndsWith('%')
@@ -280,6 +460,16 @@ public static class CssColor
         return true;
     }
 
+    /// <summary>Parses an alpha component into the 0–255 range.</summary>
+    /// <param name="text">Alpha text, optionally suffixed with <c>%</c>.</param>
+    /// <param name="alpha">Receives the alpha scaled to 0–255.</param>
+    /// <returns>Always <see langword="true"/>; invalid text is parsed as zero.</returns>
+    /// <remarks>
+    /// A bare number is treated as a 0-1 fraction and multiplied by 255; a
+    /// percentage is scaled by 2.55. Invalid text falls back to an opaque
+    /// alpha because <see cref="CssValueParser.ParseNumber(string?, float)"/> is
+    /// called with a fallback of 1.
+    /// </remarks>
     private static bool TryAlpha(string text, out float alpha)
     {
         alpha = text.EndsWith('%')
@@ -290,6 +480,18 @@ public static class CssColor
         return true;
     }
 
+    /// <summary>
+    /// The CSS named colours, keyed by lower-case name and compared without
+    /// case sensitivity.
+    /// </summary>
+    /// <remarks>
+    /// Values are fully opaque <c>0xAARRGGBB</c> literals. The table is
+    /// initialised once and never mutated, so concurrent reads are safe. It
+    /// contains the CSS Color Level 4 named colours, including
+    /// <c>rebeccapurple</c>; <c>transparent</c> and <c>currentcolor</c> are
+    /// handled separately by <see cref="TryParse(string?, uint, out uint)"/>
+    /// before the lookup.
+    /// </remarks>
     private static readonly Dictionary<string, uint> NamedColors = new(StringComparer.OrdinalIgnoreCase)
     {
         ["aliceblue"] = 0xFFF0F8FF,

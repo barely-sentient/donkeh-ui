@@ -5,11 +5,44 @@ namespace Ignite.LayoutLab;
 public sealed partial class LayoutEngine
 {
     /// <summary>
-    /// A single-line flex layout with wrapping, grow/shrink, gap, justify and
+    /// A flex layout with optional wrapping, grow/shrink, gap, justify and
     /// cross-axis alignment. The implementation follows the CSS order of
     /// operations closely enough that common toolbars, cards and sidebars lay out
     /// as authored without a second pass over the DOM.
     /// </summary>
+    /// <param name="box">Flex container whose items are laid out.</param>
+    /// <param name="content">Content box of the container in absolute coordinates.</param>
+    /// <param name="definiteContentHeight">
+    /// Definite content height for column containers, or <see langword="null"/>
+    /// when the height is content-based.
+    /// </param>
+    /// <returns>
+    /// The used main size for a column container, or the total cross size of the
+    /// flex lines for a row container.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// Items are collected through <c>display:contents</c> and sorted by
+    /// <c>order</c>. The method resolves base sizes, breaks items into lines when
+    /// wrapping is enabled, distributes positive free space by
+    /// <c>flex-grow</c> and negative free space by scaled
+    /// <c>flex-shrink</c>, then measures the cross size of each line.
+    /// </para>
+    /// <para>
+    /// Automatic minimum sizes use the item's measured max-content size as a
+    /// floor for non-scroll items. Shrink clamping can leave a line overflowing,
+    /// so up to four extra passes remove the remaining overflow from items that
+    /// still have room above their floor. A single line fills a definite cross
+    /// size; multiple lines share extra space when
+    /// <c>align-content:stretch</c> applies.
+    /// </para>
+    /// <para>
+    /// Placement honours auto margins before <c>justify-content</c>, reverses the
+    /// main axis for <c>row-reverse</c>/<c>column-reverse</c>, and stretches items
+    /// whose cross size is auto and whose effective alignment is
+    /// <c>stretch</c>. Scratch arrays come from <see cref="ArrayPool{T}"/>.
+    /// </para>
+    /// </remarks>
     private float LayoutFlex(LayoutBox box, Rect content, float? definiteContentHeight)
     {
         var style = box.Style;
@@ -575,6 +608,16 @@ public sealed partial class LayoutEngine
         }
     }
 
+    /// <summary>Moves an already-laid-out flex item to its final position.</summary>
+    /// <param name="item">Measured item whose geometry is final apart from its origin.</param>
+    /// <param name="borderX">Final absolute x coordinate of the border box.</param>
+    /// <param name="borderY">Final absolute y coordinate of the border box.</param>
+    /// <remarks>
+    /// Translating the measured subtree preserves its internal layout. The
+    /// border box is then reapplied at the destination so derived boxes reflect
+    /// any auto margins changed during placement. This avoids a second recursive
+    /// layout for items whose cross size did not change.
+    /// </remarks>
     private static void MoveMeasuredItem(LayoutBox item, float borderX, float borderY)
     {
         var dx = borderX - item.BorderBox.X;
@@ -591,6 +634,18 @@ public sealed partial class LayoutEngine
         item.ApplyBorderBox(borderX, borderY, item.BorderBox.Width, item.BorderBox.Height);
     }
 
+    /// <summary>Collects the boxes that participate in a flex or grid formatting context.</summary>
+    /// <param name="box">Container whose children are collected.</param>
+    /// <returns>
+    /// A pooled list owned by the engine. It is valid until the next collection at
+    /// the same nesting depth or until <see cref="ReleaseFlowChildren"/> is called.
+    /// </returns>
+    /// <remarks>
+    /// Out-of-flow and <c>display:none</c> children are skipped.
+    /// <c>display:contents</c> boxes contribute their children instead of
+    /// themselves, which makes framework fragments direct flex/grid items. The
+    /// caller must release the list in a <c>finally</c> block.
+    /// </remarks>
     private List<LayoutBox> CollectFlowChildren(LayoutBox box)
     {
         if (_flowItemDepth == _flowItemLists.Count)
@@ -628,6 +683,12 @@ public sealed partial class LayoutEngine
         }
     }
 
+    /// <summary>Releases the current nesting level of <see cref="_flowItemLists"/>.</summary>
+    /// <remarks>
+    /// Must be paired with <see cref="CollectFlowChildren"/> in a <c>finally</c>
+    /// block. The list itself is retained and reused; only the depth counter is
+    /// decremented.
+    /// </remarks>
     private void ReleaseFlowChildren()
     {
         if (_flowItemDepth > 0)
@@ -636,6 +697,24 @@ public sealed partial class LayoutEngine
         }
     }
 
+    /// <summary>
+    /// Resolves an item's flex base size from <c>flex-basis</c> or its main size.
+    /// </summary>
+    /// <param name="item">Flex item being sized.</param>
+    /// <param name="row">
+    /// <see langword="true"/> for a row axis, <see langword="false"/> for a column.
+    /// </param>
+    /// <param name="cbWidth">Containing-block width for percentages and measurement.</param>
+    /// <param name="cbHeight">Containing-block height for percentages.</param>
+    /// <param name="context">Length context with the item's font metrics.</param>
+    /// <returns>The clamped flex base size in CSS pixels.</returns>
+    /// <remarks>
+    /// A non-auto <c>flex-basis</c> wins; intrinsic keywords use max-content
+    /// measurement and other values resolve against the main-axis containing-block
+    /// size. Without a basis the main size (<c>width</c> or <c>height</c>) applies,
+    /// and an auto size falls back to max-content. Content-box values gain padding
+    /// and border before <see cref="ClampFlexBaseSize"/> applies min/max constraints.
+    /// </remarks>
     private float ResolveFlexBase(
         LayoutBox item,
         bool row,
@@ -684,6 +763,18 @@ public sealed partial class LayoutEngine
         return ClampFlexBaseSize(item, row, cbWidth, cbHeight, in context, measured);
     }
 
+    /// <summary>Clamps a flex base size to the item's min and max main size.</summary>
+    /// <param name="item">Flex item whose constraints apply.</param>
+    /// <param name="row">Whether the main axis is horizontal.</param>
+    /// <param name="cbWidth">Containing-block width for the horizontal clamp.</param>
+    /// <param name="cbHeight">Containing-block height for the vertical clamp.</param>
+    /// <param name="context">Length context with the item's font metrics.</param>
+    /// <param name="value">Base size to clamp, in CSS pixels.</param>
+    /// <returns>The clamped base size, never negative.</returns>
+    /// <remarks>
+    /// Row clamping reuses <see cref="ClampBorderWidth"/>; column clamping
+    /// converts content-box min and max heights to border-box units.
+    /// </remarks>
     private float ClampFlexBaseSize(
         LayoutBox item,
         bool row,
@@ -718,6 +809,25 @@ public sealed partial class LayoutEngine
         return MathF.Max(0, MathF.Max(min, MathF.Min(value, max)));
     }
 
+    /// <summary>Computes a box's max-content border-box height for flex and table sizing.</summary>
+    /// <param name="box">Box to measure.</param>
+    /// <param name="cbWidth">
+    /// Containing-block width for text shaping and percentages.
+    /// </param>
+    /// <returns>Max-content height including padding and border, in CSS pixels.</returns>
+    /// <remarks>
+    /// <para>
+    /// A definite style height short-circuits measurement. Otherwise the result
+    /// starts with the box's own text height and adds child contributions:
+    /// a wrapping row sums its flex lines, a non-wrapping row or table row uses
+    /// its tallest child, and a block or column container stacks children with
+    /// the main-axis gap.
+    /// </para>
+    /// <para>
+    /// Children with a definite flex basis or width occupy that width for line
+    /// breaking. Out-of-flow and <c>display:contents</c> children are skipped.
+    /// </para>
+    /// </remarks>
     private float MeasureMaxContentHeight(LayoutBox box, float cbWidth)
     {
         var style = box.Style;
@@ -866,6 +976,13 @@ public sealed partial class LayoutEngine
         return content + padding.Vertical + border.Vertical;
     }
 
+    /// <summary>Resolves an item's effective cross-axis alignment.</summary>
+    /// <param name="item">Flex item's style, whose <c>align-self</c> is inspected.</param>
+    /// <param name="container">Container style providing the fallback <c>align-items</c>.</param>
+    /// <returns>
+    /// The mapped alignment; <c>auto</c> inherits the container's value and an
+    /// unknown value falls back to <see cref="AlignItems.Stretch"/>.
+    /// </returns>
     private static AlignItems EffectiveAlignSelf(ComputedStyle item, ComputedStyle container)
     {
         return item.AlignSelf switch
@@ -884,11 +1001,24 @@ public sealed partial class LayoutEngine
         };
     }
 
+    /// <summary>Returns whether an item's cross-axis size is <c>auto</c>.</summary>
+    /// <param name="style">Item style to inspect.</param>
+    /// <param name="row">Whether the main axis is horizontal, making height the cross axis.</param>
+    /// <returns><see langword="true"/> when the relevant cross size is auto.</returns>
     private static bool IsCrossSizeAuto(ComputedStyle style, bool row)
     {
         return row ? style.Height.IsAuto : style.Width.IsAuto;
     }
 
+    /// <summary>Converts cross-axis alignment into an offset inside free space.</summary>
+    /// <param name="align">Effective alignment of the item.</param>
+    /// <param name="free">Unused cross-axis space for the item.</param>
+    /// <returns>The offset from the line's cross start, in CSS pixels.</returns>
+    /// <remarks>
+    /// Negative free space is ignored because an overflowing item starts at the
+    /// line start. Flex-end maps to the full free space, center to half, and every
+    /// other value (including baseline) to zero.
+    /// </remarks>
     private static float AlignOffset(AlignItems align, float free)
     {
         if (free <= 0)
@@ -904,6 +1034,20 @@ public sealed partial class LayoutEngine
         };
     }
 
+    /// <summary>
+    /// Resolves <c>justify-content</c> into a start offset and item spacing.
+    /// </summary>
+    /// <param name="justify">Justification mode.</param>
+    /// <param name="free">Unused main-axis space for the line.</param>
+    /// <param name="count">Number of items on the line.</param>
+    /// <param name="start">Receives the offset before the first item.</param>
+    /// <param name="between">Receives the extra spacing inserted between adjacent items.</param>
+    /// <remarks>
+    /// Non-positive free space yields zero for both outputs. <c>space-between</c>
+    /// puts all space between items when there are at least two, <c>space-around</c>
+    /// gives each item half a share on both sides, and <c>space-evenly</c> gives
+    /// equal space to the leading edge, gaps and trailing edge.
+    /// </remarks>
     private static void ComputeJustify(
         JustifyContent justify,
         float free,
@@ -954,6 +1098,11 @@ public sealed partial class LayoutEngine
         }
     }
 
+    /// <summary>Resolves a row or column gap length to a non-negative pixel value.</summary>
+    /// <param name="gap">Gap length from the style.</param>
+    /// <param name="context">Length context with the element's font metrics.</param>
+    /// <param name="basis">Percentage basis for the gap.</param>
+    /// <returns>The resolved gap, or zero for auto or negative values.</returns>
     private static float ResolveGap(CssLength gap, in LengthContext context, float basis)
     {
         return MathF.Max(0, gap.ResolveOr(in context, basis, 0));
@@ -964,18 +1113,49 @@ public sealed partial class LayoutEngine
     /// bookkeeping on the stack; the arrays themselves come from the shared
     /// pool and are returned by <see cref="Dispose"/>.
     /// </summary>
+    /// <remarks>
+    /// Every array is cleared on construction so an earlier borrower cannot leak
+    /// values into this layout. <see cref="LineStarts"/> is one element longer
+    /// than the item count to hold the sentinel end index; the other line arrays
+    /// are sized for the maximum possible line count.
+    /// </remarks>
     private ref struct FlexScratch
     {
+        /// <summary>Flex base size of each item, before free-space distribution.</summary>
         public float[] Bases;
+
+        /// <summary>Resolved main size of each item after grow or shrink.</summary>
         public float[] Mains;
+
+        /// <summary>Automatic minimum main size of each item, used as a shrink floor.</summary>
         public float[] MinMains;
+
+        /// <summary>Outer main-axis margin of each item.</summary>
         public float[] MainMargins;
+
+        /// <summary>Cross size measured for each item.</summary>
         public float[] CrossSizes;
+
+        /// <summary>Cross size of each flex line, indexed by line number.</summary>
         public float[] LineCross;
+
+        /// <summary>Cross-axis start offset of each flex line.</summary>
         public float[] LineCrossStart;
+
+        /// <summary>Line index for each item.</summary>
         public int[] LineOf;
+
+        /// <summary>
+        /// Start index of each flex line. The entry after the last line holds the
+        /// item count as a sentinel.
+        /// </summary>
         public int[] LineStarts;
 
+        /// <summary>
+        /// Rents and clears the scratch arrays for a container with
+        /// <paramref name="count"/> items.
+        /// </summary>
+        /// <param name="count">Number of flex items in the container.</param>
         public FlexScratch(int count)
         {
             Bases = ArrayPool<float>.Shared.Rent(count);
@@ -999,6 +1179,11 @@ public sealed partial class LayoutEngine
             LineStarts[0] = 0;
         }
 
+        /// <summary>Returns every rented array to <see cref="ArrayPool{T}.Shared"/>.</summary>
+        /// <remarks>
+        /// Invoked by the <c>using</c> declaration in <see cref="LayoutFlex"/>,
+        /// including when layout exits through an exception.
+        /// </remarks>
         public void Dispose()
         {
             ArrayPool<float>.Shared.Return(Bases);

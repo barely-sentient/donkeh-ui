@@ -4,6 +4,14 @@ namespace Ignite.Parser
 {
     public static partial class Tokenizer
     {
+        /// <summary>
+        /// Registers the supported CSS pseudo-class names.
+        /// </summary>
+        /// <remarks>
+        /// Each name is registered through
+        /// <see cref="Builder.RuleBuilder.CssPseudoClass"/>, which prepends the
+        /// leading colon. Names are matched case-sensitively.
+        /// </remarks>
         private static void PseudoClasses()
         {
             CssPseudoClass("active-view-transition");

@@ -4,6 +4,14 @@ namespace Ignite.Parser
 {
     public static partial class Tokenizer
     {
+        /// <summary>
+        /// Registers the supported CSS pseudo-element names.
+        /// </summary>
+        /// <remarks>
+        /// Each name is registered through
+        /// <see cref="Builder.RuleBuilder.CssPseudoElement"/>, which prepends the
+        /// leading double colon. Names are matched case-sensitively.
+        /// </remarks>
         private static void PseudoElements()
         {
             CssPseudoElement("after");

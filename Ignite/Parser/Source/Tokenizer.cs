@@ -13,6 +13,22 @@ namespace Ignite.Parser
         /// Compiled exact-rule matcher built during type initialisation.
         /// Returns the underlying <see cref="TokenKind"/> value, or -1 on no match.
         /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Assigned by the static constructor in <c>Rules/Rules.cs</c> after all
+        /// exact rules have been registered. The field is mutable only so that
+        /// initialisation can populate it; it must not be reassigned afterwards.
+        /// The <see langword="null"/>-forgiving initializer merely keeps the
+        /// compiler quiet until the type initializer runs.
+        /// </para>
+        /// <para>
+        /// The matcher dispatches on the first character of the supplied span
+        /// and then performs exact length and content comparisons. It does not
+        /// trim, normalise or case-fold its input and returns -1 for an empty
+        /// span or an unknown first character.
+        /// </para>
+        /// </remarks>
+        /// <seealso cref="MinLengthByFirstChar"/>
         public static Func<ReadOnlySpan<char>, int> ExactMatch = null!;
 
         /// <summary>
@@ -21,8 +37,20 @@ namespace Ignite.Parser
         /// skip the (relatively expensive) compiled matcher on the very common
         /// single-letter identifiers.
         /// </summary>
+        /// <remarks>
+        /// Indexed by UTF-16 code unit (0 to <see cref="char.MaxValue"/>). An
+        /// entry of <see cref="int.MaxValue"/> means that no exact rule starts
+        /// with that character. The array is populated once, by the static
+        /// constructor, and is read-only thereafter even though its elements
+        /// are not deeply immutable.
+        /// </remarks>
+        /// <seealso cref="ExactMatch"/>
         public static readonly int[] MinLengthByFirstChar = new int[char.MaxValue + 1];
 
+        /// <summary>
+        /// Largest source length the packed <see cref="Token.Location"/> layout
+        /// can address: the start index occupies 24 bits.
+        /// </summary>
         private const int MaxSourceLength = 0x00FFFFFF; // Token.StartIndex is 24 bits.
 
         /// <summary>
@@ -30,6 +58,28 @@ namespace Ignite.Parser
         /// Whitespace and comments are skipped, but every token keeps its original
         /// start and end index so callers can recover the exact source text.
         /// </summary>
+        /// <param name="source">The CSS text to tokenize.</param>
+        /// <returns>
+        /// A new list containing one <see cref="Token"/> per lexical token, in
+        /// source order. The list is never <see langword="null"/> but may be empty.
+        /// </returns>
+        /// <exception cref="ArgumentNullException">
+        /// Thrown when <paramref name="source"/> is <see langword="null"/>.
+        /// </exception>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// Thrown when <paramref name="source"/> is longer than 16,777,215
+        /// characters, which the packed token layout cannot address.
+        /// </exception>
+        /// <example>
+        /// <code>
+        /// var tokens = Tokenizer.Parse("a { color: red; }");
+        /// foreach (var token in tokens)
+        /// {
+        ///     var text = InternTable.GetString(token.InternedId);
+        ///     Console.WriteLine($"{token.Kind}: {text}");
+        /// }
+        /// </code>
+        /// </example>
         public static List<Token> Parse(string source)
         {
             ArgumentNullException.ThrowIfNull(source);
@@ -39,6 +89,19 @@ namespace Ignite.Parser
         /// <summary>
         /// Tokenizes <paramref name="source"/> and returns the tokens in source order.
         /// </summary>
+        /// <param name="source">The CSS text to tokenize.</param>
+        /// <returns>
+        /// A new list containing one <see cref="Token"/> per lexical token, in
+        /// source order. The list is never <see langword="null"/> but may be empty.
+        /// </returns>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// Thrown when <paramref name="source"/> is longer than 16,777,215
+        /// characters, which the packed token layout cannot address.
+        /// </exception>
+        /// <remarks>
+        /// The returned list is pre-sized from the source length to avoid
+        /// repeated reallocation while tokenizing.
+        /// </remarks>
         public static List<Token> Parse(ReadOnlySpan<char> source)
         {
             EnsureSourceFitsInToken(source.Length);
@@ -53,6 +116,19 @@ namespace Ignite.Parser
         /// <paramref name="tokens"/>. The list is not cleared first, so it can be
         /// reused across calls to avoid allocating a new token buffer.
         /// </summary>
+        /// <param name="source">The CSS text to tokenize.</param>
+        /// <param name="tokens">
+        /// The destination list. Existing elements are preserved and new tokens
+        /// are appended after them. The caller owns the list and should clear it
+        /// between unrelated documents.
+        /// </param>
+        /// <exception cref="ArgumentNullException">
+        /// Thrown when <paramref name="tokens"/> is <see langword="null"/>.
+        /// </exception>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// Thrown when <paramref name="source"/> is longer than 16,777,215
+        /// characters, which the packed token layout cannot address.
+        /// </exception>
         public static void Parse(ReadOnlySpan<char> source, List<Token> tokens)
         {
             ArgumentNullException.ThrowIfNull(tokens);
@@ -63,8 +139,22 @@ namespace Ignite.Parser
         /// <summary>
         /// Tokenizes the whole span without materialising a token list, consuming
         /// the span, and returns the number of tokens found. This is the
-        /// allocation-free path used to measure raw tokenizer throughput.
+        /// list-free path used to measure raw tokenizer throughput.
         /// </summary>
+        /// <param name="span">
+        /// The CSS text to tokenize. It is reset to <see langword="default"/>
+        /// before the method returns, leaving an empty span.
+        /// </param>
+        /// <returns>The number of tokens that were recognized.</returns>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// Thrown when <paramref name="span"/> is longer than 16,777,215
+        /// characters, which the packed token layout cannot address.
+        /// </exception>
+        /// <remarks>
+        /// Tokens are still interned through <see cref="InternTable"/>, so this
+        /// path avoids the token list but not the interning cost. It is intended
+        /// for benchmarks and for callers that only need a token count.
+        /// </remarks>
         public static int Parse(ref ReadOnlySpan<char> span)
         {
             EnsureSourceFitsInToken(span.Length);
@@ -83,6 +173,24 @@ namespace Ignite.Parser
             return Math.Max(16, sourceLength / 2 + 16);
         }
 
+        /// <summary>
+        /// Runs the lexer over <paramref name="source"/>, optionally writing
+        /// tokens into <paramref name="tokens"/>.
+        /// </summary>
+        /// <param name="source">The CSS text to tokenize.</param>
+        /// <param name="tokens">
+        /// Destination list, or <see langword="null"/> to count tokens without
+        /// storing them. When supplied, the list's count is temporarily grown to
+        /// reserve capacity and then trimmed to the exact number of tokens added.
+        /// </param>
+        /// <returns>The number of tokens recognized.</returns>
+        /// <remarks>
+        /// The list is written through a <see cref="Span{T}"/> obtained from
+        /// <see cref="CollectionsMarshal.AsSpan{T}(List{T})"/>; this avoids
+        /// <see cref="List{T}.Add"/> on the hot path but requires the count to be
+        /// restored before returning. Existing elements are never overwritten:
+        /// the write window starts at the list's original count.
+        /// </remarks>
         private static int ParseCore(ReadOnlySpan<char> source, List<Token>? tokens)
         {
             // When a list is supplied, reserve the whole estimated token buffer
@@ -322,6 +430,22 @@ namespace Ignite.Parser
             return i + 2 < source.Length && source[i + 1] == '.' && IsDigit(source[i + 2]);
         }
 
+        /// <summary>
+        /// Classifies a scanned number as a percentage, a dimension or a plain
+        /// number and emits the corresponding token.
+        /// </summary>
+        /// <param name="source">The full source text.</param>
+        /// <param name="start">Index of the first character of the number.</param>
+        /// <param name="i">Index one past the numeric part.</param>
+        /// <param name="buffer">Destination token buffer.</param>
+        /// <param name="count">Running token count; incremented by the emit.</param>
+        /// <returns>Index one past the emitted token's text.</returns>
+        /// <remarks>
+        /// A trailing <c>%</c> produces <see cref="TokenKind.Percentage"/> and an
+        /// immediately following name start produces
+        /// <see cref="TokenKind.Dimension"/>; anything else is a
+        /// <see cref="TokenKind.Number"/>.
+        /// </remarks>
         private static int EmitNumeric(
             ReadOnlySpan<char> source,
             int start,
@@ -347,6 +471,23 @@ namespace Ignite.Parser
             return i;
         }
 
+        /// <summary>
+        /// Determines the token kind for a scanned identifier, consulting the
+        /// compiled exact-rule matcher.
+        /// </summary>
+        /// <param name="source">The full source text.</param>
+        /// <param name="start">Index of the identifier's first character.</param>
+        /// <param name="end">Index one past the identifier's last character.</param>
+        /// <returns>
+        /// <see cref="TokenKind.Function"/> when the name is immediately followed
+        /// by <c>'('</c>; otherwise the registered kind, or
+        /// <see cref="TokenKind.Identifier"/> when no rule matches.
+        /// </returns>
+        /// <remarks>
+        /// The matcher is skipped when the candidate is shorter than the smallest
+        /// registered rule with the same first character, which makes the common
+        /// single-character identifier case cheap.
+        /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static TokenKind ClassifyName(ReadOnlySpan<char> source, int start, int end)
         {
@@ -373,6 +514,28 @@ namespace Ignite.Parser
             return (TokenKind)kind;
         }
 
+        /// <summary>
+        /// Scans a colon-prefixed pseudo-class or pseudo-element, emitting either
+        /// a combined token or a standalone colon token.
+        /// </summary>
+        /// <param name="source">The full source text.</param>
+        /// <param name="i">Index of the first <c>':'</c>.</param>
+        /// <param name="buffer">Destination token buffer.</param>
+        /// <param name="count">Running token count; incremented by each emit.</param>
+        /// <returns>Index one past the characters consumed.</returns>
+        /// <remarks>
+        /// <para>
+        /// A known <c>:name</c> produces <see cref="TokenKind.PseudoClass"/>
+        /// covering the whole construct. A known <c>::name</c> produces
+        /// <see cref="TokenKind.PseudoElement"/>.
+        /// </para>
+        /// <para>
+        /// When the name is unknown the method emits only
+        /// <see cref="TokenKind.Colon"/> or
+        /// <see cref="TokenKind.PseudoElementColon"/> and leaves the identifier
+        /// for the main lexer loop. A lone <c>::</c> is treated the same way.
+        /// </para>
+        /// </remarks>
         private static int ScanPseudo(ReadOnlySpan<char> source, int i, Span<Token> buffer, ref int count)
         {
             var start = i;
@@ -426,6 +589,22 @@ namespace Ignite.Parser
             return start + 1;
         }
 
+        /// <summary>
+        /// Emits one logical token, splitting text longer than 255 characters
+        /// into consecutive chunks that share the same token kind.
+        /// </summary>
+        /// <param name="source">The full source text.</param>
+        /// <param name="buffer">Destination token buffer.</param>
+        /// <param name="kind">The kind assigned to every chunk.</param>
+        /// <param name="start">Index of the token's first character.</param>
+        /// <param name="end">Index one past the token's last character.</param>
+        /// <param name="count">Running token count; incremented once per chunk.</param>
+        /// <remarks>
+        /// The packed <see cref="Token"/> layout stores the length in a single
+        /// byte, so a 255+ character literal cannot be represented in one token.
+        /// Chunking keeps the original text recoverable by concatenating the
+        /// chunk text in order.
+        /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void Emit(
             ReadOnlySpan<char> source,
@@ -457,6 +636,26 @@ namespace Ignite.Parser
             }
         }
 
+        /// <summary>
+        /// Writes a single chunk of at most 255 characters to the buffer and
+        /// advances <paramref name="count"/>.
+        /// </summary>
+        /// <param name="source">The full source text.</param>
+        /// <param name="buffer">Destination token buffer.</param>
+        /// <param name="kind">The token kind to assign.</param>
+        /// <param name="start">Index of the chunk's first character.</param>
+        /// <param name="end">Index one past the chunk's last character.</param>
+        /// <param name="count">
+        /// Running token count. It is incremented even when the buffer is full, so
+        /// the caller can detect overflow and grow the buffer; no token is written
+        /// in that case.
+        /// </param>
+        /// <remarks>
+        /// The packed location is built directly here rather than through
+        /// <see cref="Token.StartIndex"/> and <see cref="Token.EndIndex"/>, which
+        /// would each unpack and repack the field. The token's text is interned
+        /// through <see cref="InternTable.Intern(ReadOnlySpan{char})"/>.
+        /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void EmitOne(
             ReadOnlySpan<char> source,
@@ -487,6 +686,17 @@ namespace Ignite.Parser
             count++;
         }
 
+        /// <summary>
+        /// Skips a <c>/* ... */</c> comment and returns the index one past its
+        /// closing delimiter.
+        /// </summary>
+        /// <param name="source">The full source text.</param>
+        /// <param name="i">Index of the opening <c>'/'</c>.</param>
+        /// <returns>
+        /// Index one past <c>*&#47;</c>, or the source length when the comment is
+        /// unterminated.
+        /// </returns>
+        /// <remarks>Comments are never emitted as tokens.</remarks>
         private static int SkipComment(ReadOnlySpan<char> source, int i)
         {
             i += 2;
@@ -505,6 +715,20 @@ namespace Ignite.Parser
             return length;
         }
 
+        /// <summary>
+        /// Scans a single- or double-quoted CSS string, honouring backslash
+        /// escapes.
+        /// </summary>
+        /// <param name="source">The full source text.</param>
+        /// <param name="i">Index of the opening quote.</param>
+        /// <returns>
+        /// Index one past the closing quote, or the index of the terminating
+        /// newline when the string is malformed and unterminated on its line.
+        /// </returns>
+        /// <remarks>
+        /// An unescaped newline, carriage return or form feed ends a malformed
+        /// string; the offending character is not consumed.
+        /// </remarks>
         private static int ScanString(ReadOnlySpan<char> source, int i)
         {
             var quote = source[i];
@@ -538,6 +762,17 @@ namespace Ignite.Parser
             return i;
         }
 
+        /// <summary>
+        /// Scans a CSS identifier, consuming name characters and escapes.
+        /// </summary>
+        /// <param name="source">The full source text.</param>
+        /// <param name="i">Index of the first character to inspect.</param>
+        /// <returns>Index one past the last character of the identifier.</returns>
+        /// <remarks>
+        /// The scan stops at the first character that is neither a name
+        /// character nor the start of an escape. It does not validate that the
+        /// first character is a legal name start.
+        /// </remarks>
         private static int ScanName(ReadOnlySpan<char> source, int i)
         {
             var length = source.Length;
@@ -568,6 +803,17 @@ namespace Ignite.Parser
         /// Consumes a CSS escape sequence. <paramref name="i"/> points at the
         /// backslash; the returned index is one past the escape.
         /// </summary>
+        /// <param name="source">The full source text.</param>
+        /// <param name="i">Index of the backslash.</param>
+        /// <returns>
+        /// Index one past the escape. At most six hexadecimal digits and one
+        /// optional trailing whitespace character are consumed.
+        /// </returns>
+        /// <remarks>
+        /// An escaped newline is a line continuation and consumes both the
+        /// backslash and the newline (including a full <c>CRLF</c> pair). A
+        /// trailing backslash at the end of the source consumes only itself.
+        /// </remarks>
         private static int ScanEscape(ReadOnlySpan<char> source, int i)
         {
             i++;
@@ -610,6 +856,18 @@ namespace Ignite.Parser
             return i;
         }
 
+        /// <summary>
+        /// Scans the numeric part of a CSS number: an optional sign, digits, an
+        /// optional fractional part and an optional exponent.
+        /// </summary>
+        /// <param name="source">The full source text.</param>
+        /// <param name="i">Index of the first character of the number.</param>
+        /// <returns>Index one past the last numeric character.</returns>
+        /// <remarks>
+        /// A decimal point is only consumed when followed by a digit, and an
+        /// exponent is only consumed when it is followed by an optional sign and
+        /// at least one digit.
+        /// </remarks>
         private static int ScanNumber(ReadOnlySpan<char> source, int i)
         {
             var length = source.Length;
@@ -654,6 +912,15 @@ namespace Ignite.Parser
             return i;
         }
 
+        /// <summary>
+        /// Determines whether a number can start at <paramref name="i"/>.
+        /// </summary>
+        /// <param name="source">The full source text.</param>
+        /// <param name="i">Index of the candidate first character.</param>
+        /// <returns>
+        /// <see langword="true"/> for a digit, for <c>'.'</c> followed by a
+        /// digit, or for a sign followed by a digit or <c>".digit"</c>.
+        /// </returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static bool IsNumberStart(ReadOnlySpan<char> source, int i)
         {
@@ -682,18 +949,41 @@ namespace Ignite.Parser
             return false;
         }
 
+        /// <summary>
+        /// Tests for the CSS whitespace characters: space, tab, line feed,
+        /// carriage return and form feed.
+        /// </summary>
+        /// <param name="c">The character to test.</param>
+        /// <returns><see langword="true"/> when <paramref name="c"/> is whitespace.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static bool IsWhitespace(char c)
         {
             return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
         }
 
+        /// <summary>
+        /// Tests whether <paramref name="c"/> is an ASCII decimal digit.
+        /// </summary>
+        /// <param name="c">The character to test.</param>
+        /// <returns><see langword="true"/> for <c>'0'</c> through <c>'9'</c>.</returns>
+        /// <remarks>
+        /// The subtraction trick gives a single unsigned comparison and is the
+        /// reason this is aggressively inlined.
+        /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static bool IsDigit(char c)
         {
             return (uint)(c - '0') < 10;
         }
 
+        /// <summary>
+        /// Tests whether <paramref name="c"/> is an ASCII hexadecimal digit.
+        /// </summary>
+        /// <param name="c">The character to test.</param>
+        /// <returns>
+        /// <see langword="true"/> for <c>0</c>–<c>9</c>, <c>a</c>–<c>f</c> and
+        /// <c>A</c>–<c>F</c>.
+        /// </returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static bool IsHex(char c)
         {
@@ -702,6 +992,20 @@ namespace Ignite.Parser
                 || (uint)(c - 'A') < 6;
         }
 
+        /// <summary>
+        /// Tests whether <paramref name="c"/> can start a CSS identifier.
+        /// </summary>
+        /// <param name="c">The character to test.</param>
+        /// <returns>
+        /// <see langword="true"/> for ASCII letters, <c>'_'</c>, <c>'-'</c>,
+        /// non-ASCII characters (<c>&gt;= 0x80</c>) and the backslash escape
+        /// introducer.
+        /// </returns>
+        /// <remarks>
+        /// The CSS specification also allows two hyphens or an escape to start a
+        /// name; this predicate is deliberately permissive and lets the scanner
+        /// resolve those cases.
+        /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static bool IsNameStart(char c)
         {
@@ -713,6 +1017,18 @@ namespace Ignite.Parser
                 || c == '\\';
         }
 
+        /// <summary>
+        /// Tests whether <paramref name="c"/> can appear inside a CSS identifier.
+        /// </summary>
+        /// <param name="c">The character to test.</param>
+        /// <returns>
+        /// <see langword="true"/> for ASCII letters, digits, <c>'_'</c>,
+        /// <c>'-'</c> and non-ASCII characters (<c>&gt;= 0x80</c>).
+        /// </returns>
+        /// <remarks>
+        /// Escapes are handled separately by <see cref="ScanName"/>, so a
+        /// backslash is intentionally not a name character here.
+        /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static bool IsNameChar(char c)
         {
@@ -726,6 +1042,15 @@ namespace Ignite.Parser
                 || c >= 0x80;
         }
 
+        /// <summary>
+        /// Validates that a source length can be addressed by the 24-bit start
+        /// index stored in <see cref="Token.Location"/>.
+        /// </summary>
+        /// <param name="length">The source length in UTF-16 code units.</param>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// Thrown when <paramref name="length"/> exceeds
+        /// <see cref="MaxSourceLength"/>.
+        /// </exception>
         private static void EnsureSourceFitsInToken(int length)
         {
             if (length > MaxSourceLength)

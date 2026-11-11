@@ -1,9 +1,28 @@
 ﻿namespace Ignite.Parser.Objects
 {
+    /// <summary>
+    /// Identifies the lexical category of a <see cref="Token"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The underlying numeric values are assigned implicitly from declaration
+    /// order, starting at zero. They are embedded in compiled IL by
+    /// <see cref="Compilation.Compiler"/> and stored in
+    /// <see cref="Token.Kind"/>, so reordering or inserting members changes the
+    /// values produced by the tokenizer.
+    /// </para>
+    /// <para>
+    /// Several kinds mirror CSS syntax tokens (<see cref="Function"/>,
+    /// <see cref="Hash"/>, <see cref="Dimension"/>); others are Ignite-specific
+    /// helpers such as <see cref="PropertyName"/> and
+    /// <see cref="PseudoElementColon"/>.
+    /// </para>
+    /// </remarks>
+    /// <seealso cref="Token"/>
     public enum TokenKind
     {
         /// <summary>
-        /// A property name 'color', 'text-align' etc...
+        /// A known CSS property name, e.g. <c>color</c> or <c>text-align</c>.
         /// </summary>
         PropertyName,
         
@@ -11,61 +30,77 @@
         #region Punctuation
         
         /// <summary>
-        /// the ':' character
+        /// The <c>':'</c> character when it does not begin a recognized pseudo
+        /// selector.
         /// </summary>
         Colon, 
         
         /// <summary>
-        /// the ';' character
+        /// The <c>';'</c> character.
         /// </summary>
         SemiColon,
         
         /// <summary>
-        /// the '(' character
+        /// The <c>'('</c> character.
         /// </summary>
         LeftParenthesis,
         
         /// <summary>
-        /// the ')' character
+        /// The <c>')'</c> character.
         /// </summary>
         RightParenthesis,
         
         /// <summary>
-        /// the '{' character
+        /// The <c>'{'</c> character.
         /// </summary>
         LeftCurlyBrace,
         
         /// <summary>
-        /// the '}' character
+        /// The <c>'}'</c> character.
         /// </summary>
         RightCurlyBrace,
         
         /// <summary>
-        /// the '[' character
+        /// The <c>'['</c> character.
         /// </summary>
         LeftSquareBracket,
         
         /// <summary>
-        /// the ']' character
+        /// The <c>']'</c> character.
         /// </summary>
         RightSquareBracket,
         
         /// <summary>
-        /// the '>' character
+        /// The <c>'>'</c> child combinator.
         /// </summary>
         DirectChildBracket,
         
         #endregion
         #region Special functionality
-            
+
+        /// <summary>
+        /// A complete pseudo-class including its leading colon, e.g. <c>:hover</c>.
+        /// </summary>
         PseudoClass,
-        
+
+        /// <summary>
+        /// A complete pseudo-element including its leading double colon, e.g.
+        /// <c>::before</c>.
+        /// </summary>
         PseudoElement,
-        
+
+        /// <summary>
+        /// A function name, emitted only when the identifier is immediately
+        /// followed by <c>'('</c>, e.g. <c>calc</c>.
+        /// </summary>
         Function,
-        
+
+        /// <summary>
+        /// The <c>::</c> pair on its own, used when the following pseudo-element
+        /// name is not recognized.
+        /// </summary>
         PseudoElementColon,
-        
+
         #endregion
         #region Values
         

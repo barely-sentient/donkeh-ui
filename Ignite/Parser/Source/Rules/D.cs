@@ -5,7 +5,7 @@ namespace Ignite.Parser
     public static partial class Tokenizer
     {
         /// <summary>
-        /// All CSS properties beginning with 'd'
+        /// Registers CSS property names beginning with 'd'.
         /// </summary>
         private static void PropertiesD()
         {

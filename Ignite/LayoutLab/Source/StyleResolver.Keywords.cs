@@ -2,8 +2,32 @@ namespace Ignite.LayoutLab;
 
 public sealed partial class StyleResolver
 {
+    /// <summary>
+    /// The CSS initial values for every property, used as the source for
+    /// <c>initial</c> and non-inherited <c>unset</c>.
+    /// </summary>
+    /// <remarks>
+    /// A single shared instance is enough because it is only ever read from. It
+    /// must never be mutated: doing so would change the initial value for every
+    /// subsequent resolution in the process. <c>all</c> uses a fresh
+    /// <see cref="ComputedStyle"/> instead because it also resets bookkeeping
+    /// fields.
+    /// </remarks>
     private static readonly ComputedStyle DefaultStyle = new();
 
+    /// <summary>
+    /// Recognises the CSS-wide keywords.
+    /// </summary>
+    /// <param name="value">The cleaned declaration value.</param>
+    /// <param name="keyword">
+    /// Receives the lower-case keyword on success, or an empty string otherwise.
+    /// </param>
+    /// <returns><see langword="true"/> for a CSS-wide keyword.</returns>
+    /// <remarks>
+    /// The set is <c>inherit</c>, <c>initial</c>, <c>unset</c>, <c>revert</c>
+    /// and <c>revert-layer</c>. Matching is case-insensitive and ignores
+    /// surrounding whitespace.
+    /// </remarks>
     private static bool TryGetWideKeyword(string value, out string keyword)
     {
         var text = value.Trim();
@@ -22,6 +46,31 @@ public sealed partial class StyleResolver
         return false;
     }
 
+    /// <summary>
+    /// Applies the <c>all</c> property, which resets every non-custom property at
+    /// once.
+    /// </summary>
+    /// <param name="style">The style to reset in place.</param>
+    /// <param name="parent">The parent style, or <see langword="null"/> at the root.</param>
+    /// <param name="keyword">The CSS-wide keyword from the <c>all</c> declaration.</param>
+    /// <remarks>
+    /// <para>
+    /// <c>inherit</c> copies the parent wholesale, including properties that are
+    /// normally non-inherited. <c>initial</c> leaves a fresh initial style.
+    /// <c>unset</c>, <c>revert</c> and <c>revert-layer</c> copy only inherited
+    /// properties and leave the rest initial.
+    /// </para>
+    /// <para>
+    /// The element's own custom properties and its
+    /// <see cref="ComputedStyle.StyleParent"/> link are saved and restored after
+    /// the copy: CSS's <c>all</c> does not reset custom properties, and dropping
+    /// the link would break <c>var()</c> lookup for descendants.
+    /// </para>
+    /// <para>
+    /// There is one origin in this engine, so <c>revert</c> has nothing to roll
+    /// back to and is treated as <c>unset</c>.
+    /// </para>
+    /// </remarks>
     private void ApplyAll(ComputedStyle style, ComputedStyle? parent, string keyword)
     {
         var custom = style.CustomProperties;
@@ -48,6 +97,19 @@ public sealed partial class StyleResolver
         style.StyleParent = styleParent;
     }
 
+    /// <summary>
+    /// Applies a CSS-wide keyword to a single property.
+    /// </summary>
+    /// <param name="style">The style being updated.</param>
+    /// <param name="parent">The parent style, or <see langword="null"/> at the root.</param>
+    /// <param name="property">The property named by the declaration.</param>
+    /// <param name="keyword">The lower-case keyword.</param>
+    /// <remarks>
+    /// <c>inherit</c> copies from the parent. <c>initial</c> copies from
+    /// <see cref="DefaultStyle"/>. <c>unset</c> chooses between the two based on
+    /// <see cref="IsInheritedProperty"/>. <c>revert</c> and <c>revert-layer</c>
+    /// behave like <c>unset</c> because this engine models a single origin.
+    /// </remarks>
     private void ApplyWideKeyword(
         ComputedStyle style,
         ComputedStyle? parent,
@@ -81,6 +143,18 @@ public sealed partial class StyleResolver
         }
     }
 
+    /// <summary>
+    /// Determines whether a property inherits by default.
+    /// </summary>
+    /// <param name="property">The property to test.</param>
+    /// <returns><see langword="true"/> for inherited properties.</returns>
+    /// <remarks>
+    /// This table mirrors the engine's scalar inheritance rules in
+    /// <see cref="ComputedStyle"/>; the two must stay in sync. Properties not
+    /// listed here are treated as non-inherited, which is the CSS default. Note
+    /// that <c>visibility</c> and <c>cursor</c> are inherited while
+    /// <c>display</c> is not.
+    /// </remarks>
     private static bool IsInheritedProperty(CssProperty property)
     {
         return property is CssProperty.Color
@@ -104,6 +178,28 @@ public sealed partial class StyleResolver
             or CssProperty.ObjectFit;
     }
 
+    /// <summary>
+    /// Copies one property, or all sub-properties of a shorthand, from a source
+    /// style.
+    /// </summary>
+    /// <param name="dest">The style to update.</param>
+    /// <param name="source">
+    /// The style to read; typically the parent or <see cref="DefaultStyle"/>.
+    /// </param>
+    /// <param name="property">The property named by the declaration.</param>
+    /// <remarks>
+    /// <para>
+    /// The switch mirrors the property handling in
+    /// <see cref="ApplyDeclaration"/>: a shorthand case copies every field the
+    /// shorthand would set, while a longhand case copies only its field. This is
+    /// what makes <c>margin-top: inherit</c> affect only the top edge while
+    /// <c>margin: inherit</c> copies all four.
+    /// </para>
+    /// <para>
+    /// Properties with no case are silently ignored. This method is only used
+    /// for CSS-wide keywords; ordinary values never go through it.
+    /// </para>
+    /// </remarks>
     private static void CopyProperty(ComputedStyle dest, ComputedStyle source, CssProperty property)
     {
         switch (property)
@@ -333,6 +429,16 @@ public sealed partial class StyleResolver
         }
     }
 
+    /// <summary>
+    /// Copies the width, style and colour of one border side.
+    /// </summary>
+    /// <param name="dest">The style to update.</param>
+    /// <param name="source">The style to read.</param>
+    /// <param name="side">0 = top, 1 = right, 2 = bottom, 3 = left.</param>
+    /// <remarks>
+    /// Out-of-range sides are ignored. Used by the <c>border-&lt;side&gt;</c>
+    /// cases of <see cref="CopyProperty"/>.
+    /// </remarks>
     private static void CopyBorderSide(ComputedStyle dest, ComputedStyle source, int side)
     {
         switch (side)
@@ -360,6 +466,20 @@ public sealed partial class StyleResolver
         }
     }
 
+    /// <summary>
+    /// Parses a <c>display</c> value, including the two-keyword forms.
+    /// </summary>
+    /// <param name="value">The declaration value.</param>
+    /// <returns>The matching <see cref="Display"/>; <see cref="Display.Block"/>
+    /// for anything unrecognised.</returns>
+    /// <remarks>
+    /// Matching is case-insensitive and uses ordered substring checks because
+    /// multi-keyword values such as <c>inline flex</c> are supported. The order
+    /// matters: <c>inline-block</c> is tested before <c>inline</c>, and
+    /// <c>table-row-group</c> before <c>table-row</c>. A value containing
+    /// <c>table</c> but no more specific table keyword becomes
+    /// <see cref="Display.Table"/>.
+    /// </remarks>
     private static Display ParseDisplay(string value)
     {
         var text = value.Trim().ToLowerInvariant();
@@ -389,6 +509,12 @@ public sealed partial class StyleResolver
         return Display.Block;
     }
 
+    /// <summary>
+    /// Parses a <c>position</c> keyword.
+    /// </summary>
+    /// <param name="value">The declaration value.</param>
+    /// <returns>The matching <see cref="Position"/>; <see cref="Position.Static"/>
+    /// for <c>static</c> or anything unrecognised.</returns>
     private static Position ParsePosition(string value)
     {
         var text = value.Trim().ToLowerInvariant();
@@ -403,6 +529,15 @@ public sealed partial class StyleResolver
         };
     }
 
+    /// <summary>
+    /// Parses a <c>text-align</c> keyword.
+    /// </summary>
+    /// <param name="value">The declaration value.</param>
+    /// <returns>
+    /// The matching <see cref="TextAlign"/>; <see cref="TextAlign.Start"/> as the
+    /// initial value for <c>start</c> and unrecognised input. <c>justify-all</c>
+    /// is not supported and also becomes <see cref="TextAlign.Start"/>.
+    /// </returns>
     private static TextAlign ParseTextAlign(string value)
     {
         return value.Trim().ToLowerInvariant() switch
@@ -417,6 +552,22 @@ public sealed partial class StyleResolver
         };
     }
 
+    /// <summary>
+    /// Parses the line keywords of <c>text-decoration</c> into flags.
+    /// </summary>
+    /// <param name="value">The declaration value, possibly multi-keyword.</param>
+    /// <returns>
+    /// A combination of <see cref="TextDecoration.Underline"/>,
+    /// <see cref="TextDecoration.Overline"/>,
+    /// <see cref="TextDecoration.LineThrough"/> and
+    /// <see cref="TextDecoration.Blink"/>; <see cref="TextDecoration.None"/> when
+    /// none are present.
+    /// </returns>
+    /// <remarks>
+    /// Matching is substring-based, so <c>line-through</c> is found in the same
+    /// value as a colour or style token. <c>none</c> is not special-cased; it
+    /// simply matches nothing.
+    /// </remarks>
     private static TextDecoration ParseTextDecoration(string value)
     {
         var text = value.ToLowerInvariant();
@@ -429,6 +580,14 @@ public sealed partial class StyleResolver
         return decoration;
     }
 
+    /// <summary>
+    /// Parses a <c>white-space</c> keyword.
+    /// </summary>
+    /// <param name="value">The declaration value.</param>
+    /// <returns>
+    /// The matching <see cref="WhiteSpace"/>; <see cref="WhiteSpace.Normal"/> for
+    /// <c>normal</c> and unrecognised input.
+    /// </returns>
     private static WhiteSpace ParseWhiteSpace(string value)
     {
         return value.Trim().ToLowerInvariant() switch
@@ -442,6 +601,14 @@ public sealed partial class StyleResolver
         };
     }
 
+    /// <summary>
+    /// Parses a <c>flex-direction</c> keyword.
+    /// </summary>
+    /// <param name="value">The declaration value.</param>
+    /// <returns>
+    /// The matching <see cref="FlexDirection"/>; <see cref="FlexDirection.Row"/>
+    /// for <c>row</c> and unrecognised input.
+    /// </returns>
     private static FlexDirection ParseFlexDirection(string value)
     {
         return value.Trim().ToLowerInvariant() switch
@@ -453,6 +620,14 @@ public sealed partial class StyleResolver
         };
     }
 
+    /// <summary>
+    /// Parses a <c>flex-wrap</c> keyword.
+    /// </summary>
+    /// <param name="value">The declaration value.</param>
+    /// <returns>
+    /// The matching <see cref="FlexWrap"/>; <see cref="FlexWrap.NoWrap"/> for
+    /// <c>nowrap</c> and unrecognised input.
+    /// </returns>
     private static FlexWrap ParseFlexWrap(string value)
     {
         return value.Trim().ToLowerInvariant() switch
@@ -463,6 +638,15 @@ public sealed partial class StyleResolver
         };
     }
 
+    /// <summary>
+    /// Parses a <c>justify-content</c> keyword.
+    /// </summary>
+    /// <param name="value">The declaration value.</param>
+    /// <returns>
+    /// The matching <see cref="JustifyContent"/>;
+    /// <see cref="JustifyContent.FlexStart"/> as the initial value for
+    /// <c>flex-start</c> and unrecognised input.
+    /// </returns>
     private static JustifyContent ParseJustifyContent(string value)
     {
         return value.Trim().ToLowerInvariant() switch
@@ -481,6 +665,14 @@ public sealed partial class StyleResolver
         };
     }
 
+    /// <summary>
+    /// Parses an <c>align-items</c> keyword.
+    /// </summary>
+    /// <param name="value">The declaration value.</param>
+    /// <returns>
+    /// The matching <see cref="AlignItems"/>; <see cref="AlignItems.Stretch"/> as
+    /// the initial value for <c>stretch</c> and unrecognised input.
+    /// </returns>
     private static AlignItems ParseAlignItems(string value)
     {
         return value.Trim().ToLowerInvariant() switch
@@ -497,6 +689,14 @@ public sealed partial class StyleResolver
         };
     }
 
+    /// <summary>
+    /// Parses an <c>align-content</c> keyword.
+    /// </summary>
+    /// <param name="value">The declaration value.</param>
+    /// <returns>
+    /// The matching <see cref="AlignContent"/>; <see cref="AlignContent.Stretch"/>
+    /// as the initial value for <c>stretch</c> and unrecognised input.
+    /// </returns>
     private static AlignContent ParseAlignContent(string value)
     {
         return value.Trim().ToLowerInvariant() switch
@@ -513,6 +713,14 @@ public sealed partial class StyleResolver
         };
     }
 
+    /// <summary>
+    /// Parses an <c>align-self</c> keyword.
+    /// </summary>
+    /// <param name="value">The declaration value.</param>
+    /// <returns>
+    /// The matching <see cref="AlignSelf"/>; <see cref="AlignSelf.Auto"/> for
+    /// <c>auto</c> and unrecognised input.
+    /// </returns>
     private static AlignSelf ParseAlignSelf(string value)
     {
         var text = value.Trim().ToLowerInvariant();
@@ -532,6 +740,14 @@ public sealed partial class StyleResolver
         };
     }
 
+    /// <summary>
+    /// Parses a <c>justify-items</c> keyword.
+    /// </summary>
+    /// <param name="value">The declaration value.</param>
+    /// <returns>
+    /// The matching <see cref="JustifyItems"/>; <see cref="JustifyItems.Normal"/>
+    /// for <c>normal</c> and unrecognised input.
+    /// </returns>
     private static JustifyItems ParseJustifyItems(string value)
     {
         return value.Trim().ToLowerInvariant() switch
@@ -548,6 +764,14 @@ public sealed partial class StyleResolver
         };
     }
 
+    /// <summary>
+    /// Parses a <c>justify-self</c> keyword.
+    /// </summary>
+    /// <param name="value">The declaration value.</param>
+    /// <returns>
+    /// The matching <see cref="JustifySelf"/>; <see cref="JustifySelf.Auto"/> for
+    /// <c>auto</c> and unrecognised input.
+    /// </returns>
     private static JustifySelf ParseJustifySelf(string value)
     {
         return value.Trim().ToLowerInvariant() switch
@@ -565,6 +789,15 @@ public sealed partial class StyleResolver
         };
     }
 
+    /// <summary>
+    /// Parses one <c>overflow</c> component.
+    /// </summary>
+    /// <param name="value">The declaration or component value.</param>
+    /// <returns>
+    /// The matching <see cref="Overflow"/>; <see cref="Overflow.Visible"/> for
+    /// <c>visible</c> and unrecognised input. The legacy <c>overlay</c> keyword
+    /// maps to <see cref="Overflow.Auto"/>.
+    /// </returns>
     private static Overflow ParseOverflow(string value)
     {
         return value.Trim().ToLowerInvariant() switch
@@ -578,6 +811,15 @@ public sealed partial class StyleResolver
         };
     }
 
+    /// <summary>
+    /// Parses a <c>background-repeat</c> keyword.
+    /// </summary>
+    /// <param name="value">The declaration value.</param>
+    /// <returns>
+    /// The matching <see cref="BackgroundRepeat"/>; <see cref="BackgroundRepeat.Repeat"/>
+    /// for <c>repeat</c> and unrecognised input. The two-axis
+    /// <c>repeat no-repeat</c> form is not represented.
+    /// </returns>
     private static BackgroundRepeat ParseBackgroundRepeat(string value)
     {
         return value.Trim().ToLowerInvariant() switch
@@ -591,6 +833,15 @@ public sealed partial class StyleResolver
         };
     }
 
+    /// <summary>
+    /// Parses a background clipping/origin box keyword.
+    /// </summary>
+    /// <param name="value">The declaration value.</param>
+    /// <returns>
+    /// The matching <see cref="BackgroundBox"/>; <see cref="BackgroundBox.BorderBox"/>
+    /// for <c>border-box</c> and unrecognised input. <c>text</c> is supported for
+    /// clipped text backgrounds.
+    /// </returns>
     private static BackgroundBox ParseBackgroundBox(string value)
     {
         return value.Trim().ToLowerInvariant() switch
@@ -602,6 +853,14 @@ public sealed partial class StyleResolver
         };
     }
 
+    /// <summary>
+    /// Parses an <c>object-fit</c> keyword.
+    /// </summary>
+    /// <param name="value">The declaration value.</param>
+    /// <returns>
+    /// The matching <see cref="ObjectFit"/>; <see cref="ObjectFit.Fill"/> as the
+    /// initial value for <c>fill</c> and unrecognised input.
+    /// </returns>
     private static ObjectFit ParseObjectFit(string value)
     {
         return value.Trim().ToLowerInvariant() switch
@@ -614,6 +873,18 @@ public sealed partial class StyleResolver
         };
     }
 
+    /// <summary>
+    /// Parses a <c>grid-auto-flow</c> value into flags.
+    /// </summary>
+    /// <param name="value">The declaration value, such as <c>row dense</c>.</param>
+    /// <returns>
+    /// <see cref="GridAutoFlow.Row"/> or <see cref="GridAutoFlow.Column"/>, plus
+    /// <see cref="GridAutoFlow.Dense"/> when requested.
+    /// </returns>
+    /// <remarks>
+    /// Substring matching makes <c>column</c> and <c>dense</c> order-independent.
+    /// The default is <c>row</c> when neither axis keyword is present.
+    /// </remarks>
     private static GridAutoFlow ParseGridAutoFlow(string value)
     {
         var text = value.ToLowerInvariant();
@@ -627,6 +898,14 @@ public sealed partial class StyleResolver
         return flow;
     }
 
+    /// <summary>
+    /// Parses a <c>mix-blend-mode</c> keyword.
+    /// </summary>
+    /// <param name="value">The declaration value.</param>
+    /// <returns>
+    /// The matching <see cref="MixBlendMode"/>; <see cref="MixBlendMode.Normal"/>
+    /// for <c>normal</c> and unrecognised input.
+    /// </returns>
     private static MixBlendMode ParseMixBlendMode(string value)
     {
         return value.Trim().ToLowerInvariant() switch
@@ -651,6 +930,18 @@ public sealed partial class StyleResolver
         };
     }
 
+    /// <summary>
+    /// Extracts the line number from a grid line value, ignoring a leading
+    /// <c>span</c>.
+    /// </summary>
+    /// <param name="value">The line value.</param>
+    /// <returns>The parsed integer, or 0 when no integer is present.</returns>
+    /// <remarks>
+    /// This helper is currently unused by the cascade. It does not distinguish
+    /// a bare <c>span 2</c> from a line number 2; callers that need that
+    /// distinction use <see cref="ParseSpanCount"/> and
+    /// <see cref="ApplyGridLine"/> instead.
+    /// </remarks>
     private static int ParseLineNumber(string value)
     {
         var text = value.Trim();
@@ -663,7 +954,18 @@ public sealed partial class StyleResolver
         return int.TryParse(text, out var line) ? line : 0;
     }
 
-    /// <summary>Returns N for <c>span N</c>, or 0 when the value is not a span.</summary>
+    /// <summary>
+    /// Returns N for <c>span N</c>, or 0 when the value is not a span.
+    /// </summary>
+    /// <param name="value">The grid line value.</param>
+    /// <returns>
+    /// A positive span count clamped to 1024, or 0 for a non-span or a
+    /// non-positive/invalid count.
+    /// </returns>
+    /// <remarks>
+    /// The clamp bounds the work a hostile stylesheet can request from the grid
+    /// layout pass.
+    /// </remarks>
     private static int ParseSpanCount(string value)
     {
         var text = value.Trim();
@@ -683,6 +985,21 @@ public sealed partial class StyleResolver
     /// belongs to the side it is declared on, so overriding that side clears
     /// the span while overriding the opposite side keeps it.
     /// </summary>
+    /// <param name="current">The placement accumulated from weaker declarations.</param>
+    /// <param name="value">
+    /// The longhand value: a line number, a name, <c>auto</c> or <c>span N</c>.
+    /// </param>
+    /// <param name="isStart">
+    /// <see langword="true"/> for <c>*-start</c>; <see langword="false"/> for
+    /// <c>*-end</c>.
+    /// </param>
+    /// <returns>The updated placement.</returns>
+    /// <remarks>
+    /// A span sets the owning side to auto and records
+    /// <see cref="GridPlacement.SpanCount"/> plus which side owns it. Later
+    /// longhand values on the opposite side preserve that span; values on the
+    /// same side clear it. A defined line clears the corresponding name.
+    /// </remarks>
     private static GridPlacement ApplyGridLine(GridPlacement current, string value, bool isStart)
     {
         var span = ParseSpanCount(value);
@@ -775,6 +1092,19 @@ public sealed partial class StyleResolver
             };
     }
 
+    /// <summary>
+    /// Parses a <c>font-weight</c> value.
+    /// </summary>
+    /// <param name="value">A keyword or numeric weight.</param>
+    /// <returns>
+    /// 400 for <c>normal</c>, 700 for <c>bold</c> and <c>bolder</c>, 300 for
+    /// <c>lighter</c>, or the numeric value clamped to 1-1000. Unparsable text
+    /// becomes 400.
+    /// </returns>
+    /// <remarks>
+    /// <c>bolder</c> and <c>lighter</c> use fixed weights rather than being
+    /// relative to the parent, so nested bolding does not progressively increase.
+    /// </remarks>
     private static int ParseFontWeight(string value)
     {
         var text = value.Trim().ToLowerInvariant();
@@ -789,6 +1119,19 @@ public sealed partial class StyleResolver
         };
     }
 
+    /// <summary>
+    /// Parses a <c>line-height</c> value.
+    /// </summary>
+    /// <param name="value">A keyword, number or length.</param>
+    /// <returns>
+    /// 1.2 for <c>normal</c>; a <see cref="LengthUnit.Number"/> for a unitless
+    /// value (multiplied by font size at use time); otherwise the parsed length.
+    /// </returns>
+    /// <remarks>
+    /// Keeping a unitless value as a number preserves CSS's inheritance rule:
+    /// descendants multiply their own font size rather than inheriting a
+    /// precomputed pixel value.
+    /// </remarks>
     private static CssLength ParseLineHeight(string value)
     {
         if (value.Equals("normal", StringComparison.OrdinalIgnoreCase))
@@ -806,6 +1149,17 @@ public sealed partial class StyleResolver
         return CssValueParser.ParseLength(value);
     }
 
+    /// <summary>
+    /// Recognises one <c>border-style</c> keyword.
+    /// </summary>
+    /// <param name="value">The keyword to test.</param>
+    /// <param name="style">Receives the matching style, or
+    /// <see cref="BorderStyle.None"/> on failure.</param>
+    /// <returns><see langword="true"/> when the keyword is recognised.</returns>
+    /// <remarks>
+    /// Matching is case-insensitive and covers all CSS border styles plus
+    /// <c>hidden</c>.
+    /// </remarks>
     private static bool TryParseBorderStyle(string value, out BorderStyle style)
     {
         switch (value.Trim().ToLowerInvariant())
@@ -824,11 +1178,28 @@ public sealed partial class StyleResolver
         }
     }
 
+    /// <summary>
+    /// Parses one <c>border-style</c> keyword, defaulting to
+    /// <see cref="BorderStyle.None"/>.
+    /// </summary>
+    /// <param name="value">The keyword to parse.</param>
+    /// <returns>The matching style, or <see cref="BorderStyle.None"/>.</returns>
     private static BorderStyle ParseBorderStyle(string value)
     {
         return TryParseBorderStyle(value, out var style) ? style : BorderStyle.None;
     }
 
+    /// <summary>
+    /// Parses the one-to-four keyword form of <c>border-style</c>.
+    /// </summary>
+    /// <param name="value">The declaration value.</param>
+    /// <returns>Top, right, bottom and left styles.</returns>
+    /// <remarks>
+    /// Expansion follows CSS: one value sets all sides, two set
+    /// vertical/horizontal, three set top/horizontal/bottom, and four set
+    /// top/right/bottom/left. Unrecognised keywords become
+    /// <see cref="BorderStyle.None"/>, which also makes that side invisible.
+    /// </remarks>
     private static BorderStyle4 ParseBorderStyles(string value)
     {
         var parts = CssValueParser.SplitTopLevel(value, ' ');
@@ -863,6 +1234,26 @@ public sealed partial class StyleResolver
         return new BorderStyle4(At(0), At(1), At(2), At(3));
     }
 
+    /// <summary>
+    /// Applies <c>font-size</c>, resolving keyword and relative sizes.
+    /// </summary>
+    /// <param name="style">The style being updated.</param>
+    /// <param name="parent">The parent style, or <see langword="null"/> at the root.</param>
+    /// <param name="valueId">The interned value id, used by the length cache.</param>
+    /// <param name="value">The cleaned, variable-substituted value.</param>
+    /// <remarks>
+    /// <para>
+    /// Absolute keywords use fixed CSS pixel sizes: <c>medium</c> 16,
+    /// <c>small</c> 13, <c>x-small</c> 10, <c>xx-small</c> 9, <c>large</c> 18,
+    /// <c>x-large</c> 24 and <c>xx-large</c> 32. <c>smaller</c> and
+    /// <c>larger</c> multiply the parent font size by 0.8 and 1.2.
+    /// </para>
+    /// <para>
+    /// With no parent, <see cref="LayoutOptions.DefaultFontSize"/> is the basis.
+    /// The stored value is always absolute pixels; negative results are clamped
+    /// to zero.
+    /// </para>
+    /// </remarks>
     private void ApplyFontSize(
         ComputedStyle style,
         ComputedStyle? parent,
@@ -917,6 +1308,25 @@ public sealed partial class StyleResolver
         style.FontSize = CssLength.Px(Math.Max(0, pixels));
     }
 
+    /// <summary>
+    /// Resolves a font-size length against the parent font size and stores it in
+    /// pixels.
+    /// </summary>
+    /// <param name="style">The style being updated.</param>
+    /// <param name="parent">The parent style, or <see langword="null"/> at the root.</param>
+    /// <param name="length">The length from <c>font-size</c> or the <c>font</c> shorthand.</param>
+    /// <remarks>
+    /// <para>
+    /// A percentage resolves against the parent font size, while <c>em</c>
+    /// resolves against <see cref="LengthContext.FontSize"/>, which is also set
+    /// to the parent font size. This makes <c>font-size: 150%</c> and
+    /// <c>font-size: 1.5em</c> equivalent.
+    /// </para>
+    /// <para>
+    /// The <c>rem</c> basis still comes from <see cref="_baseContext"/>, so it
+    /// refers to the root font size rather than the parent.
+    /// </para>
+    /// </remarks>
     private void ApplyFontSizeLength(ComputedStyle style, ComputedStyle? parent, CssLength length)
     {
         var parentFont = parent is null
@@ -933,6 +1343,28 @@ public sealed partial class StyleResolver
         style.FontSize = CssLength.Px(Math.Max(0, pixels));
     }
 
+    /// <summary>
+    /// Applies the <c>font</c> shorthand.
+    /// </summary>
+    /// <param name="style">The style being updated.</param>
+    /// <param name="parent">The parent style, used to resolve relative sizes.</param>
+    /// <param name="value">The cleaned, variable-substituted shorthand.</param>
+    /// <remarks>
+    /// <para>
+    /// Tokens before the size set <c>font-style</c> (<c>italic</c>/<c>oblique</c>)
+    /// and <c>font-weight</c> (<c>bold</c>/<c>bolder</c>); <c>normal</c> is
+    /// ignored. The first token that parses as a non-auto length is the size, and
+    /// a <c>/line-height</c> suffix on that token is parsed too. The remaining
+    /// tokens, including quoted family names, are joined as <c>font-family</c>;
+    /// surrounding quotes are removed only when the whole joined string is
+    /// quoted.
+    /// </para>
+    /// <para>
+    /// Weight, italic and line height are always assigned, even when no size was
+    /// found. This means an invalid shorthand still resets those longhands, and
+    /// it does not inherit the parent's values.
+    /// </para>
+    /// </remarks>
     private void ApplyFontShorthand(
         ComputedStyle style,
         ComputedStyle? parent,
@@ -1012,6 +1444,25 @@ public sealed partial class StyleResolver
         }
     }
 
+    /// <summary>
+    /// Applies the <c>flex</c> shorthand.
+    /// </summary>
+    /// <param name="style">The style being updated.</param>
+    /// <param name="value">The cleaned, variable-substituted shorthand.</param>
+    /// <remarks>
+    /// <para>
+    /// <c>none</c> becomes <c>0 0 auto</c>; <c>auto</c> becomes
+    /// <c>1 1 auto</c>. Otherwise the first one or two unitless numbers are grow
+    /// and shrink, and the remaining token is the basis.
+    /// </para>
+    /// <para>
+    /// A single number implies a shrink factor of 1. When numbers are present but
+    /// no basis token is, the basis is set to zero, matching the CSS
+    /// <c>flex: &lt;number&gt;</c> form; this deliberately prevents
+    /// <c>flex: 1</c> from keeping an auto basis that would collapse sibling
+    /// scroll areas.
+    /// </para>
+    /// </remarks>
     private static void ApplyFlexShorthand(ComputedStyle style, string value)
     {
         var text = value.Trim();
@@ -1075,6 +1526,16 @@ public sealed partial class StyleResolver
         }
     }
 
+    /// <summary>
+    /// Applies the <c>grid</c> / <c>grid-template</c> shorthand.
+    /// </summary>
+    /// <param name="style">The style being updated.</param>
+    /// <param name="value">The cleaned, variable-substituted shorthand.</param>
+    /// <remarks>
+    /// Splits at the top-level slash: the first part is the column template and
+    /// the second is the row template. Extra parts, such as an area declaration,
+    /// are ignored. A missing row template leaves the previous rows untouched.
+    /// </remarks>
     private static void ApplyGridTemplate(ComputedStyle style, string value)
     {
         var parts = CssValueParser.SplitTopLevel(value, '/');
@@ -1090,6 +1551,26 @@ public sealed partial class StyleResolver
         }
     }
 
+    /// <summary>
+    /// Applies the <c>background</c> shorthand.
+    /// </summary>
+    /// <param name="style">The style being updated.</param>
+    /// <param name="value">The cleaned, variable-substituted shorthand.</param>
+    /// <remarks>
+    /// <para>
+    /// Every background longhand is first reset to its initial value, as CSS
+    /// requires of a shorthand. Tokens are then classified into image layers
+    /// (<c>url()</c>/gradients), a colour, and a remainder interpreted as repeat,
+    /// clip, attachment, size, or position.
+    /// </para>
+    /// <para>
+    /// Only the last colour is kept and all image tokens are joined into one
+    /// comma-separated image list, so per-layer colours and sizes are not
+    /// modelled. A <c>/</c> token applies the following token as
+    /// <c>background-size</c>. Box keywords set the clip box; origin is left at
+    /// its padding-box default.
+    /// </para>
+    /// </remarks>
     private static void ApplyBackgroundShorthand(ComputedStyle style, string value)
     {
         style.BackgroundColor = CssColor.Transparent;
@@ -1171,6 +1652,17 @@ public sealed partial class StyleResolver
         }
     }
 
+    /// <summary>
+    /// Applies <c>background-size</c> or the size part of the background
+    /// shorthand.
+    /// </summary>
+    /// <param name="style">The style being updated.</param>
+    /// <param name="value">The size value.</param>
+    /// <remarks>
+    /// <c>cover</c> and <c>contain</c> set the corresponding mode. Any other
+    /// value switches to explicit sizing and parses one or two lengths; a missing
+    /// height stays <see cref="CssLength.Auto"/>.
+    /// </remarks>
     private static void ApplyBackgroundSize(ComputedStyle style, string value)
     {
         var text = value.Trim().ToLowerInvariant();
@@ -1193,6 +1685,17 @@ public sealed partial class StyleResolver
         style.BackgroundHeight = parts.Count > 1 ? CssValueParser.ParseLength(parts[1]) : CssLength.Auto;
     }
 
+    /// <summary>
+    /// Applies <c>background-position</c>.
+    /// </summary>
+    /// <param name="style">The style being updated.</param>
+    /// <param name="value">The position value.</param>
+    /// <remarks>
+    /// One or two space-separated components are supported. Keywords map to
+    /// percentages: left/top 0%, center 50%, right/bottom 100%. With no value, x
+    /// defaults to 0% and y to 50%, matching the CSS initial position. The
+    /// three- and four-value edge-offset forms are not supported.
+    /// </remarks>
     private static void ApplyBackgroundPosition(ComputedStyle style, string value)
     {
         var parts = CssValueParser.SplitTopLevel(value, ' ');
@@ -1217,6 +1720,16 @@ public sealed partial class StyleResolver
             : CssLength.Percent(50);
     }
 
+    /// <summary>
+    /// Applies <c>transform-origin</c>.
+    /// </summary>
+    /// <param name="style">The style being updated.</param>
+    /// <param name="value">The origin value.</param>
+    /// <remarks>
+    /// One or two components are supported, with keywords mapped to 0%, 50% and
+    /// 100%. The default for both axes is 50%, and the z-offset form is ignored.
+    /// Percentages are resolved against the element's border box by the painter.
+    /// </remarks>
     private static void ApplyTransformOrigin(ComputedStyle style, string value)
     {
         var parts = CssValueParser.SplitTopLevel(value, ' ');
@@ -1241,6 +1754,20 @@ public sealed partial class StyleResolver
             : CssLength.Percent(50);
     }
 
+    /// <summary>
+    /// Applies the <c>outline</c> shorthand.
+    /// </summary>
+    /// <param name="style">The style being updated.</param>
+    /// <param name="valueId">
+    /// The interned value id. It is accepted for symmetry with other declarative
+    /// handlers; this implementation parses directly and does not cache.
+    /// </param>
+    /// <param name="value">The cleaned, variable-substituted shorthand.</param>
+    /// <remarks>
+    /// Order-insensitive: a border-style keyword sets the outline style, a colour
+    /// sets the outline colour, and a non-auto length sets the width. The outline
+    /// offset is not part of the shorthand and is left unchanged.
+    /// </remarks>
     private void ApplyOutlineShorthand(ComputedStyle style, int valueId, string value)
     {
         foreach (var part in CssValueParser.SplitTopLevel(value, ' '))

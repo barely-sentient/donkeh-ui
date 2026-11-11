@@ -14,14 +14,66 @@ namespace Ignite.LayoutLab;
 /// second pass so they beat every normal declaration without allocating a
 /// per-property cascade map. Values that need a containing block stay as
 /// <see cref="CssLength"/> and are resolved by the layout pass.
+/// <para>
+/// A resolver is cheap and frame-scoped, but it writes into the supplied
+/// <see cref="StyleValueCache"/>. It is not thread-safe and must not be used
+/// concurrently with another resolver sharing the same cache. The
+/// <see cref="DataTable"/> it reads is expected to be immutable while resolving.
+/// </para>
 /// </remarks>
+/// <seealso cref="ComputedStyle"/>
+/// <seealso cref="StyleValueCache"/>
+/// <seealso cref="CssProperty"/>
 public sealed partial class StyleResolver
 {
+    /// <summary>The compiled stylesheet that supplies the rules being cascaded.</summary>
+    /// <remarks>
+    /// The resolver only reads from the table; it is owned by the caller and must
+    /// outlive the resolver.
+    /// </remarks>
     private readonly DataTable _table;
+    /// <summary>Shared cache of parsed declaration values, keyed by interned value id.</summary>
+    /// <remarks>
+    /// The cache is mutable and is not thread-safe. It is normally owned by
+    /// <see cref="LayoutEngine"/> and survives across layout passes until
+    /// <see cref="StyleValueCache.Clear"/> is called.
+    /// </remarks>
     private readonly StyleValueCache _cache;
+    /// <summary>The frame options used for the default font size and root length context.</summary>
     private readonly LayoutOptions _options;
+    /// <summary>
+    /// The root <see cref="LengthContext"/> captured when the resolver was created.
+    /// </summary>
+    /// <remarks>
+    /// It is the fallback context for font-size resolution, including the
+    /// <c>rem</c> basis and the case with no parent. It is a snapshot, so changing
+    /// <see cref="LayoutOptions.ViewportWidth"/> or
+    /// <see cref="LayoutOptions.RootFontSize"/> afterwards does not affect this
+    /// instance; create a new resolver for a new frame.
+    /// </remarks>
     private readonly LengthContext _baseContext;
 
+    /// <summary>
+    /// Creates a resolver over a compiled stylesheet, a value cache and the
+    /// options for the frame being laid out.
+    /// </summary>
+    /// <param name="table">The compiled rules to cascade. The resolver does not own it.</param>
+    /// <param name="cache">
+    /// The parsed-value cache to populate. Pass the engine's cache so repeated
+    /// values are parsed once; the resolver does not own it.
+    /// </param>
+    /// <param name="options">
+    /// The frame options. They supply <see cref="LayoutOptions.DefaultFontSize"/>
+    /// and the root length context captured by <see cref="_baseContext"/>.
+    /// </param>
+    /// <exception cref="NullReferenceException">
+    /// Thrown when <paramref name="options"/> is <see langword="null"/>, because
+    /// the constructor immediately reads its font and viewport settings.
+    /// </exception>
+    /// <remarks>
+    /// <paramref name="table"/> and <paramref name="cache"/> are stored without
+    /// validation; a <see langword="null"/> value fails when first used.
+    /// </remarks>
     public StyleResolver(DataTable table, StyleValueCache cache, LayoutOptions options)
     {
         _table = table;
@@ -30,8 +82,81 @@ public sealed partial class StyleResolver
         _baseContext = options.CreateRootLengthContext();
     }
 
+    /// <summary>Gets the parsed-value cache this resolver reads and writes.</summary>
+    /// <value>
+    /// The same instance passed to the constructor. It accumulates entries for
+    /// every distinct interned declaration value seen so far.
+    /// </value>
+    /// <remarks>
+    /// Exposed so a host can inspect the cache or clear it between documents.
+    /// The cache is not thread-safe; do not share it between concurrent
+    /// resolvers without external synchronisation.
+    /// </remarks>
     public StyleValueCache Cache => _cache;
 
+    /// <summary>
+    /// Resolves the matched declarations for one node into a new
+    /// <see cref="ComputedStyle"/>.
+    /// </summary>
+    /// <param name="node">
+    /// The node being styled. Text nodes and fragments receive framework display
+    /// overrides after the cascade.
+    /// </param>
+    /// <param name="parent">
+    /// The parent's computed style, or <see langword="null"/> for a root node.
+    /// Inherited properties and custom properties are read from it.
+    /// </param>
+    /// <param name="matches">
+    /// The rules that matched the node, ordered weakest first exactly as
+    /// <see cref="DataTable.MatchRules"/> returns them.
+    /// </param>
+    /// <returns>A fully populated style owned by the caller.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="node"/> is <see langword="null"/>.
+    /// </exception>
+    /// <example>
+    /// <code>
+    /// var matches = table.MatchRules(node, context);
+    /// var style = resolver.Resolve(node, parentStyle, matches);
+    /// </code>
+    /// </example>
+    /// <remarks>
+    /// <para>
+    /// The pipeline is deliberate and order-sensitive:
+    /// </para>
+    /// <list type="number">
+    /// <item><description>
+    /// Inherit the scalar properties (colour, font, writing mode, and so on) from
+    /// <paramref name="parent"/> and link the style parent for variable lookup.
+    /// </description></item>
+    /// <item><description>
+    /// Collect custom properties in two passes (normal, then important) and
+    /// recompute <see cref="ComputedStyle.CustomPropertyHash"/> so resolved values
+    /// can be cached by variable environment.
+    /// </description></item>
+    /// <item><description>
+    /// Apply normal declarations, then important declarations. The second pass
+    /// lets <c>!important</c> win regardless of source position without building
+    /// a per-property cascade map.
+    /// </description></item>
+    /// <item><description>
+    /// Force <see cref="Display.Inline"/> for text nodes and
+    /// <see cref="Display.Contents"/> for fragments, which are framework
+    /// constructs rather than CSS elements.
+    /// </description></item>
+    /// </list>
+    /// <para>
+    /// Because <paramref name="matches"/> is applied in the supplied order,
+    /// passing an unsorted sequence changes which declaration wins. The span is
+    /// only read for the duration of the call.
+    /// </para>
+    /// <para>
+    /// Relative lengths are not resolved here: percentages, <c>em</c>,
+    /// <c>rem</c>, viewport units and <c>auto</c> remain
+    /// <see cref="CssLength"/> values for the layout pass, which has the correct
+    /// containing block.
+    /// </para>
+    /// </remarks>
     public ComputedStyle Resolve(
         IgniteSupportedDomNode node,
         ComputedStyle? parent,
@@ -66,6 +191,30 @@ public sealed partial class StyleResolver
         return style;
     }
 
+    /// <summary>
+    /// Collects <c>--*</c> custom properties from the matched declarations.
+    /// </summary>
+    /// <param name="style">The style receiving the properties.</param>
+    /// <param name="matches">The matched rules in weakest-first cascade order.</param>
+    /// <remarks>
+    /// <para>
+    /// Two passes implement the cascade for custom properties. The first pass
+    /// records normal declarations, so later matches overwrite earlier ones. The
+    /// second pass records important declarations and therefore overwrites every
+    /// normal declaration, even one that appeared later in source order.
+    /// </para>
+    /// <para>
+    /// Values are trimmed and stripped of <c>!important</c> by
+    /// <see cref="CleanValue"/>. References to other custom properties are left
+    /// intact; they are substituted when the property is used by
+    /// <see cref="ResolveVariables"/>.
+    /// </para>
+    /// <para>
+    /// Custom properties are intentionally not routed through
+    /// <see cref="ApplyDeclaration"/>: they have no typed representation in
+    /// <see cref="ComputedStyle"/>.
+    /// </para>
+    /// </remarks>
     private void CollectCustomProperties(ComputedStyle style, ReadOnlySpan<MatchedRule> matches)
     {
        // Matches arrive weakest first, so later declarations overwrite earlier
@@ -110,6 +259,21 @@ public sealed partial class StyleResolver
         }
     }
 
+    /// <summary>
+    /// Determines whether a value contains a viewport-height unit.
+    /// </summary>
+    /// <param name="value">The declaration value to scan.</param>
+    /// <returns>
+    /// <see langword="true"/> when <c>vh</c>, <c>dvh</c>, <c>svh</c> or
+    /// <c>lvh</c> follows a digit or decimal point; otherwise
+    /// <see langword="false"/>.
+    /// </returns>
+    /// <remarks>
+    /// This is a cheap textual heuristic, not a full tokenizer. Requiring a
+    /// preceding digit or dot avoids matching identifiers such as
+    /// <c>svg</c>. The result feeds <see cref="ComputedStyle.UsesViewportHeight"/>,
+    /// which makes the layout cache signature include the viewport height.
+    /// </remarks>
     private static bool ContainsViewportHeightUnit(string value)
     {
         for (var i = 1; i < value.Length; i++)
@@ -133,12 +297,47 @@ public sealed partial class StyleResolver
         return false;
     }
 
+    /// <summary>
+    /// Stores one custom property, allocating the ordinal dictionary on first use.
+    /// </summary>
+    /// <param name="style">The style receiving the property.</param>
+    /// <param name="name">The custom property name, including the leading <c>--</c>.</param>
+    /// <param name="value">The cleaned value, without <c>!important</c>.</param>
+    /// <remarks>
+    /// Names are compared with <see cref="StringComparer.Ordinal"/> because CSS
+    /// custom property names are case-sensitive.
+    /// </remarks>
     private static void SetCustomProperty(ComputedStyle style, string name, string value)
     {
         style.CustomProperties ??= new Dictionary<string, string>(StringComparer.Ordinal);
         style.CustomProperties[name] = value;
     }
 
+    /// <summary>
+    /// Applies all matched declarations of one importance level in cascade order.
+    /// </summary>
+    /// <param name="style">The style being built.</param>
+    /// <param name="parent">The parent style, used by CSS-wide keywords.</param>
+    /// <param name="matches">The matched rules in weakest-first order.</param>
+    /// <param name="important">
+    /// <see langword="true"/> to apply only <c>!important</c> declarations;
+    /// <see langword="false"/> to apply only normal declarations.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// Later entries in <paramref name="matches"/> overwrite earlier ones for the
+    /// same property, which is why the caller runs this method twice: normal
+    /// first, important second. Important declarations therefore beat normal
+    /// declarations without a separate priority comparison.
+    /// </para>
+    /// <para>
+    /// A property the engine does not understand is recorded in
+    /// <see cref="ComputedStyle.UnsupportedProperties"/> for diagnostics, except
+    /// for custom properties, which were already collected and must not be
+    /// reported as unsupported. Unknown declarations therefore still consume
+    /// cascade time but have no layout effect.
+    /// </para>
+    /// </remarks>
     private void ApplyMatches(
         ComputedStyle style,
         ComputedStyle? parent,
@@ -174,6 +373,31 @@ public sealed partial class StyleResolver
         }
     }
 
+    /// <summary>
+    /// Applies a single known declaration to the style under construction.
+    /// </summary>
+    /// <param name="style">The style being built.</param>
+    /// <param name="parent">The parent style, used for relative font sizes and keywords.</param>
+    /// <param name="property">The recognised property to apply.</param>
+    /// <param name="valueId">The interned id of the raw value, used as a cache key.</param>
+    /// <param name="rawValue">The raw declaration value, including any <c>!important</c>.</param>
+    /// <remarks>
+    /// <para>
+    /// The value is first cleaned (trimmed, <c>!important</c> removed), then
+    /// <c>var()</c> references are substituted. An empty result is ignored,
+    /// leaving any weaker declaration that was already applied in place.
+    /// </para>
+    /// <para>
+    /// <c>all</c> is handled before variable substitution because its value is a
+    /// CSS-wide keyword, not a property value. Any other CSS-wide keyword is
+    /// handled before the property switch.
+    /// </para>
+    /// <para>
+    /// The large switch distinguishes shorthands (which write several fields)
+    /// from longhands (which write one field). Values that need a containing
+    /// block remain <see cref="CssLength"/> values.
+    /// </para>
+    /// </remarks>
     private void ApplyDeclaration(
         ComputedStyle style,
         ComputedStyle? parent,
@@ -989,6 +1213,17 @@ public sealed partial class StyleResolver
         }
     }
 
+    /// <summary>
+    /// Maps a property that reached the switch's default arm to the diagnostic
+    /// unsupported-property list.
+    /// </summary>
+    /// <param name="property">The recognised property with no apply case.</param>
+    /// <returns>The enum's numeric value.</returns>
+    /// <remarks>
+    /// This is only a diagnostic marker, not an interned property-name id. It
+    /// deliberately avoids interning a string on the hot declaration path. The
+    /// returned value may therefore collide with an interned id in the same list.
+    /// </remarks>
     private static int rulePropertyId(CssProperty property)
     {
         // Only used for the diagnostic unsupported list; the id is not needed
@@ -996,6 +1231,18 @@ public sealed partial class StyleResolver
         return (int)property;
     }
 
+    /// <summary>
+    /// Applies a parsed border shorthand to one side only.
+    /// </summary>
+    /// <param name="style">The style being updated.</param>
+    /// <param name="side">
+    /// The side index: 0 = top, 1 = right, 2 = bottom, 3 = left.
+    /// </param>
+    /// <param name="border">The width, style and colour parsed from the shorthand.</param>
+    /// <remarks>
+    /// An out-of-range side is ignored silently; callers only pass the four
+    /// constants implied by <c>border-top</c> through <c>border-left</c>.
+    /// </remarks>
     private void ApplyBorderSide(ComputedStyle style, int side, ParsedBorder border)
     {
         switch (side)

@@ -19,13 +19,28 @@
     public struct Token
     {
         /// <summary>
-        /// Gets or sets the kind of token (identifier, keyword, punctuation, etc.).
+        /// Gets or sets the lexical category of the token, such as identifier,
+        /// property name or punctuation.
         /// </summary>
+        /// <seealso cref="TokenKind"/>
         public TokenKind Kind { get; set; }
         
         /// <summary>
-        /// Interned string ID
+        /// Gets or sets the dense identifier of the token's source text in the
+        /// process-wide <see cref="InternTable"/>.
         /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The tokenizer interns every token's text, so identical tokens share
+        /// one id. Resolve it with <see cref="InternTable.GetString(int)"/> or
+        /// <see cref="InternTable.TryGetString(int, out string?)"/>.
+        /// </para>
+        /// <para>
+        /// Ids are stable for the lifetime of the process, which makes them
+        /// suitable as dictionary keys in later compilation stages.
+        /// </para>
+        /// </remarks>
+        /// <seealso cref="InternTable"/>
         public int InternedId { get; set; }
 
         /// <summary>

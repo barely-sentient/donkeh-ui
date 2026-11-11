@@ -1,0 +1,31 @@
+<Project>
+
+    <!--
+        Shared NuGet metadata for every project under Ignite/.
+        Projects that already start with "Ignite." (Ignite.Parser, Ignite.UILab,
+        Ignite.Windowing) keep their name; the rest get an Ignite. prefix, e.g.
+        Data -> Ignite.Data and DataEngine -> Ignite.DataEngine.
+    -->
+    <PropertyGroup>
+        <PackageId Condition="$(MSBuildProjectName.StartsWith('Ignite.'))">$(MSBuildProjectName)</PackageId>
+        <PackageId Condition="!$(MSBuildProjectName.StartsWith('Ignite.'))">Ignite.$(MSBuildProjectName)</PackageId>
+
+        <Authors>barely-sentient</Authors>
+        <Company>barely-sentient</Company>
+        <Description>$(PackageId) module for Ignite, a CSS-driven UI engine for .NET.</Description>
+        <PackageTags>ignite;css;ui;layout;rendering;dotnet</PackageTags>
+        <PackageProjectUrl>https://github.com/barely-sentient/ignite-ui</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/barely-sentient/ignite-ui.git</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+        <PublishRepositoryUrl>true</PublishRepositoryUrl>
+        <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+
+        <!-- Publish .snupkg symbol packages alongside the .nupkg files. -->
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+        <EmbedUntrackedSources>true</EmbedUntrackedSources>
+        <Deterministic>true</Deterministic>
+        <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+    </PropertyGroup>
+
+</Project>

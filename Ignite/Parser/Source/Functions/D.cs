@@ -5,7 +5,7 @@ namespace Ignite.Parser
     public static partial class Tokenizer
     {
         /// <summary>
-        /// All CSS functions beginning with 'd'
+        /// Registers CSS function names beginning with 'd'.
         /// </summary>
         private static void FunctionsD()
         {

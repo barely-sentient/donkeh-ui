@@ -21,11 +21,19 @@ namespace Ignite.Data.Dom
     /// </remarks>
     internal static class SelectorAnalysis
     {
+        /// <summary>Number of bits reserved for each specificity component.</summary>
         internal const int CountBits = 10;
+
+        /// <summary>Mask for one specificity component (<c>0x3FF</c>).</summary>
         internal const int CountMask = (1 << CountBits) - 1;
+
+        /// <summary>Bit offset of the class/attribute/pseudo component.</summary>
         internal const int ClassShift = CountBits;
+
+        /// <summary>Bit offset of the id component.</summary>
         internal const int IdShift = CountBits * 2;
 
+        /// <summary>The interned id of <c>"."</c>, used to recognise class selectors.</summary>
         internal static readonly int ClassDelimiterId = InternTable.Intern(".");
 
         // '=' has no dedicated token kind; it is emitted as a delimiter.
@@ -65,6 +73,30 @@ namespace Ignite.Data.Dom
         /// filters and pseudo classes to the supplied lists, and returning the
         /// packed specificity.
         /// </summary>
+        /// <param name="selector">The selector tokens, already normalised.</param>
+        /// <param name="compounds">Receives one record per compound, left to right.</param>
+        /// <param name="filters">
+        /// Receives the parsed attribute filters. Offsets in the compound records are
+        /// relative to this list, so the caller must rebase them.
+        /// </param>
+        /// <param name="pseudos">
+        /// Receives the parsed pseudo classes, with the same relative-offset contract
+        /// as <paramref name="filters"/>.
+        /// </param>
+        /// <param name="matchable">
+        /// Set to <see langword="true"/> only when every construct is supported and
+        /// at least one compound was produced.
+        /// </param>
+        /// <returns>
+        /// The specificity packed as ids in bits 20-29, classes in bits 10-19 and
+        /// types in bits 0-9.
+        /// </returns>
+        /// <remarks>
+        /// The lists are appended to, never cleared, so the caller can analyse
+        /// several selectors into one arena and record offsets between calls. Token
+        /// text is read from the intern table; the analysis itself allocates no
+        /// per-compound arrays.
+        /// </remarks>
         internal static int Analyze(
             ReadOnlySpan<Token> selector,
             List<CompoundRecord> compounds,
@@ -168,6 +200,21 @@ namespace Ignite.Data.Dom
             return Pack(idCount, classCount, typeCount);
         }
 
+        /// <summary>
+        /// Adds one compound slice, counts its specificity contributions and parses
+        /// its filters and pseudo classes.
+        /// </summary>
+        /// <param name="selector">The full selector tokens.</param>
+        /// <param name="start">First token of the compound.</param>
+        /// <param name="end">One past the last token of the compound.</param>
+        /// <param name="leading">The combinator linking the compound to its left.</param>
+        /// <param name="compounds">Receives the compound record.</param>
+        /// <param name="filters">Receives attribute filters.</param>
+        /// <param name="pseudos">Receives pseudo classes.</param>
+        /// <param name="idCount">Accumulates the id count.</param>
+        /// <param name="classCount">Accumulates the class/attribute/pseudo count.</param>
+        /// <param name="typeCount">Accumulates the type/pseudo element count.</param>
+        /// <param name="supported">Cleared when the compound cannot be evaluated.</param>
         private static void AddCompound(
             ReadOnlySpan<Token> selector,
             int start,
@@ -299,6 +346,15 @@ namespace Ignite.Data.Dom
             });
         }
 
+        /// <summary>
+        /// Parses an attribute selector starting at its opening bracket.
+        /// </summary>
+        /// <param name="selector">The full selector tokens.</param>
+        /// <param name="open">Index of the <c>[</c> token.</param>
+        /// <param name="end">One past the compound's last token.</param>
+        /// <param name="close">Receives the index of the closing <c>]</c>.</param>
+        /// <param name="filter">Receives the parsed filter on success.</param>
+        /// <returns><see langword="true"/> when the filter was fully understood.</returns>
         private static bool TryParseAttributeFilter(
             ReadOnlySpan<Token> selector,
             int open,
@@ -423,6 +479,24 @@ namespace Ignite.Data.Dom
             return true;
         }
 
+        /// <summary>
+        /// Parses a pseudo class token, including the <c>An+B</c> argument of the
+        /// <c>:nth-*</c> forms.
+        /// </summary>
+        /// <param name="selector">The full selector tokens.</param>
+        /// <param name="index">Index of the pseudo class token.</param>
+        /// <param name="end">One past the compound's last token.</param>
+        /// <param name="pseudo">Receives the parsed pseudo class on success.</param>
+        /// <param name="next">
+        /// Receives the index of the last token consumed (the closing parenthesis
+        /// for a functional form) so the caller can skip the argument list.
+        /// </param>
+        /// <returns><see langword="true"/> when the pseudo class is supported.</returns>
+        /// <remarks>
+        /// The <c>An+B</c> text is rebuilt from the argument tokens into a fixed
+        /// stack buffer of <see cref="MaxAnBLength"/> characters; a longer argument
+        /// is rejected rather than truncated.
+        /// </remarks>
         private static bool TryParsePseudoClass(
             ReadOnlySpan<Token> selector,
             int index,
@@ -730,6 +804,15 @@ namespace Ignite.Data.Dom
             return true;
         }
 
+        /// <summary>
+        /// Finds the closing parenthesis of the functional pseudo class at
+        /// <paramref name="open"/>.
+        /// </summary>
+        /// <param name="selector">The full selector tokens.</param>
+        /// <param name="open">Index of the opening parenthesis.</param>
+        /// <param name="end">One past the compound's last token.</param>
+        /// <returns>The index of the closing parenthesis, or -1 when it is missing or
+        /// the argument contains a nested function.</returns>
         private static int FindCloseParenthesis(ReadOnlySpan<Token> selector, int open, int end)
         {
             for (var i = open + 1; i < end; i++)
@@ -749,6 +832,14 @@ namespace Ignite.Data.Dom
             return -1;
         }
 
+        /// <summary>
+        /// Advances past an unparsable bracket group so its contents are not
+        /// misread as separate compounds.
+        /// </summary>
+        /// <param name="selector">The full selector tokens.</param>
+        /// <param name="open">Index of the opening bracket.</param>
+        /// <param name="end">One past the compound's last token.</param>
+        /// <returns>The index of the closing bracket, or <paramref name="end"/>.</returns>
         private static int SkipToBracketEnd(ReadOnlySpan<Token> selector, int open, int end)
         {
             for (var i = open + 1; i < end; i++)
@@ -775,6 +866,12 @@ namespace Ignite.Data.Dom
                 || (token.Kind == TokenKind.Delimiter && token.InternedId == EqualsDelimiterId);
         }
 
+        /// <summary>
+        /// Maps a raw token kind to a combinator, treating the descendant gap as a
+        /// separate case handled by the caller.
+        /// </summary>
+        /// <param name="kind">The token kind to classify.</param>
+        /// <returns>The combinator, or <see cref="Combinator.None"/>.</returns>
         private static Combinator ToCombinator(TokenKind kind)
         {
             return kind switch
@@ -786,6 +883,18 @@ namespace Ignite.Data.Dom
             };
         }
 
+        /// <summary>
+        /// Packs the three raw counts into one specificity value, saturating each
+        /// component at <see cref="CountMask"/>.
+        /// </summary>
+        /// <param name="idCount">The number of id selectors.</param>
+        /// <param name="classCount">The number of class-like selectors.</param>
+        /// <param name="typeCount">The number of type-like selectors.</param>
+        /// <returns>The packed specificity.</returns>
+        /// <remarks>
+        /// Saturation is unreachable for realistic selectors; it only prevents one
+        /// huge component from spilling into the next.
+        /// </remarks>
         private static int Pack(int idCount, int classCount, int typeCount)
         {
             return (Math.Min(idCount, CountMask) << IdShift)

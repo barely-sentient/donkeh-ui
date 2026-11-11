@@ -4,6 +4,9 @@ namespace Ignite.Parser
 {
     public static partial class Tokenizer
     {
+        /// <summary>
+        /// Registers CSS property names beginning with 'p'.
+        /// </summary>
         private static void PropertiesP()
         {
             CssPropertyGroup("padding",

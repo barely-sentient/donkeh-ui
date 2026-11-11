@@ -7,6 +7,7 @@ namespace Ignite.Data.Dom
     /// against compiled selectors.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Every value is kept as an interned id, which turns matching a selector token
     /// into a single int comparison. The text is interned exactly as the tokenizer
     /// keeps it: an id keeps its leading '#', because hash tokens are emitted from
@@ -14,6 +15,19 @@ namespace Ignite.Data.Dom
     /// delimiter token. Attribute names and values are interned as-is (surrounding
     /// quotes are stripped), and the <c>id</c> and <c>class</c> attributes are
     /// routed to the dedicated fields instead of the attribute map.
+    /// </para>
+    /// <para>
+    /// The node is a mutable tree. Assigning <see cref="Children"/> rewrites each
+    /// child's parent pointer and sibling indices and bumps the child's
+    /// <see cref="Revision"/> when it moved, so structural selectors and style
+    /// caches see the change. Mutating the array returned by
+    /// <see cref="Children"/> in place is not tracked; assign a new array instead.
+    /// </para>
+    /// <para>
+    /// Nodes are not thread-safe and are expected to be created and mutated on the
+    /// UI thread. The intern table they use is shared process-wide and grows
+    /// monotonically.
+    /// </para>
     /// </remarks>
     public class IgniteSupportedDomNode
     {
@@ -230,9 +244,13 @@ namespace Ignite.Data.Dom
         }
 
         /// <summary>
-        /// The interned tag name, for example the id of <c>"div"</c>. Compare this
-        /// directly with a type selector token.
+        /// Gets or sets the interned tag name, for example the id of <c>"div"</c>.
+        /// Compare this directly with a type selector token.
         /// </summary>
+        /// <value>
+        /// An interned id, or -1 when the node has no tag name. The setter bumps
+        /// <see cref="Revision"/> only when the id actually changes.
+        /// </value>
         public int InternedTagName
         {
             get => _tagName;
@@ -246,6 +264,11 @@ namespace Ignite.Data.Dom
             }
         }
 
+        /// <summary>
+        /// Gets or sets the tag name as text. Assigning <see langword="null"/> clears
+        /// the tag name and stores -1.
+        /// </summary>
+        /// <value>The interned text, or <see langword="null"/> when no tag is set.</value>
         public string? TagName
         {
             get => InternTable.TryGetString(_tagName, out var tagName) ? tagName : null;
@@ -278,6 +301,19 @@ namespace Ignite.Data.Dom
             }
         }
 
+        /// <summary>
+        /// Gets or sets the id as text, for example <c>"main"</c> or <c>"#main"</c>.
+        /// A leading '#' is accepted and added when missing, because hash selector
+        /// tokens include it.
+        /// </summary>
+        /// <value>
+        /// The interned text including the leading '#', or <see langword="null"/>
+        /// when the id is empty.
+        /// </value>
+        /// <remarks>
+        /// Reading resolves the interned id back to text, so prefer
+        /// <see cref="InternedId"/> on match paths.
+        /// </remarks>
         public string? Id
         {
             get => InternTable.TryGetString(_id, out var id) ? id : null;
@@ -346,6 +382,10 @@ namespace Ignite.Data.Dom
         /// Replaces the whole class list from already interned ids. This is the
         /// fast path for frameworks that cache class ids between renders.
         /// </summary>
+        /// <param name="classIds">The interned class ids, without any delimiter.</param>
+        /// <remarks>
+        /// The span is copied, so the caller may reuse its buffer immediately.
+        /// </remarks>
         public void SetInternedClassName(ReadOnlySpan<int> classIds)
         {
             _className = classIds.ToArray();
@@ -356,6 +396,17 @@ namespace Ignite.Data.Dom
         /// Adds a class to the node. The class name may be given with or without the
         /// leading '.'. Adding a class twice is a no-op.
         /// </summary>
+        /// <param name="className">
+        /// The class name to add, with or without a leading '.'.
+        /// </param>
+        /// <exception cref="ArgumentException">
+        /// Thrown when <paramref name="className"/> is <see langword="null"/> or empty.
+        /// </exception>
+        /// <remarks>
+        /// The name is interned, so adding a class grows the intern table on first
+        /// use. <see cref="Revision"/> is bumped only when the class was not already
+        /// present.
+        /// </remarks>
         public void AddClass(string className)
         {
             ArgumentException.ThrowIfNullOrEmpty(className);
@@ -370,6 +421,13 @@ namespace Ignite.Data.Dom
         /// <summary>
         /// Removes a class from the node and returns whether it was present.
         /// </summary>
+        /// <param name="className">
+        /// The class to remove, with or without a leading '.'.
+        /// </param>
+        /// <returns><see langword="true"/> when the class existed and was removed.</returns>
+        /// <remarks>
+        /// The name is not interned, so a miss cannot grow the intern table.
+        /// </remarks>
         public bool RemoveClass(string className)
         {
             if (string.IsNullOrEmpty(className) || !TryGetInternedClass(className, out var id))
@@ -394,6 +452,10 @@ namespace Ignite.Data.Dom
         /// True when the node carries <paramref name="className"/>. This never
         /// interns the name, so a miss cannot grow the intern table.
         /// </summary>
+        /// <param name="className">
+        /// The class to test, with or without a leading '.'.
+        /// </param>
+        /// <returns><see langword="true"/> when the class is present.</returns>
         public bool HasClass(string className)
         {
             return !string.IsNullOrEmpty(className)
@@ -410,6 +472,13 @@ namespace Ignite.Data.Dom
         /// Sets an attribute from already interned ids. The fastest path, and the
         /// one to use when a framework caches ids.
         /// </summary>
+        /// <param name="nameId">The interned attribute name.</param>
+        /// <param name="valueId">The interned attribute value.</param>
+        /// <remarks>
+        /// No validation is performed, so an id that was never interned produces a
+        /// value that the matcher cannot see. Unlike the string overload this does
+        /// not special-case <c>id</c> or <c>class</c>.
+        /// </remarks>
         public void SetAttribute(int nameId, int valueId)
         {
             _attributes[nameId] = valueId;
@@ -420,6 +489,18 @@ namespace Ignite.Data.Dom
         /// Sets an attribute by name. The <c>id</c> and <c>class</c> attributes are
         /// routed to <see cref="Id"/> and <see cref="ClassName"/>.
         /// </summary>
+        /// <param name="name">The attribute name; must not be empty.</param>
+        /// <param name="value">The attribute value.</param>
+        /// <exception cref="ArgumentException">
+        /// Thrown when <paramref name="name"/> is <see langword="null"/> or empty.
+        /// </exception>
+        /// <exception cref="ArgumentNullException">
+        /// Thrown when <paramref name="value"/> is <see langword="null"/>.
+        /// </exception>
+        /// <remarks>
+        /// A value wrapped in matching single or double quotes is stored unquoted,
+        /// so it interns to the same id as a normalised selector value.
+        /// </remarks>
         public void SetAttribute(string name, string value)
         {
             ArgumentException.ThrowIfNullOrEmpty(name);
@@ -443,6 +524,21 @@ namespace Ignite.Data.Dom
             _revision++;
         }
 
+        /// <summary>
+        /// Gets or sets a specific attribute by interned name.
+        /// </summary>
+        /// <param name="nameId">The interned attribute name.</param>
+        /// <param name="valueId">
+        /// When this method returns <see langword="true"/>, receives the interned
+        /// value; otherwise -1.
+        /// </param>
+        /// <returns><see langword="true"/> when the attribute is present.</returns>
+        /// <remarks>
+        /// The <see cref="SetAttribute(string,string)"/> overload routes <c>id</c>
+        /// and <c>class</c> to <see cref="Id"/> and <see cref="ClassName"/> rather
+        /// than the attribute map; the interned overload stores whatever ids it is
+        /// given.
+        /// </remarks>
         public bool TryGetAttribute(int nameId, out int valueId)
         {
             return _attributes.TryGetValue(nameId, out valueId);
@@ -452,6 +548,11 @@ namespace Ignite.Data.Dom
         /// Reads an attribute by name. Returns false when the node does not carry it
         /// or when the name was never interned.
         /// </summary>
+        /// <param name="name">The attribute name to look up.</param>
+        /// <param name="value">
+        /// Receives the attribute text on success; otherwise <see langword="null"/>.
+        /// </param>
+        /// <returns><see langword="true"/> when the attribute is present.</returns>
         public bool TryGetAttribute(string name, out string? value)
         {
             if (!string.IsNullOrEmpty(name)
@@ -466,6 +567,15 @@ namespace Ignite.Data.Dom
             return false;
         }
 
+        /// <summary>
+        /// Removes an attribute by interned name and returns whether it was present.
+        /// </summary>
+        /// <param name="nameId">The interned attribute name.</param>
+        /// <returns><see langword="true"/> when the attribute existed and was removed.</returns>
+        /// <remarks>
+        /// Removing an attribute bumps <see cref="Revision"/>, because attribute
+        /// selectors may stop matching.
+        /// </remarks>
         public bool RemoveAttribute(int nameId)
         {
             if (_attributes.Remove(nameId))
@@ -480,6 +590,8 @@ namespace Ignite.Data.Dom
         /// <summary>
         /// Removes an attribute by name and returns whether it was present.
         /// </summary>
+        /// <param name="name">The attribute name to remove.</param>
+        /// <returns><see langword="true"/> when the attribute existed and was removed.</returns>
         public bool RemoveAttribute(string name)
         {
             if (!string.IsNullOrEmpty(name)
@@ -557,6 +669,16 @@ namespace Ignite.Data.Dom
         /// </summary>
         internal int SiblingCount => _parent?._elementChildCount ?? 1;
 
+        /// <summary>
+        /// Returns the element at an element-relative sibling index, or this node
+        /// when the index is out of range.
+        /// </summary>
+        /// <param name="index">A zero-based index among element siblings.</param>
+        /// <returns>The sibling element, or this node as a fallback.</returns>
+        /// <remarks>
+        /// Text nodes and fragments are skipped. The fallback keeps callers total
+        /// when a hand-edited tree has stale sibling counts; it never returns null.
+        /// </remarks>
         internal IgniteSupportedDomNode SiblingAt(int index)
         {
             if (_parent is null)
@@ -611,6 +733,14 @@ namespace Ignite.Data.Dom
             return 0;
         }
 
+        /// <summary>
+        /// Gets the raw child array, including text nodes and fragments, for the
+        /// matcher's descendant walk.
+        /// </summary>
+        /// <remarks>
+        /// The span is a live view over the array; it is invalidated when
+        /// <see cref="Children"/> is assigned.
+        /// </remarks>
         internal ReadOnlySpan<IgniteSupportedDomNode> ChildNodes => _children;
 
         private static bool TryGetInternedClass(string className, out int id)
@@ -640,6 +770,18 @@ namespace Ignite.Data.Dom
             return InternTable.Intern(value);
         }
 
+        /// <summary>
+        /// Replaces the class list from a whitespace-separated <c>class</c>
+        /// attribute value.
+        /// </summary>
+        /// <param name="value">
+        /// The raw attribute value, for example <c>"btn btn-primary"</c>.
+        /// </param>
+        /// <remarks>
+        /// Runs of CSS whitespace separate names; empty runs are ignored. Each name
+        /// is interned, so this method grows the intern table and bumps
+        /// <see cref="Revision"/> once per added class.
+        /// </remarks>
         private void SetClassFromAttribute(ReadOnlySpan<char> value)
         {
             _className = [];

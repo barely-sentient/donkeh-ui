@@ -8,6 +8,32 @@ public sealed partial class LayoutEngine
     /// box's <see cref="FloatContext"/>; following line boxes and BFC roots avoid
     /// their margin boxes.
     /// </summary>
+    /// <param name="box">Block container whose children are laid out.</param>
+    /// <param name="content">Content box in absolute coordinates.</param>
+    /// <param name="definiteContentHeight">
+    /// Known content height, passed through to inline groups; block children
+    /// still resolve their own heights.
+    /// </param>
+    /// <returns>The used content height, including enclosed floats for a BFC root.</returns>
+    /// <remarks>
+    /// <para>
+    /// The element's own text is laid out before its child boxes, followed by
+    /// runs of adjacent inline-level children. Each inline run occupies a line
+    /// group whose height advances <c>flowY</c>.
+    /// </para>
+    /// <para>
+    /// Out-of-flow children record a static position for later absolute layout,
+    /// floats are registered with the shared <see cref="FloatContext"/>, and
+    /// block children collapse their vertical margins with the previous
+    /// sibling's bottom margin. A trailing bottom margin is applied only when at
+    /// least one flow child was seen.
+    /// </para>
+    /// <para>
+    /// When the box establishes a block formatting context, or is the root, its
+    /// used height is extended to the bottom of the tallest float so the BFC
+    /// encloses its floats. A plain block does not enclose floats.
+    /// </para>
+    /// </remarks>
     private float LayoutBlockChildren(LayoutBox box, Rect content, float definiteContentHeight)
     {
         var children = box.Children;
@@ -130,6 +156,41 @@ public sealed partial class LayoutEngine
         return MathF.Max(0, flowY - content.Y);
     }
 
+    /// <summary>
+    /// Places and lays out one in-flow block-level child at the current flow
+    /// position.
+    /// </summary>
+    /// <param name="child">Block child to lay out.</param>
+    /// <param name="content">Content box of the parent block.</param>
+    /// <param name="flowY">
+    /// Absolute y position of the next flow edge. Advanced by the child's border
+    /// box height on return.
+    /// </param>
+    /// <param name="previousMargin">
+    /// Bottom margin of the previous in-flow sibling, used for margin collapsing.
+    /// Replaced by this child's bottom margin on return.
+    /// </param>
+    /// <param name="floats">Float context shared with the parent block.</param>
+    /// <param name="containingBlockHeight">
+    /// Parent content height for percentage heights.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// Resolving margins happens before placement because both clearance and
+    /// float avoidance need the used values. The child's top margin collapses
+    /// with <paramref name="previousMargin"/> and then yields to <c>clear</c>.
+    /// </para>
+    /// <para>
+    /// A BFC root must not overlap active floats: it moves below them, and an
+    /// auto-width or too-wide explicit-width box is narrowed to the current
+    /// float band. Non-BFC blocks ignore floats for sizing but their line boxes
+    /// still see them through the shared context.
+    /// </para>
+    /// <para>
+    /// <c>display:contents</c> children zero their edges and contribute only the
+    /// laid-out height of their descendants to flow.
+    /// </para>
+    /// </remarks>
     private void LayoutBlockChild(
         LayoutBox child,
         Rect content,
@@ -238,6 +299,24 @@ public sealed partial class LayoutEngine
     }
 
     /// <summary>Places a floated child inside the current line/block position.</summary>
+    /// <param name="child">Floated child to lay out.</param>
+    /// <param name="content">Content box of the containing block.</param>
+    /// <param name="flowY">Current flow y position before float placement.</param>
+    /// <param name="floats">Float context that receives the placed margin box.</param>
+    /// <remarks>
+    /// <para>
+    /// The used width is shrink-to-fit against the containing block (not the
+    /// current band), then placement searches for a band wide enough for the
+    /// margin box. It moves below active floats up to 64 times, after which it
+    /// stays at the last band.
+    /// </para>
+    /// <para>
+    /// Left floats align to the band's left edge and right floats to its right
+    /// edge. The registered rectangle includes vertical margins, so following
+    /// flow content clears the full margin box. The float does not advance the
+    /// parent's flow position.
+    /// </para>
+    /// </remarks>
     private void LayoutFloatChild(
         LayoutBox child,
         Rect content,
@@ -320,6 +399,16 @@ public sealed partial class LayoutEngine
             child.Style.Float);
     }
 
+    /// <summary>Collapses two adjoining vertical margins into one used margin.</summary>
+    /// <param name="first">First margin, typically the previous sibling's bottom margin.</param>
+    /// <param name="second">Second margin, typically the next sibling's top margin.</param>
+    /// <returns>The collapsed margin in CSS pixels.</returns>
+    /// <remarks>
+    /// Two positive margins use the larger value, two negative margins use the
+    /// smaller (more negative) value, and mixed signs add together. This helper
+    /// models adjoining sibling margins only; parent-child and empty-block
+    /// collapsing are not implemented.
+    /// </remarks>
     private static float CollapseMargins(float first, float second)
     {
         if (first >= 0 && second >= 0)
@@ -335,6 +424,17 @@ public sealed partial class LayoutEngine
         return first + second;
     }
 
+    /// <summary>Returns whether a node's text should produce a line box.</summary>
+    /// <param name="style">Style of the node that owns the text.</param>
+    /// <param name="text">Text to test.</param>
+    /// <returns>
+    /// <see langword="false"/> for empty text and for whitespace that the
+    /// <c>white-space</c> mode collapses; otherwise <see langword="true"/>.
+    /// </returns>
+    /// <remarks>
+    /// Preserved whitespace (<c>pre</c>, <c>pre-wrap</c>, <c>break-spaces</c>)
+    /// always lays out, which keeps blank lines and indentation in code blocks.
+    /// </remarks>
     private static bool ShouldLayoutText(ComputedStyle style, string text)
     {
         if (text.Length == 0)
@@ -350,6 +450,16 @@ public sealed partial class LayoutEngine
         return !string.IsNullOrWhiteSpace(text);
     }
 
+    /// <summary>Returns the usable horizontal band at a vertical position.</summary>
+    /// <param name="floats">
+    /// Float context to query, or <see langword="null"/> for none.
+    /// </param>
+    /// <param name="y">Absolute y position to query.</param>
+    /// <param name="content">Content box that bounds the band horizontally.</param>
+    /// <returns>
+    /// The band's left and right edges, or the full content width when no float
+    /// context is active.
+    /// </returns>
     private static FloatBand BandAt(FloatContext? floats, float y, in Rect content)
     {
         return floats is null
@@ -363,6 +473,34 @@ public sealed partial class LayoutEngine
     /// and wrap as a unit; text wraps through <see cref="TextLayoutEngine"/>.
     /// Lines avoid any active floats.
     /// </summary>
+    /// <param name="container">Block box that owns the text and inline children.</param>
+    /// <param name="text">Text to lay out first, or <see langword="null"/> for none.</param>
+    /// <param name="children">Child list containing the inline run.</param>
+    /// <param name="start">Index of the first child in the run.</param>
+    /// <param name="count">Number of children in the run.</param>
+    /// <param name="content">Content box that bounds the line horizontally.</param>
+    /// <param name="startY">Absolute y coordinate of the first line.</param>
+    /// <param name="definiteContentHeight">Definite height passed to child layout.</param>
+    /// <param name="floats">
+    /// Active float context, or <see langword="null"/> for none.
+    /// </param>
+    /// <returns>The total height consumed from <paramref name="startY"/>, never negative.</returns>
+    /// <remarks>
+    /// <para>
+    /// Text is shaped once for the available line width, or through
+    /// <see cref="GetTextLayoutInBands"/> when floats are active. A multi-line
+    /// text layout is stored on the container and advances the line cursor by its
+    /// full height; a single-line layout becomes an inline box on the current
+    /// line.
+    /// </para>
+    /// <para>
+    /// Atomic inline children do not break internally. An auto-width child
+    /// shrink-to-fits the remaining line space, while an explicitly sized child
+    /// keeps its max-content width and moves to the next line when it does not
+    /// fit and the line already has content. Line height is the tallest margin
+    /// box on the line; vertical-align and baseline alignment are not applied.
+    /// </para>
+    /// </remarks>
     private float LayoutInlineGroup(
         LayoutBox container,
         string? text,

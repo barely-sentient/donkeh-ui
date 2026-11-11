@@ -5,6 +5,23 @@ namespace Ignite.Parser
 {
     public static partial class Tokenizer
     {
+        /// <summary>
+        /// Registers every exact rule and compiles them into
+        /// <see cref="ExactMatch"/>.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The order of the calls is significant only in that all rules must be
+        /// registered before <see cref="MinLengthByFirstChar"/> is computed and
+        /// the matcher is compiled. Property groups, pseudo selectors and
+        /// functions are all flat exact-match rules.
+        /// </para>
+        /// <para>
+        /// <c>k</c> has no property rules, so <c>PropertiesK</c> does not exist.
+        /// The per-letter methods are partial-class helpers split across
+        /// <c>Rules/*.cs</c>.
+        /// </para>
+        /// </remarks>
         static Tokenizer()
         {
             for (var i = 0; i < MinLengthByFirstChar.Length; i++)

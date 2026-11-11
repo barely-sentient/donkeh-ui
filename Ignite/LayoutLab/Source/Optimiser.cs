@@ -2,8 +2,19 @@
 
 namespace Ignite.LayoutLab;
 
+/// <summary>The optimised instruction stream together with the pool it references.</summary>
+/// <remarks>
+/// When <see cref="LayoutOptions.CompactConstants"/> is enabled,
+/// <see cref="Constants"/> is a newly allocated pool, not the input pool, and
+/// the instructions in <see cref="Instructions"/> have been renumbered to match
+/// it.
+/// </remarks>
 public sealed class OptimisationResult
 {
+    /// <summary>Creates a result from an optimised buffer.</summary>
+    /// <param name="instructions">The output instruction buffer.</param>
+    /// <param name="constants">The constant pool referenced by the output.</param>
+    /// <param name="stats">The pass statistics.</param>
     public OptimisationResult(
         InstructionBuffer instructions,
         ConstantPool constants,
@@ -14,8 +25,13 @@ public sealed class OptimisationResult
         Stats = stats;
     }
 
+    /// <summary>Gets the optimised display list.</summary>
     public InstructionBuffer Instructions { get; }
+
+    /// <summary>Gets the constant pool referenced by <see cref="Instructions"/>.</summary>
     public ConstantPool Constants { get; }
+
+    /// <summary>Gets the pass statistics.</summary>
     public OptimisationStats Stats { get; }
 }
 
@@ -25,26 +41,62 @@ public sealed class OptimisationResult
 /// the constant pool so a frame only carries constants it references.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The passes never change what the renderer draws: clip intersections only
 /// remove geometry that is already outside the effective clip, merged rectangles
 /// cover exactly the union of the originals, and redundant scopes are those
 /// whose effect is the identity.
+/// </para>
+/// <para>
+/// The methods are static and keep no state between calls, so concurrent runs
+/// are safe as long as each call owns its input, output and constant pool.
+/// Instructions are processed in paint order; draw culling is disabled inside
+/// an active transform or filter scope, and rectangle merging is disabled
+/// inside a transform scope, because those change the coordinate space or
+/// sample the backdrop.
+/// </para>
 /// </remarks>
+/// <seealso cref="InstructionBuffer"/>
+/// <seealso cref="ConstantPool"/>
 public static class Optimiser
 {
+    /// <summary>The kinds of push/pop scope tracked while walking the stream.</summary>
     private enum ScopeKind : byte
     {
+        /// <summary>A rectangular or rounded clip push.</summary>
         Clip,
+
+        /// <summary>A group-opacity push.</summary>
         Opacity,
+
+        /// <summary>A transform push.</summary>
         Transform,
+
+        /// <summary>A composited-layer push.</summary>
         Layer,
+
+        /// <summary>A filter push.</summary>
         Filter,
+
+        /// <summary>A backdrop-filter push.</summary>
         BackdropFilter,
+
+        /// <summary>A clip-path push.</summary>
         ClipPath,
+
+        /// <summary>A mask push.</summary>
         Mask,
+
+        /// <summary>A blend-mode push.</summary>
         Blend
     }
 
+    /// <summary>Bookkeeping for one open push/pop scope.</summary>
+    /// <param name="Kind">The scope family, used to match pops.</param>
+    /// <param name="Pop">The pop opcode that closes the scope; informational.</param>
+    /// <param name="Emit">Whether the matching push and pop survive in the output.</param>
+    /// <param name="PreviousClip">The clip in effect before a clip push.</param>
+    /// <param name="ClipEmpty">Whether a clip push produced an empty intersection.</param>
     private readonly record struct Scope(
         ScopeKind Kind,
         InstructionOpCode Pop,
@@ -52,6 +104,42 @@ public static class Optimiser
         Rect PreviousClip,
         bool ClipEmpty);
 
+    /// <summary>Runs every enabled optimisation pass over a frame's instruction stream.</summary>
+    /// <param name="source">The input display list; it is not modified.</param>
+    /// <param name="constants">The pool referenced by <paramref name="source"/>.</param>
+    /// <param name="viewport">The viewport rectangle in CSS pixels, used as the initial clip.</param>
+    /// <param name="options">The flags controlling each pass.</param>
+    /// <param name="outputBuffer">
+    /// An optional buffer to clear and fill. It must not be the same instance as
+    /// <paramref name="source"/>, because the output is cleared before the input
+    /// is read.
+    /// </param>
+    /// <returns>The output buffer, the (possibly rebuilt) pool and the statistics.</returns>
+    /// <remarks>
+    /// <para>
+    /// When <see cref="LayoutOptions.Optimise"/> is disabled the source buffer
+    /// and pool are returned unchanged with <see cref="OptimisationStats.Empty"/>.
+    /// </para>
+    /// <para>
+    /// Enabled passes, in order: <c>Nop</c> instructions are dropped; frame
+    /// markers are dropped unless <see cref="LayoutOptions.IncludeFrameMarkers"/>
+    /// is set; clip pushes are intersected with the current clip and dropped when
+    /// they are empty or (for rectangular clips only) identical to the current
+    /// clip; opacity pushes at or above <c>0.9999</c> are dropped with their
+    /// pop; draws are culled when the current clip is empty, or when
+    /// <see cref="LayoutOptions.CullOffscreen"/> is set, no transform/filter is
+    /// active and the draw's bounds miss the clip; adjacent opaque
+    /// <c>DrawRect</c> instructions are merged when
+    /// <see cref="LayoutOptions.MergeDraws"/> is set and no clip changed between
+    /// them; finally constants are compacted when
+    /// <see cref="LayoutOptions.CompactConstants"/> is set.
+    /// </para>
+    /// <para>
+    /// Rounded clips are never treated as redundant even when their bounds equal
+    /// the current clip, because the corner rounding is part of their effect.
+    /// Unmatched pops are ignored rather than clipping the rest of the frame.
+    /// </para>
+    /// </remarks>
     public static OptimisationResult Run(
         InstructionBuffer source,
         ConstantPool constants,
@@ -367,6 +455,15 @@ public static class Optimiser
     /// Bounds used for off-screen culling. Most draws are fully described by
     /// their rect; an outer shadow can bleed outside the border box.
     /// </summary>
+    /// <param name="instruction">The draw instruction being tested.</param>
+    /// <param name="constants">The pool used to expand a shadow constant.</param>
+    /// <returns>The instruction rectangle, inflated for a shadow draw.</returns>
+    /// <remarks>
+    /// For <c>DrawShadow</c> the inflation is
+    /// <c>|offsetX| + |offsetY| + blur + max(0, spread)</c>, an upper bound on
+    /// the shadow's reach. The payload is range-checked against the pool; any
+    /// other opcode returns its rectangle unchanged.
+    /// </remarks>
     private static Rect CullBounds(in Instruction instruction, ConstantPool constants)
     {
         var rect = instruction.Rect;
@@ -386,11 +483,25 @@ public static class Optimiser
         return rect;
     }
 
+    /// <summary>Pops the nearest scope of the expected kind, keeping the current clip.</summary>
+    /// <param name="scopes">The open-scope stack.</param>
+    /// <param name="expected">The scope kind the pop belongs to.</param>
+    /// <returns>The removed scope, or a non-emitting placeholder when none matched.</returns>
     private static Scope PopScope(List<Scope> scopes, ScopeKind expected)
     {
         return PopScope(scopes, expected, Rect.Empty);
     }
 
+    /// <summary>Pops the nearest scope of the expected kind.</summary>
+    /// <param name="scopes">The open-scope stack.</param>
+    /// <param name="expected">The scope kind the pop belongs to.</param>
+    /// <param name="currentClip">The clip to preserve when the pop is unmatched.</param>
+    /// <returns>The removed scope, or a non-emitting placeholder when none matched.</returns>
+    /// <remarks>
+    /// Searches from the top of the stack so interleaved scopes of other kinds
+    /// are tolerated. An unmatched pop is a no-op: keeping the current clip
+    /// avoids turning a malformed stream into a fully clipped (blank) frame.
+    /// </remarks>
     private static Scope PopScope(List<Scope> scopes, ScopeKind expected, in Rect currentClip)
     {
         for (var i = scopes.Count - 1; i >= 0; i--)
@@ -408,6 +519,20 @@ public static class Optimiser
         return new Scope(expected, InstructionOpCode.Nop, false, currentClip, false);
     }
 
+    /// <summary>Attempts to fuse a rectangle into the previous output rectangle.</summary>
+    /// <param name="output">The buffer written so far; the last instruction may be replaced.</param>
+    /// <param name="instruction">The incoming <c>DrawRect</c>.</param>
+    /// <param name="clipVersion">The current clip generation.</param>
+    /// <param name="lastClipVersion">The clip generation at the last emitted draw.</param>
+    /// <returns><see langword="true"/> when the incoming rect was merged and must not be emitted.</returns>
+    /// <remarks>
+    /// Merging is refused when the clip changed since the previous draw, when the
+    /// previous instruction is not a <c>DrawRect</c>, when payload or flags
+    /// differ, or when the fill is not fully opaque (merging translucent fills
+    /// would lose a compositing layer). Two rectangles merge when they share a
+    /// row (same y and height) or a column (same x and width) within 0.01 px and
+    /// touch or overlap along the other axis.
+    /// </remarks>
     private static bool TryMerge(
         InstructionBuffer output,
         in Instruction instruction,
@@ -468,6 +593,23 @@ public static class Optimiser
     /// Rebuilds the pool in first-use order. Instructions are rewritten in place
     /// so the caller gets a smaller, tighter frame with the same visual output.
     /// </summary>
+    /// <param name="buffer">The optimised instructions; payloads are rewritten in place.</param>
+    /// <param name="source">The pool referenced by the original payloads.</param>
+    /// <returns>A new pool containing only constants reachable from <paramref name="buffer"/>.</returns>
+    /// <remarks>
+    /// <para>
+    /// Each constant kind keeps its own old-to-new id map, so identical values
+    /// used by different kinds are never conflated. The first reference to a
+    /// value defines its new id; later references reuse it. Constants that the
+    /// optimised stream no longer references are dropped.
+    /// </para>
+    /// <para>
+    /// Corner radii are addressed through <see cref="Instruction.Aux"/> rather
+    /// than the payload and are renumbered with a checked 16-bit cast. The input
+    /// pool is left untouched, so callers must use the returned pool from then
+    /// on.
+    /// </para>
+    /// </remarks>
     private static ConstantPool CompactConstants(InstructionBuffer buffer, ConstantPool source)
     {
         var pool = new ConstantPool();

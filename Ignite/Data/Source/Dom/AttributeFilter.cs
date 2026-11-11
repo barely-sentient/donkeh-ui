@@ -5,6 +5,10 @@ namespace Ignite.Data.Dom
     /// <c>[attr]</c>, <c>[attr=v]</c>, <c>[attr~=v]</c>, <c>[attr|=v]</c>,
     /// <c>[attr^=v]</c>, <c>[attr$=v]</c> and <c>[attr*=v]</c>.
     /// </summary>
+    /// <remarks>
+    /// Stored as a <c>byte</c> so an <see cref="AttributeFilter"/> stays compact in
+    /// the table-wide filter arena.
+    /// </remarks>
     public enum AttributeOperator : byte
     {
         /// <summary><c>[attr]</c>: the attribute has to be present.</summary>
@@ -37,6 +41,13 @@ namespace Ignite.Data.Dom
     /// <param name="ValueId">The interned value, or -1 for <see cref="AttributeOperator.Exists"/>.</param>
     /// <param name="Operator">The comparison to perform.</param>
     /// <param name="IgnoreCase">The <c>i</c> flag, making the comparison case insensitive.</param>
+    /// <remarks>
+    /// The filter is a pure value: it holds interned ids, no text, so it can be
+    /// copied freely and stays valid as long as the intern table does. The
+    /// <c>s</c> flag is accepted at parse time but normalises to
+    /// <see cref="IgnoreCase"/> = <see langword="false"/>, since ordinal comparison
+    /// is already case sensitive.
+    /// </remarks>
     public readonly record struct AttributeFilter(
         int NameId,
         int ValueId,

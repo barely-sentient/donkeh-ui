@@ -9,11 +9,45 @@ namespace Ignite.Data
     /// and rules are all stored once and referenced by dense integer ids.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Selector and condition tokens live in flat arenas, so the table does not
     /// allocate one array per selector or condition. Hash buckets are intrusive
     /// linked lists over the same records, avoiding a <see cref="List{T}"/> per
     /// hash value.
+    /// </para>
+    /// <para>
+    /// Ids are dense, zero-based indices into the parallel collections and are
+    /// stable for the lifetime of the table: nothing is ever removed, only
+    /// appended. A negative id is the "absent" sentinel used for optional
+    /// references such as <see cref="Rule.ConditionId"/> and
+    /// <see cref="Rule.LayerId"/>.
+    /// </para>
+    /// <para>
+    /// The table is mutable while parsing and not thread-safe. Do not mutate it
+    /// while <see cref="MatchRules(IgniteSupportedDomNode, RendererContext)"/> is
+    /// running: matching uses shared scratch buffers, the growing token arenas
+    /// invalidate previously returned spans, and the condition cache stores a
+    /// single owner/version pair.
+    /// </para>
+    /// <para>
+    /// Matching returns rules weakest first, so a consumer applies them in order
+    /// and lets later declarations win. The ordering key is layer, then
+    /// specificity, then source order.
+    /// </para>
     /// </remarks>
+    /// <example>
+    /// <code>
+    /// var table = new DataTable();
+    /// var selectorId = table.InternSelector(selectorTokens);
+    /// table.AddRule(selectorId, propertyId, valueId, conditionId);
+    ///
+    /// var context = new RendererContext { ViewportWidth = 1280 };
+    /// foreach (var match in table.MatchRules(node, context))
+    /// {
+    ///     Apply(match.Rule.PropertyId, match.Rule.ValueId);
+    /// }
+    /// </code>
+    /// </example>
     public sealed partial class DataTable
     {
         private readonly List<SelectorRecord> _selectors;
@@ -100,13 +134,39 @@ namespace Ignite.Data
         private RendererContext? _cacheOwner;
         private long _cacheVersion = long.MinValue;
 
+        /// <summary>
+        /// Memo of the rule key most recently appended, used to collapse adjacent
+        /// exact duplicates without hashing the whole list.
+        /// </summary>
         private RuleKey _lastRule;
         private bool _hasLastRule;
 
+        /// <summary>
+        /// Initializes an empty table with the default capacity of 16 entries.
+        /// </summary>
+        /// <remarks>
+        /// Each capacity slot also reserves four rule slots and four token slots,
+        /// so capacity is a rough budget rather than an exact count. Prefer
+        /// <see cref="DataTable(int)"/> when the stylesheet size is known.
+        /// </remarks>
         public DataTable() : this(16)
         {
         }
 
+        /// <summary>
+        /// Initializes an empty table sized for roughly
+        /// <paramref name="capacity"/> selectors, conditions and rules.
+        /// </summary>
+        /// <param name="capacity">The expected number of selectors and conditions.</param>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// Thrown when <paramref name="capacity"/> is negative.
+        /// </exception>
+        /// <remarks>
+        /// Every internal collection is pre-sized, and the token arenas get at
+        /// least four tokens per unit of capacity, so a realistic hint removes
+        /// almost all growth reallocations during a parse. The hint does not limit
+        /// the table: it still grows geometrically when exceeded.
+        /// </remarks>
         public DataTable(int capacity)
         {
             ArgumentOutOfRangeException.ThrowIfNegative(capacity);
@@ -147,6 +207,11 @@ namespace Ignite.Data
             _conditionTokens = new Token[tokenCapacity];
         }
 
+        /// <summary>
+        /// Cached result of <see cref="ComputeHeightMediaQueries"/>. The nullable
+        /// makes the scan lazy and one-shot; <see langword="null"/> means "not yet
+        /// computed".
+        /// </summary>
         private bool? _hasHeightMediaQueries;
 
         /// <summary>
@@ -157,6 +222,11 @@ namespace Ignite.Data
         /// </summary>
         public bool HasHeightMediaQueries => _hasHeightMediaQueries ??= ComputeHeightMediaQueries();
 
+        /// <summary>
+        /// Scans every stored condition token for the substring "height". This is a
+        /// deliberately conservative text heuristic, not a parse of the media query.
+        /// </summary>
+        /// <returns><see langword="true"/> when any condition may depend on height.</returns>
         private bool ComputeHeightMediaQueries()
         {
             for (var i = 0; i < _conditionTokenCount; i++)
@@ -173,46 +243,132 @@ namespace Ignite.Data
             return false;
         }
 
+        /// <summary>
+        /// Gets the interned selectors, indexed by selector id.
+        /// </summary>
+        /// <remarks>
+        /// The collection is a live view over the table's internal list: it grows
+        /// as selectors are interned, so do not cache the reference across a parse.
+        /// </remarks>
         public IReadOnlyList<SelectorRecord> Selectors => _selectors;
 
+        /// <summary>
+        /// Gets every stored rule in source order.
+        /// </summary>
+        /// <remarks>
+        /// Adjacent exact duplicates are collapsed by <see cref="AddRule"/>, so this
+        /// is not necessarily one entry per parsed declaration. The index in this
+        /// list is the rule's cascade order.
+        /// </remarks>
         public IReadOnlyList<Rule> Rules => _rules;
 
+        /// <summary>
+        /// Gets the interned conditions, indexed by condition id.
+        /// </summary>
         public IReadOnlyList<Condition> Conditions => _conditions;
 
+        /// <summary>Gets the number of interned selectors.</summary>
         public int SelectorCount => _selectors.Count;
 
+        /// <summary>Gets the number of stored rules.</summary>
         public int RuleCount => _rules.Count;
 
+        /// <summary>Gets the number of interned conditions.</summary>
         public int ConditionCount => _conditions.Count;
 
+        /// <summary>Gets the recorded <c>@import</c> declarations in source order.</summary>
         public IReadOnlyList<CssImport> Imports => _imports;
+
+        /// <summary>Gets the recorded <c>@namespace</c> declarations in source order.</summary>
         public IReadOnlyList<CssNamespace> Namespaces => _namespaces;
+
+        /// <summary>Gets the declared cascade layers in declaration order.</summary>
         public IReadOnlyList<CssLayer> Layers => _layers;
+
+        /// <summary>Gets the recorded <c>@scope</c> boundaries in source order.</summary>
         public IReadOnlyList<CssScope> Scopes => _scopes;
+
+        /// <summary>Gets the recorded keyframe declarations.</summary>
         public IReadOnlyList<CssKeyframe> Keyframes => _keyframes;
+
+        /// <summary>Gets the recorded at-rule descriptors.</summary>
         public IReadOnlyList<CssDescriptor> Descriptors => _descriptors;
+
+        /// <summary>Gets the recorded <c>@page</c> margin box declarations.</summary>
         public IReadOnlyList<CssMarginBox> MarginBoxes => _marginBoxes;
+
+        /// <summary>Gets the recorded <c>@charset</c> declarations.</summary>
         public IReadOnlyList<CssCharset> Charsets => _charsets;
 
+        /// <summary>Gets the number of recorded <c>@import</c> declarations.</summary>
         public int ImportCount => _imports.Count;
+
+        /// <summary>Gets the number of recorded <c>@namespace</c> declarations.</summary>
         public int NamespaceCount => _namespaces.Count;
+
+        /// <summary>Gets the number of declared cascade layers.</summary>
         public int LayerCount => _layers.Count;
+
+        /// <summary>Gets the number of recorded <c>@scope</c> boundaries.</summary>
         public int ScopeCount => _scopes.Count;
+
+        /// <summary>Gets the number of recorded keyframe declarations.</summary>
         public int KeyframeCount => _keyframes.Count;
+
+        /// <summary>Gets the number of recorded at-rule descriptors.</summary>
         public int DescriptorCount => _descriptors.Count;
+
+        /// <summary>Gets the number of recorded <c>@page</c> margin box declarations.</summary>
         public int MarginBoxCount => _marginBoxes.Count;
+
+        /// <summary>Gets the number of recorded <c>@charset</c> declarations.</summary>
         public int CharsetCount => _charsets.Count;
 
+        /// <summary>
+        /// Returns the selector with the given id.
+        /// </summary>
+        /// <param name="id">
+        /// A selector id in the range 0 to <see cref="SelectorCount"/> - 1.
+        /// </param>
+        /// <returns>The stored selector record.</returns>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// Thrown when <paramref name="id"/> is not a valid selector id.
+        /// </exception>
         public SelectorRecord GetSelector(int id) => _selectors[id];
 
+        /// <summary>
+        /// Returns the rule with the given index.
+        /// </summary>
+        /// <param name="id">A rule index in the range 0 to <see cref="RuleCount"/> - 1.</param>
+        /// <returns>The stored rule.</returns>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// Thrown when <paramref name="id"/> is not a valid rule index.
+        /// </exception>
         public Rule GetRule(int id) => _rules[id];
 
+        /// <summary>
+        /// Returns the condition with the given id.
+        /// </summary>
+        /// <param name="id">
+        /// A condition id in the range 0 to <see cref="ConditionCount"/> - 1.
+        /// </param>
+        /// <returns>The stored condition.</returns>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// Thrown when <paramref name="id"/> is not a valid condition id.
+        /// </exception>
         public Condition GetCondition(int id) => _conditions[id];
 
         /// <summary>
         /// Returns the tokens of an interned selector. The span points into the
         /// table's arena and is invalidated by later additions.
         /// </summary>
+        /// <param name="id">
+        /// A selector id in the range 0 to <see cref="SelectorCount"/> - 1.
+        /// </param>
+        /// <returns>The selector's tokens, in source order.</returns>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// Thrown when <paramref name="id"/> is not a valid selector id.
+        /// </exception>
         public ReadOnlySpan<Token> GetSelectorSpan(int id)
         {
             var record = _selectors[id];
@@ -223,6 +379,16 @@ namespace Ignite.Data
         /// Returns the prelude tokens of an interned condition. The span points
         /// into the table's arena and is invalidated by later additions.
         /// </summary>
+        /// <param name="conditionId">
+        /// A condition id in the range 0 to <see cref="ConditionCount"/> - 1.
+        /// </param>
+        /// <returns>
+        /// The condition's prelude tokens, including the leading at-keyword. Two
+        /// conditions that share a prelude return the same tokens.
+        /// </returns>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// Thrown when <paramref name="conditionId"/> is not a valid condition id.
+        /// </exception>
         public ReadOnlySpan<Token> GetConditionTokens(int conditionId)
         {
             var condition = _conditions[conditionId];
@@ -235,6 +401,31 @@ namespace Ignite.Data
         /// kind, the same interned id, and the same descendant-gap state; source
         /// offsets themselves are irrelevant.
         /// </summary>
+        /// <param name="selector">
+        /// The selector tokens, left to right. Attribute string values may keep
+        /// their quotes; they are normalised to unquoted text.
+        /// </param>
+        /// <returns>
+        /// The existing or newly assigned selector id. The id is stable for the
+        /// lifetime of the table.
+        /// </returns>
+        /// <exception cref="ArgumentException">
+        /// Thrown when <paramref name="selector"/> is empty.
+        /// </exception>
+        /// <remarks>
+        /// <para>
+        /// Interning is the expensive step: it hashes the tokens, splits the
+        /// selector into compounds, parses attribute filters and pseudo classes,
+        /// and assigns the discriminator bucket that matching later probes. A hit
+        /// returns before any of that work.
+        /// </para>
+        /// <para>
+        /// Selectors that use a construct the engine cannot evaluate are still
+        /// interned, but are stored with <see cref="SelectorRecord.IsMatchable"/>
+        /// false and never returned by matching. This preserves the parse output
+        /// for inspectors without risking a wrong match.
+        /// </para>
+        /// </remarks>
         public int InternSelector(ReadOnlySpan<Token> selector)
         {
             if (selector.IsEmpty)
@@ -362,6 +553,19 @@ namespace Ignite.Data
         /// <paramref name="discriminator"/>, or an empty span when none do. The
         /// returned span is owned by the table and is invalidated by the next call.
         /// </summary>
+        /// <param name="discriminator">
+        /// A token whose kind and interned id form the bucket key. Identifier,
+        /// property name and function kinds are folded together before lookup.
+        /// </param>
+        /// <returns>
+        /// The bucket's selector ids in reverse insertion order. The span is reused
+        /// scratch storage, so copy it if it must outlive the next call.
+        /// </returns>
+        /// <remarks>
+        /// This is a diagnostic/entry-point helper; matching itself probes the same
+        /// buckets through <see cref="CollectCandidates"/>. The buffer grows on
+        /// demand and is never shrunk.
+        /// </remarks>
         public ReadOnlySpan<int> GetSelectorIds(Token discriminator)
         {
             var normalized = NormalizeDiscriminator(discriminator);
@@ -390,12 +594,35 @@ namespace Ignite.Data
             return _discriminatorBuffer.AsSpan(0, count);
         }
 
+        /// <summary>
+        /// Gets the number of distinct right-most discriminator buckets.
+        /// </summary>
+        /// <remarks>
+        /// This is the number of keys the candidate index can be probed by; it is
+        /// not the number of selectors, since one bucket can hold many.
+        /// </remarks>
         public int DiscriminatorCount => _discriminatorHeads.Count;
 
         /// <summary>
         /// Returns the id of an identical condition (same tokens and same parent),
         /// otherwise compiles it through <paramref name="compiler"/> and stores it.
         /// </summary>
+        /// <param name="condition">The condition prelude tokens.</param>
+        /// <param name="parentId">
+        /// The enclosing condition id, or -1 for a top-level condition. The parent
+        /// takes part in the identity, so the same prelude under different parents
+        /// yields different condition ids but shares the compiled executor.
+        /// </param>
+        /// <param name="compiler">
+        /// The compiler invoked for a new prelude. When omitted, or when it throws,
+        /// the condition is compiled to <see cref="Condition.AlwaysFalse"/>.
+        /// </param>
+        /// <returns>The existing or newly assigned condition id.</returns>
+        /// <remarks>
+        /// Conditions are interned by (tokens, parent), while executors are interned
+        /// by tokens alone. This keeps the condition chain exact for evaluation
+        /// while ensuring a media query used in many scopes is compiled once.
+        /// </remarks>
         public int GetOrAddCondition(
             ReadOnlySpan<Token> condition,
             int parentId,
@@ -423,6 +650,18 @@ namespace Ignite.Data
             return newId;
         }
 
+        /// <summary>
+        /// Returns the shared executor id for a prelude, compiling and storing it on
+        /// first use.
+        /// </summary>
+        /// <param name="condition">The prelude tokens.</param>
+        /// <param name="compiler">The compiler for a new prelude, or
+        /// <see langword="null"/> to fail closed.</param>
+        /// <returns>An executor id into the table's executor arrays.</returns>
+        /// <remarks>
+        /// The executor cache is keyed by tokens only, ignoring the parent, which is
+        /// what lets one compiled media query serve every nesting scope.
+        /// </remarks>
         private int GetOrAddExecutor(ReadOnlySpan<Token> condition, ConditionCompiler? compiler)
         {
             var hash = HashCondition(condition, 0);
@@ -458,6 +697,26 @@ namespace Ignite.Data
         /// selector more than once, while preserving cascade order for anything
         /// separated by another declaration.
         /// </summary>
+        /// <param name="selectorId">The selector the declaration belongs to.</param>
+        /// <param name="propertyId">The interned property name.</param>
+        /// <param name="valueId">The interned declaration value.</param>
+        /// <param name="conditionId">
+        /// The innermost condition gating the declaration, or -1 when unconditional.
+        /// </param>
+        /// <param name="layerId">
+        /// The cascade layer id from <see cref="GetOrAddLayer"/>, or -1 when
+        /// unlayered.
+        /// </param>
+        /// <returns>
+        /// The new rule's index, or the previous index when the declaration is an
+        /// exact duplicate of the immediately preceding one.
+        /// </returns>
+        /// <remarks>
+        /// Only duplicates that are adjacent in insertion order are collapsed, so
+        /// the relative order of distinct declarations is never changed. The rule is
+        /// linked at the head of its selector's chain, which is why matching can
+        /// enumerate a matched selector's rules without scanning the whole list.
+        /// </remarks>
         public int AddRule(int selectorId, int propertyId, int valueId, int conditionId, int layerId = -1)
         {
             var key = new RuleKey(selectorId, propertyId, valueId, conditionId);
@@ -496,6 +755,16 @@ namespace Ignite.Data
         /// Replaces one declaration's value in place. Used by the inspector to
         /// make matched rules editable without re-parsing a stylesheet.
         /// </summary>
+        /// <param name="ruleIndex">The index of the rule to edit.</param>
+        /// <param name="valueId">The new interned value.</param>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// Thrown when <paramref name="ruleIndex"/> is not a valid rule index.
+        /// </exception>
+        /// <remarks>
+        /// The rule keeps its position, so cascade order is unchanged. The
+        /// adjacent-duplicate memo is reset because the list no longer ends with the
+        /// value it recorded.
+        /// </remarks>
         public void SetRuleValue(int ruleIndex, int valueId)
         {
             if ((uint)ruleIndex >= (uint)_rules.Count)
@@ -516,6 +785,15 @@ namespace Ignite.Data
         }
 
         /// <summary>Replaces one declaration's property name in place.</summary>
+        /// <param name="ruleIndex">The index of the rule to edit.</param>
+        /// <param name="propertyId">The new interned property name.</param>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// Thrown when <paramref name="ruleIndex"/> is not a valid rule index.
+        /// </exception>
+        /// <remarks>
+        /// Like <see cref="SetRuleValue"/>, the rule keeps its cascade position and
+        /// the adjacent-duplicate memo is reset.
+        /// </remarks>
         public void SetRuleProperty(int ruleIndex, int propertyId)
         {
             if ((uint)ruleIndex >= (uint)_rules.Count)
@@ -538,6 +816,13 @@ namespace Ignite.Data
         /// <summary>
         /// Records a stylesheet import for the host to resolve.
         /// </summary>
+        /// <param name="urlId">The interned url text.</param>
+        /// <param name="layerId">The target layer id, or -1 when unlayered.</param>
+        /// <param name="conditionId">The media condition id, or -1 when unconditional.</param>
+        /// <param name="supportsConditionId">
+        /// The <c>supports()</c> condition id, or -1 when none was given.
+        /// </param>
+        /// <returns>The index of the recorded import.</returns>
         public int AddImport(int urlId, int layerId = -1, int conditionId = -1, int supportsConditionId = -1)
         {
             var import = new CssImport(urlId, layerId, conditionId, supportsConditionId);
@@ -548,6 +833,9 @@ namespace Ignite.Data
         /// <summary>
         /// Records a namespace declaration.
         /// </summary>
+        /// <param name="prefixId">The interned prefix, or -1 for a default namespace.</param>
+        /// <param name="uriId">The interned namespace uri.</param>
+        /// <returns>The index of the recorded declaration.</returns>
         public int AddNamespace(int prefixId, int uriId)
         {
             _namespaces.Add(new CssNamespace(prefixId, uriId));
@@ -557,6 +845,16 @@ namespace Ignite.Data
         /// <summary>
         /// Records (or reuses) a cascade layer, returning its layer id.
         /// </summary>
+        /// <param name="nameId">The interned layer name.</param>
+        /// <returns>
+        /// The existing id when the name was already declared, otherwise the next
+        /// id. The id doubles as the layer's cascade order.
+        /// </returns>
+        /// <remarks>
+        /// The lookup is a linear scan of the declared layers, which is fine because
+        /// a stylesheet declares only a handful. The <see cref="CssLayer.Order"/>
+        /// value written on first declaration equals the returned id.
+        /// </remarks>
         public int GetOrAddLayer(int nameId)
         {
             for (var i = 0; i < _layers.Count; i++)
@@ -575,6 +873,8 @@ namespace Ignite.Data
         /// <summary>
         /// Records a scope boundary.
         /// </summary>
+        /// <param name="preludeId">The interned prelude text of the <c>@scope</c> rule.</param>
+        /// <returns>The index of the recorded scope.</returns>
         public int AddScope(int preludeId)
         {
             _scopes.Add(new CssScope(preludeId));
@@ -584,6 +884,19 @@ namespace Ignite.Data
         /// <summary>
         /// Records a keyframe declaration.
         /// </summary>
+        /// <param name="nameId">The interned animation name.</param>
+        /// <param name="keyId">
+        /// The selector id of the keyframe selector, for example the id of
+        /// <c>"from"</c> or <c>"50%"</c>.
+        /// </param>
+        /// <param name="propertyId">The interned property name.</param>
+        /// <param name="valueId">The interned declaration value.</param>
+        /// <param name="conditionId">The gating condition id, or -1 when unconditional.</param>
+        /// <returns>The index of the recorded declaration.</returns>
+        /// <remarks>
+        /// Keyframes are stored flat and grouped by <paramref name="nameId"/> by the
+        /// host when it builds an animation; the table does not nest them.
+        /// </remarks>
         public int AddKeyframe(int nameId, int keyId, int propertyId, int valueId, int conditionId = -1)
         {
             _keyframes.Add(new CssKeyframe(nameId, keyId, propertyId, valueId, conditionId));
@@ -593,6 +906,14 @@ namespace Ignite.Data
         /// <summary>
         /// Records a descriptor inside an at-rule.
         /// </summary>
+        /// <param name="atRuleId">
+        /// The interned at-rule name including the leading '@', for example
+        /// <c>"@font-face"</c>.
+        /// </param>
+        /// <param name="contextId">The interned at-rule prelude, or -1 when there is none.</param>
+        /// <param name="propertyId">The interned descriptor name.</param>
+        /// <param name="valueId">The interned descriptor value.</param>
+        /// <returns>The index of the recorded descriptor.</returns>
         public int AddDescriptor(int atRuleId, int contextId, int propertyId, int valueId)
         {
             _descriptors.Add(new CssDescriptor(atRuleId, contextId, propertyId, valueId));
@@ -602,6 +923,13 @@ namespace Ignite.Data
         /// <summary>
         /// Records a margin box declaration.
         /// </summary>
+        /// <param name="boxId">
+        /// The interned margin box name including the leading '@', for example
+        /// <c>"@top-center"</c>.
+        /// </param>
+        /// <param name="propertyId">The interned property name.</param>
+        /// <param name="valueId">The interned declaration value.</param>
+        /// <returns>The index of the recorded declaration.</returns>
         public int AddMarginBox(int boxId, int propertyId, int valueId)
         {
             _marginBoxes.Add(new CssMarginBox(boxId, propertyId, valueId));
@@ -611,6 +939,8 @@ namespace Ignite.Data
         /// <summary>
         /// Records a charset declaration.
         /// </summary>
+        /// <param name="charsetId">The interned charset name.</param>
+        /// <returns>The index of the recorded declaration.</returns>
         public int AddCharset(int charsetId)
         {
             _charsets.Add(new CssCharset(charsetId));
@@ -622,6 +952,34 @@ namespace Ignite.Data
         /// Each condition is evaluated at most once per environment version, so
         /// a rule set sharing a media query pays for that query once per change.
         /// </summary>
+        /// <param name="conditionId">
+        /// The innermost condition to test, or a negative value for "no condition",
+        /// which always matches.
+        /// </param>
+        /// <param name="context">The environment to evaluate against.</param>
+        /// <returns>
+        /// <see langword="true"/> when the condition and every ancestor match;
+        /// otherwise <see langword="false"/>.
+        /// </returns>
+        /// <exception cref="ArgumentNullException">
+        /// Thrown when <paramref name="conditionId"/> is non-negative and
+        /// <paramref name="context"/> is <see langword="null"/>.
+        /// </exception>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// Thrown when a condition id in the ancestor chain is out of range.
+        /// </exception>
+        /// <remarks>
+        /// <para>
+        /// The cache is stamped with a generation that advances whenever
+        /// <see cref="RendererContext.Version"/> changes or the context instance is
+        /// replaced, so results are never shared across environments. Because the
+        /// cache is stored on the table, this method is not re-entrant.
+        /// </para>
+        /// <para>
+        /// A negative parent id terminates the walk, so the root condition is only
+        /// evaluated once.
+        /// </para>
+        /// </remarks>
         public bool MatchesCondition(int conditionId, in RendererContext context)
         {
             if (conditionId < 0)
@@ -663,19 +1021,44 @@ namespace Ignite.Data
         /// <summary>
         /// Evaluates the conditions that gate <paramref name="rule"/>.
         /// </summary>
+        /// <param name="rule">The rule whose <see cref="Rule.ConditionId"/> is tested.</param>
+        /// <param name="context">The environment to evaluate against.</param>
+        /// <returns>
+        /// <see langword="true"/> when the rule is unconditional or all of its
+        /// conditions match.
+        /// </returns>
+        /// <remarks>
+        /// A convenience wrapper over <see cref="MatchesCondition"/>; it shares the
+        /// same per-version condition cache.
+        /// </remarks>
         public bool MatchesRule(Rule rule, in RendererContext context)
         {
             return MatchesCondition(rule.ConditionId, in context);
         }
 
+        /// <summary>
+        /// The identity used to collapse adjacent duplicate declarations.
+        /// </summary>
         private readonly record struct RuleKey(
             int SelectorId,
             int PropertyId,
             int ValueId,
             int ConditionId);
 
+        /// <summary>
+        /// The candidate-index key: the normalised right-most discriminator kind
+        /// and its interned id. <see cref="TokenKind.Identifier"/> covers type and
+        /// class subjects; <see cref="TokenKind.Hash"/> covers ids.
+        /// </summary>
         private readonly record struct DiscriminatorKey(TokenKind Kind, int InternedId);
 
+        /// <summary>
+        /// Looks for an interned selector with the same hash and token identity.
+        /// </summary>
+        /// <param name="hash">The precomputed selector hash.</param>
+        /// <param name="selector">The normalised selector tokens.</param>
+        /// <param name="id">The matching selector id, or -1 when none matches.</param>
+        /// <returns><see langword="true"/> when a match was found.</returns>
         private bool TryFindSelector(int hash, ReadOnlySpan<Token> selector, out int id)
         {
             if (_selectorHeads.TryGetValue(hash, out var current))
@@ -696,6 +1079,15 @@ namespace Ignite.Data
             return false;
         }
 
+        /// <summary>
+        /// Looks for a condition with the same hash, same prelude tokens and the
+        /// same parent.
+        /// </summary>
+        /// <param name="hash">The precomputed condition hash, which includes the parent.</param>
+        /// <param name="condition">The prelude tokens.</param>
+        /// <param name="parentId">The required parent condition id.</param>
+        /// <param name="id">The matching condition id, or -1 when none matches.</param>
+        /// <returns><see langword="true"/> when a match was found.</returns>
         private bool TryFindCondition(
             int hash,
             ReadOnlySpan<Token> condition,
@@ -722,6 +1114,11 @@ namespace Ignite.Data
             return false;
         }
 
+        /// <summary>
+        /// Returns the prelude tokens of a shared executor.
+        /// </summary>
+        /// <param name="executorId">An executor id, which is always valid when it
+        /// comes from a stored <see cref="Condition"/>.</param>
         private ReadOnlySpan<Token> GetExecutorTokens(int executorId)
         {
             return _conditionTokens.AsSpan(
@@ -729,6 +1126,15 @@ namespace Ignite.Data
                 _executorTokenLength[executorId]);
         }
 
+        /// <summary>
+        /// Copies a selector's tokens into the flat arena and returns their offset.
+        /// </summary>
+        /// <param name="tokens">The tokens to append.</param>
+        /// <returns>The token index where the copy starts.</returns>
+        /// <remarks>
+        /// The arena may be resized, which invalidates every span previously obtained
+        /// through <see cref="GetSelectorSpan"/>.
+        /// </remarks>
         private int AppendSelectorTokens(ReadOnlySpan<Token> tokens)
         {
             EnsureSelectorTokenCapacity(_selectorTokenCount + tokens.Length);
@@ -739,6 +1145,12 @@ namespace Ignite.Data
             return offset;
         }
 
+        /// <summary>
+        /// Copies a condition prelude into the shared executor arena and returns its
+        /// offset.
+        /// </summary>
+        /// <param name="tokens">The prelude tokens to append.</param>
+        /// <returns>The token index where the copy starts.</returns>
         private int AppendConditionTokens(ReadOnlySpan<Token> tokens)
         {
             EnsureConditionTokenCapacity(_conditionTokenCount + tokens.Length);
@@ -749,6 +1161,11 @@ namespace Ignite.Data
             return offset;
         }
 
+        /// <summary>
+        /// Grows the selector arena geometrically until it can hold
+        /// <paramref name="required"/> tokens.
+        /// </summary>
+        /// <param name="required">The minimum required token capacity.</param>
         private void EnsureSelectorTokenCapacity(int required)
         {
             if (required <= _selectorTokens.Length)
@@ -760,6 +1177,11 @@ namespace Ignite.Data
             Array.Resize(ref _selectorTokens, size);
         }
 
+        /// <summary>
+        /// Grows the condition arena geometrically until it can hold
+        /// <paramref name="required"/> tokens.
+        /// </summary>
+        /// <param name="required">The minimum required token capacity.</param>
         private void EnsureConditionTokenCapacity(int required)
         {
             if (required <= _conditionTokens.Length)
@@ -771,6 +1193,14 @@ namespace Ignite.Data
             Array.Resize(ref _conditionTokens, size);
         }
 
+        /// <summary>
+        /// Grows the parallel condition stamp/result arrays so they cover every
+        /// stored condition.
+        /// </summary>
+        /// <remarks>
+        /// The arrays are allocated lazily because a stylesheet with no at-rules
+        /// never evaluates a condition and should not pay for the cache.
+        /// </remarks>
         private void EnsureConditionCacheCapacity()
         {
             if (_conditionStamp.Length >= _conditions.Count)
@@ -783,6 +1213,15 @@ namespace Ignite.Data
             Array.Resize(ref _conditionResult, size);
         }
 
+        /// <summary>
+        /// Advances the cache generation when the context instance or its version
+        /// changed, invalidating every stamped condition result.
+        /// </summary>
+        /// <param name="context">The context about to be evaluated.</param>
+        /// <remarks>
+        /// A generation of zero is reserved for "never evaluated", so the counter
+        /// skips it on wrap by clearing the stamps and restarting at one.
+        /// </remarks>
         private void UpdateCache(in RendererContext context)
         {
             if (ReferenceEquals(_cacheOwner, context) && _cacheVersion == context.Version)
@@ -802,6 +1241,19 @@ namespace Ignite.Data
             }
         }
 
+        /// <summary>
+        /// Prepends <paramref name="id"/> to the intrusive chain for
+        /// <paramref name="hash"/>, making it the new head.
+        /// </summary>
+        /// <param name="heads">Hash to head-id map.</param>
+        /// <param name="next">Parallel next-id list, indexed by id.</param>
+        /// <param name="hash">The bucket key.</param>
+        /// <param name="id">The record being linked; must equal <c>next.Count</c>.</param>
+        /// <remarks>
+        /// The chain is singly linked in reverse insertion order. Because the next
+        /// pointer for a record is stored in the shared list rather than per bucket,
+        /// a bucket never allocates its own collection.
+        /// </remarks>
         private static void Link(
             Dictionary<int, int> heads,
             List<int> next,
@@ -812,6 +1264,18 @@ namespace Ignite.Data
             heads[hash] = id;
         }
 
+        /// <summary>
+        /// Invokes a condition compiler, converting any failure into
+        /// <see cref="Condition.AlwaysFalse"/>.
+        /// </summary>
+        /// <param name="compiler">The compiler to invoke.</param>
+        /// <param name="condition">The prelude tokens passed to the compiler.</param>
+        /// <returns>The compiled predicate, or <see cref="Condition.AlwaysFalse"/>.</returns>
+        /// <remarks>
+        /// Failures are swallowed deliberately: an unsupported condition must not
+        /// apply gated rules, and one bad at-rule should not abort the whole
+        /// stylesheet. <see cref="OutOfMemoryException"/> is still propagated.
+        /// </remarks>
         private static ConditionFunction CompileCondition(
             ConditionCompiler compiler,
             ReadOnlySpan<Token> condition)
@@ -888,6 +1352,18 @@ namespace Ignite.Data
             return tokens;
         }
 
+        /// <summary>
+        /// Folds the token kinds that can act as a right-most discriminator into
+        /// <see cref="TokenKind.Identifier"/>, keeping the interned id unchanged.
+        /// </summary>
+        /// <param name="token">The right-most selector token.</param>
+        /// <returns>A token with a normalised kind and identical id/location.</returns>
+        /// <remarks>
+        /// Class names may be tokenised as <see cref="TokenKind.PropertyName"/> when
+        /// they collide with a CSS property keyword (for example <c>.content</c>),
+        /// and functional names as <see cref="TokenKind.Function"/>; all three are
+        /// probed through the identifier bucket.
+        /// </remarks>
         private static Token NormalizeDiscriminator(in Token token)
         {
             var kind = token.Kind switch
@@ -938,6 +1414,12 @@ namespace Ignite.Data
                 or TokenKind.ColumnCombinator;
         }
 
+        /// <summary>
+        /// Hashes a selector from its token kinds, interned ids and descendant-gap
+        /// state, deliberately ignoring source offsets.
+        /// </summary>
+        /// <param name="selector">The selector tokens.</param>
+        /// <returns>A hash compatible with <see cref="SelectorEquals"/>.</returns>
         private static int HashSelector(ReadOnlySpan<Token> selector)
         {
             var hash = new HashCode();
@@ -952,6 +1434,12 @@ namespace Ignite.Data
             return hash.ToHashCode();
         }
 
+        /// <summary>
+        /// Hashes a condition prelude and its parent id.
+        /// </summary>
+        /// <param name="condition">The prelude tokens.</param>
+        /// <param name="parentId">The enclosing condition id, or -1.</param>
+        /// <returns>A hash compatible with <see cref="TokenEquals"/>.</returns>
         private static int HashCondition(ReadOnlySpan<Token> condition, int parentId)
         {
             var hash = new HashCode();
@@ -967,6 +1455,13 @@ namespace Ignite.Data
             return hash.ToHashCode();
         }
 
+        /// <summary>
+        /// Compares two token runs for selector identity: same length, same kinds,
+        /// same interned ids and same gap state.
+        /// </summary>
+        /// <param name="stored">The stored token run.</param>
+        /// <param name="candidate">The candidate token run.</param>
+        /// <returns><see langword="true"/> when the runs are the same selector.</returns>
         private static bool SelectorEquals(ReadOnlySpan<Token> stored, ReadOnlySpan<Token> candidate)
         {
             if (stored.Length != candidate.Length)
@@ -987,6 +1482,13 @@ namespace Ignite.Data
             return true;
         }
 
+        /// <summary>
+        /// Compares two condition token runs. Conditions and selectors share the
+        /// same identity rules, so this delegates to <see cref="SelectorEquals"/>.
+        /// </summary>
+        /// <param name="stored">The stored token run.</param>
+        /// <param name="candidate">The candidate token run.</param>
+        /// <returns><see langword="true"/> when the runs are identical.</returns>
         private static bool TokenEquals(ReadOnlySpan<Token> stored, ReadOnlySpan<Token> candidate)
         {
             return SelectorEquals(stored, candidate);

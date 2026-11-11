@@ -2,15 +2,58 @@ using System.Text;
 
 namespace Ignite.Inspector;
 
-/// <summary>The inspector's own stylesheet. It is appended after author CSS.</summary>
+/// <summary>
+/// The inspector's own stylesheet, appended after author CSS.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <see cref="Css"/> defines the dark panel chrome under the
+/// <c>#ignite-devtools</c> id, and <see cref="HeightClasses"/> supplies fixed
+/// pixel heights and widths because the layout engine has no inline styles.
+/// Both strings are built once at type initialisation and are immutable
+/// afterwards, so they can be shared between threads.
+/// </para>
+/// <para>
+/// The host compiles <c>Css + HeightClasses</c> last, after the user-agent and
+/// author sheets, which lets the panel's rules win ties by source order. The
+/// stylesheet is only compiled when devtools are enabled.
+/// </para>
+/// </remarks>
 public static class InspectorStyles
 {
-    /// <summary>Height of the panel when docked to the bottom, in CSS pixels.</summary>
+    /// <summary>
+    /// Default height of the panel when docked to the bottom, in CSS pixels.
+    /// </summary>
+    /// <remarks>
+    /// Used as the initial <see cref="DevToolsState.DockBottomHeight"/> and
+    /// interpolated into the <c>dt-dock-bottom</c> rule. Splitter drags clamp the
+    /// live value to 160..900.
+    /// </remarks>
     public const float DockBottomHeight = 320;
 
-    /// <summary>Width of the panel when docked to the right, in CSS pixels.</summary>
+    /// <summary>
+    /// Default width of the panel when docked to the right, in CSS pixels.
+    /// </summary>
+    /// <remarks>
+    /// Used as the initial <see cref="DevToolsState.DockRightWidth"/> and
+    /// interpolated into the <c>dt-dock-right</c> rule. Splitter drags clamp the
+    /// live value to 280..1000.
+    /// </remarks>
     public const float DockRightWidth = 460;
 
+    /// <summary>
+    /// Gets the inspector stylesheet, including the dock and standalone layout
+    /// rules but not the generated utility classes.
+    /// </summary>
+    /// <value>
+    /// A raw string literal with rules for the toolbar, tabs, DOM tree, styles
+    /// pane, colour picker, animation list and performance cards.
+    /// </value>
+    /// <remarks>
+    /// Height and width utility classes are deliberately excluded; append
+    /// <see cref="HeightClasses"/> when compiling so resized docks and graph bars
+    /// have matching rules.
+    /// </remarks>
     public static string Css { get; } = $$"""
         .dt-host {
             position: relative;
@@ -839,11 +882,33 @@ public static class InspectorStyles
         """;
 
     /// <summary>
-    /// Height utility classes used by the performance graph. The engine has no
-    /// inline style support, so bar heights are chosen from this table.
+    /// Height and width utility classes used by the performance graph and the
+    /// resizable docks. The engine has no inline style support, so sizes are
+    /// chosen from this table.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Contains <c>dt-h0</c> through <c>dt-h120</c> (bar heights in pixels),
+    /// <c>dt-dockh-160</c> through <c>dt-dockh-900</c> (bottom dock heights) and
+    /// <c>dt-dockw-280</c> through <c>dt-dockw-1000</c> (right dock widths).
+    /// </para>
+    /// <para>
+    /// Values outside those ranges have no class; callers must clamp first. The
+    /// string is generated once and shared.
+    /// </para>
+    /// </remarks>
     public static string HeightClasses { get; } = BuildHeightClasses();
 
+    /// <summary>
+    /// Generates the pixel-height and pixel-width utility class text.
+    /// </summary>
+    /// <returns>
+    /// Newline-separated rules for all supported graph and dock sizes.
+    /// </returns>
+    /// <remarks>
+    /// Emits 1583 rules into a single <see cref="StringBuilder"/>. Called once by
+    /// the <see cref="HeightClasses"/> initializer; not intended for repeated use.
+    /// </remarks>
     private static string BuildHeightClasses()
     {
         var builder = new StringBuilder();

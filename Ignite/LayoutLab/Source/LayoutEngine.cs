@@ -11,53 +11,205 @@ namespace Ignite.LayoutLab;
 /// </summary>
 /// <remarks>
 /// <para>
-/// One engine instance is reusable across frames. It owns the style/text caches;
-/// caches are invalidated by the DOM revision, the containing style identity,
-/// the renderer context version and the layout viewport.
+/// One engine instance is reusable across frames. It owns the style, text and
+/// layout-box caches, together with the animation state of every animated node.
+/// Cache entries are validated by the DOM revision, the inherited-value hash of
+/// the containing style, a frame signature derived from the viewport and font
+/// settings, and the renderer context version. Changing a key re-resolves the
+/// affected node instead of forcing a cold rebuild of the whole tree.
 /// </para>
 /// <para>
-/// The layout tree keeps unscrolled absolute coordinates. Scroll offsets are
-/// clamped per scroll container and applied by the display-list builder, which
-/// makes scrolling a paint-only operation.
+/// A frame builds the box tree with <see cref="BuildBox"/>, lays it out through
+/// <see cref="LayoutRootBox"/>, drains absolutely positioned boxes with
+/// <see cref="ProcessAbsoluteBoxes"/> and finally emits paint instructions with
+/// <see cref="BuildDisplayList"/>. The tree keeps unscrolled absolute
+/// coordinates; scroll offsets are clamped per scroll container and applied as
+/// paint-time translations, so scrolling never invalidates geometry.
+/// </para>
+/// <para>
+/// Instances are not thread-safe and expect to be driven by a single layout
+/// thread. When <see cref="LayoutOptions.ReuseLayoutBoxes"/> is enabled the
+/// cached <see cref="LayoutBox"/> instances are mutated in place, which means a
+/// previous <see cref="LayoutResult"/> is only stable when
+/// <see cref="LayoutOptions.SnapshotResults"/> copied it.
 /// </para>
 /// </remarks>
+/// <seealso cref="LayoutOptions"/>
+/// <seealso cref="LayoutResult"/>
 public sealed partial class LayoutEngine
 {
+    /// <summary>The compiled rule table used for selector matching and style resolution.</summary>
     private readonly DataTable _table;
+
+    /// <summary>
+    /// Shared cache of parsed CSS values, owned by the host when one is supplied.
+    /// </summary>
     private readonly StyleValueCache _valueCache;
+
+    /// <summary>
+    /// Computed styles keyed by node. Entries are reused until the node revision,
+    /// the parent's inherited-value hash, the frame signature or the renderer
+    /// context version changes. See <see cref="ResolveStyle"/>.
+    /// </summary>
     private readonly Dictionary<IgniteSupportedDomNode, StyleCacheEntry> _styleCache = [];
+
+    /// <summary>Current-generation text layouts keyed by text, style and quantised width.</summary>
     private Dictionary<TextLayoutKey, TextLayout> _textCache = [];
+
+    /// <summary>
+    /// Previous-generation text layouts. The two maps rotate when the current
+    /// map reaches 1024 entries, giving a bounded approximation of an LRU cache.
+    /// </summary>
     private Dictionary<TextLayoutKey, TextLayout> _textCachePrevious = [];
+
+    /// <summary>
+    /// Reusable boxes keyed by node. Populated only when
+    /// <see cref="LayoutOptions.ReuseLayoutBoxes"/> is enabled; detached entries
+    /// are removed by <see cref="PruneBoxCache"/>.
+    /// </summary>
     private readonly Dictionary<IgniteSupportedDomNode, LayoutBox> _boxCache = [];
+
+    /// <summary>Scratch list of detached box-cache keys filled during pruning.</summary>
     private readonly List<IgniteSupportedDomNode> _staleBoxes = [];
+
+    /// <summary>Scratch list of detached style-cache keys filled during pruning.</summary>
     private readonly List<IgniteSupportedDomNode> _staleStyles = [];
+
+    /// <summary>
+    /// Every node reached by <see cref="BuildBox"/> in the current frame,
+    /// including <c>display:none</c> nodes that produced no box. Pruning uses it
+    /// to keep styles for live but unpainted subtrees.
+    /// </summary>
     private readonly HashSet<IgniteSupportedDomNode> _visited = [];
+
+    /// <summary>
+    /// Node-to-box lookup for the frame being laid out, exposed through
+    /// <see cref="LayoutResult"/>.
+    /// </summary>
     private readonly Dictionary<IgniteSupportedDomNode, LayoutBox> _byNode = [];
+
+    /// <summary>
+    /// Absolutely and fixed positioned boxes discovered while building the tree,
+    /// in discovery order. They are laid out after normal flow by
+    /// <see cref="ProcessAbsoluteBoxes"/>.
+    /// </summary>
     private readonly List<LayoutBox> _absolutes = [];
+
+    /// <summary>
+    /// Boxes already processed by <see cref="ProcessAbsoluteBoxes"/>. It makes
+    /// the recursive drain idempotent when nested absolutes are appended while
+    /// an outer absolute is being laid out.
+    /// </summary>
     private readonly HashSet<LayoutBox> _absoluteLaidOut = [];
 
+    /// <summary>
+    /// Scratch buffer for
+    /// <see cref="DataTable.MatchRules(IgniteSupportedDomNode,RendererContext,Span{MatchedRule})"/>
+    /// overload; grows to fit the largest match set.
+    /// </summary>
     private MatchedRule[] _matchBuffer = new MatchedRule[16];
+
+    /// <summary>
+    /// Per-frame configuration, including the viewport, providers and scroll
+    /// overrides.
+    /// </summary>
     private LayoutOptions _options = new();
+
+    /// <summary>
+    /// Resolver created per frame; it writes into the shared
+    /// <see cref="_valueCache"/>.
+    /// </summary>
     private StyleResolver _resolver = null!;
+
+    /// <summary>
+    /// Root length context carrying viewport and root font metrics for the frame.
+    /// </summary>
     private LengthContext _baseContext;
+
+    /// <summary>Renderer environment used for media and container queries on this frame.</summary>
     private RendererContext _rendererContext = new();
+
+    /// <summary>
+    /// Text measurer selected from <see cref="LayoutOptions.TextMeasurer"/>
+    /// for this frame.
+    /// </summary>
     private ITextMeasurer _measurer = SimpleTextMeasurer.Instance;
+
+    /// <summary>
+    /// Hash of viewport, font, orientation, pixel-ratio and renderer-context
+    /// inputs. Style-cache entries are invalid when this value changes.
+    /// </summary>
     private long _styleSignature;
+
+    /// <summary>
+    /// Renderer-context version used as a style-cache key. It is the full
+    /// viewport-sensitive version when viewport height can affect styles.
+    /// </summary>
     private long _contextVersion;
 
+    /// <summary>Paint-instruction buffer for the current frame.</summary>
     private InstructionBuffer _instructions = new();
+
+    /// <summary>Reusable destination buffer for <see cref="Optimiser.Run"/>.</summary>
     private readonly InstructionBuffer _optimisedInstructions = new();
+
+    /// <summary>Constant pool referenced by the current frame's instructions.</summary>
     private ConstantPool _constants = new();
+
+    /// <summary>Holds per-node animation clocks and running states across frames.</summary>
     private readonly AnimationRuntime _animations;
+
+    /// <summary>Scratch list of fixed boxes deferred to the second paint pass.</summary>
     private readonly List<LayoutBox> _fixedBoxes = [];
+
+    /// <summary>
+    /// Pooled child lists indexed by flex/grid nesting depth. Each nested layout
+    /// gets its own list so an outer item list is not overwritten mid-iteration.
+    /// </summary>
     private readonly List<List<LayoutBox>> _flowItemLists = [];
+
+    /// <summary>Current nesting depth into <see cref="_flowItemLists"/>.</summary>
     private int _flowItemDepth;
+
+    /// <summary>True while the deferred fixed-position paint pass is running.</summary>
     private bool _paintingFixed;
+
+    /// <summary>
+    /// Set when any resolved style uses a viewport-height unit. The style
+    /// signature is computed before this flag is reset, so the next signature
+    /// includes the viewport height.
+    /// </summary>
     private bool _usesViewportHeight;
+
+    /// <summary>Layout viewport used as the containing block for fixed boxes.</summary>
     private Rect _layoutViewport;
+
+    /// <summary>
+    /// Root box of the current frame, or <see langword="null"/> when the root is
+    /// not displayed.
+    /// </summary>
     private LayoutBox? _root;
+
+    /// <summary>
+    /// Effective tree-depth cap for <see cref="BuildBox"/>, clamped to at least one.
+    /// </summary>
     private int _maxDepth = 512;
 
+    /// <summary>Initializes a layout engine bound to a compiled rule table.</summary>
+    /// <param name="table">The CSS table used to match rules and resolve computed styles.</param>
+    /// <param name="valueCache">
+    /// Optional parsed-value cache to share with other consumers. When omitted the
+    /// engine creates and owns one.
+    /// </param>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="table"/> is <see langword="null"/>.
+    /// </exception>
+    /// <remarks>
+    /// The engine retains both dependencies for its lifetime and never disposes
+    /// them. Reuse one engine per document host so the style, text and box caches
+    /// survive between frames; create a separate instance for independent
+    /// documents or threads.
+    /// </remarks>
     public LayoutEngine(DataTable table, StyleValueCache? valueCache = null)
     {
         _table = table ?? throw new ArgumentNullException(nameof(table));
@@ -65,17 +217,84 @@ public sealed partial class LayoutEngine
         _animations = new AnimationRuntime(table);
     }
 
+    /// <summary>Gets the parsed CSS value cache used by the style resolver.</summary>
+    /// <value>
+    /// The cache supplied to the constructor, or a cache created by the engine.
+    /// </value>
+    /// <remarks>
+    /// The cache deduplicates resolved values such as lengths and colours. It is
+    /// cleared by <see cref="ClearCaches"/>; other engine caches do not affect it.
+    /// </remarks>
     public StyleValueCache ValueCache => _valueCache;
 
     /// <summary>Number of nodes with retained animation state, for tests and diagnostics.</summary>
+    /// <value>The number of entries currently held by the animation runtime.</value>
+    /// <remarks>
+    /// Entries are created for animated nodes and pruned after a layout or
+    /// animated repaint when their node is no longer visited.
+    /// </remarks>
     public int AnimationStateCount => _animations.StateCount;
 
+    /// <summary>Lays out a frame with default <see cref="LayoutOptions"/>.</summary>
+    /// <param name="root">Root of the DOM subtree to lay out.</param>
+    /// <returns>The frame's box tree, display list, constant pool and node map.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="root"/> is <see langword="null"/>.
+    /// </exception>
+    /// <remarks>
+    /// Equivalent to <see cref="Layout(IgniteSupportedDomNode, LayoutOptions?)"/>
+    /// with <see langword="null"/> options. A fresh options object is created and
+    /// discarded, so viewport size, providers and scroll offsets use their
+    /// defaults.
+    /// </remarks>
     public LayoutResult Layout(IgniteSupportedDomNode root)
     {
         return Layout(root, null);
     }
 
     /// <summary>Lays out a frame, reusing the engine's style and text caches.</summary>
+    /// <param name="root">
+    /// Root of the DOM subtree to lay out. Must not be <see langword="null"/>.
+    /// </param>
+    /// <param name="options">
+    /// Frame configuration. When <see langword="null"/>, a default instance is used.
+    /// </param>
+    /// <returns>
+    /// A <see cref="LayoutResult"/> containing the root box, the optimised or raw
+    /// instruction stream, constants, the node-to-box map and optimisation stats.
+    /// </returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="root"/> is <see langword="null"/>.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The pass runs in this order: cache selection and frame setup, box-tree
+    /// construction, cache pruning, root layout, absolute-position drain and
+    /// display-list building. Normal flow, flex, grid and table layout all share
+    /// the same resolved style and box caches.
+    /// </para>
+    /// <para>
+    /// When <see cref="LayoutOptions.Optimise"/> is enabled the instruction
+    /// stream is passed through <see cref="Optimiser.Run"/>; otherwise the raw
+    /// buffer is returned. <see cref="LayoutOptions.SnapshotResults"/> decides
+    /// whether the returned stream and node map are copies or aliases of the
+    /// engine's reusable storage.
+    /// </para>
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var engine = new LayoutEngine(table);
+    /// var options = new LayoutOptions
+    /// {
+    ///     ViewportWidth = 1280,
+    ///     ViewportHeight = 720,
+    ///     TextMeasurer = hostMeasurer
+    /// };
+    ///
+    /// var frame = engine.Layout(root, options);
+    /// var instructions = frame.Opcodes;
+    /// </code>
+    /// </example>
     public LayoutResult Layout(IgniteSupportedDomNode root, LayoutOptions? options)
     {
         ArgumentNullException.ThrowIfNull(root);
@@ -144,6 +363,29 @@ public sealed partial class LayoutEngine
     /// valid. Scroll offsets never move boxes, so a scroll can repaint without
     /// rebuilding the box tree or re-resolving styles.
     /// </summary>
+    /// <param name="previous">A frame whose geometry is still valid.</param>
+    /// <param name="options">
+    /// Configuration for the repaint. Its viewport must match the viewport used
+    /// to produce <paramref name="previous"/>; changed styles are not re-resolved.
+    /// </param>
+    /// <returns>A new result that reuses <paramref name="previous"/>'s box tree.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="previous"/> is <see langword="null"/>.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// Scroll metrics are recomputed from the existing geometry so offsets can
+    /// be re-clamped, then the display list is emitted with the new offsets.
+    /// Style and text caches are not consulted. Box geometry is not mutated;
+    /// only scroll metrics and scroll offsets are refreshed.
+    /// </para>
+    /// <para>
+    /// When <paramref name="previous"/> was created without
+    /// <see cref="LayoutOptions.SnapshotResults"/> its node map is the engine's
+    /// live map; the engine detects that case instead of clearing it. Passing a
+    /// result from a different engine is not supported.
+    /// </para>
+    /// </remarks>
     public LayoutResult Repaint(LayoutResult previous, LayoutOptions? options)
     {
         ArgumentNullException.ThrowIfNull(previous);
@@ -207,6 +449,22 @@ public sealed partial class LayoutEngine
     /// running geometry. Transform/opacity animations do not move boxes, so
     /// this avoids a full layout allocation every animation frame.
     /// </summary>
+    /// <param name="previous">A frame whose geometry is still valid.</param>
+    /// <param name="options">
+    /// Configuration for the repaint, including
+    /// <see cref="LayoutOptions.AnimationTimeSeconds"/>.
+    /// </param>
+    /// <returns>A new result whose styles reflect the current animation time.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="previous"/> is <see langword="null"/>.
+    /// </exception>
+    /// <remarks>
+    /// Each box style is rebuilt from the cached base style plus the animation
+    /// values for the supplied clock, using the animated parent style for
+    /// inheritance. No style resolution, box construction or geometry pass runs.
+    /// If an animation can change geometry, use <see cref="Layout"/> instead;
+    /// <see cref="LayoutResult.HasLayoutAnimations"/> reports that condition.
+    /// </remarks>
     public LayoutResult RepaintAnimated(LayoutResult previous, LayoutOptions? options)
     {
         ArgumentNullException.ThrowIfNull(previous);
@@ -268,6 +526,20 @@ public sealed partial class LayoutEngine
             hasLayoutAnimations: _animations.HasLayoutAnimations);
     }
 
+    /// <summary>
+    /// Rewrites the style of an existing box tree from cached base styles and
+    /// the animation clock, without re-resolving selectors or recomputing geometry.
+    /// </summary>
+    /// <param name="box">Subtree root to refresh, or <see langword="null"/>.</param>
+    /// <param name="parentStyle">
+    /// Animated style of the box's parent, used as the inheritance source.
+    /// </param>
+    /// <remarks>
+    /// The base style comes from <see cref="_styleCache"/> when present so
+    /// repeated repaints do not compound animation transforms; otherwise the
+    /// box's current style is treated as the base. Styles are shared by
+    /// reference with descendants through the recursive call.
+    /// </remarks>
     private void RefreshAnimatedStyles(LayoutBox? box, ComputedStyle? parentStyle)
     {
         if (box is null)
@@ -292,6 +564,12 @@ public sealed partial class LayoutEngine
     }
 
     /// <summary>Re-clamps scroll offsets without touching box geometry.</summary>
+    /// <param name="box">Subtree root whose scroll metrics are refreshed.</param>
+    /// <remarks>
+    /// Recursive and allocation-free. It recomputes overflow from the existing
+    /// child boxes and re-reads offsets from <see cref="LayoutOptions"/>, which
+    /// makes it the geometry-preserving half of <see cref="Repaint"/>.
+    /// </remarks>
     private void RefreshScrollMetrics(LayoutBox box)
     {
         UpdateScrollMetrics(box);
@@ -302,7 +580,13 @@ public sealed partial class LayoutEngine
         }
     }
 
-    /// <summary>Drops every cached style and text layout.</summary>
+    /// <summary>Drops every cached style, text layout and reusable box.</summary>
+    /// <remarks>
+    /// Also clears the shared <see cref="ValueCache"/>, so callers that supplied
+    /// that cache lose its parsed values too. Animation state, the constant pool
+    /// and layout options are left untouched. Use this when the rule table or
+    /// font environment changes in a way the per-entry keys cannot observe.
+    /// </remarks>
     public void ClearCaches()
     {
         _styleCache.Clear();
@@ -317,6 +601,20 @@ public sealed partial class LayoutEngine
     /// tree. Without this the cache would keep detached devtools or rerendered
     /// subtrees alive forever.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Box entries are compared against <see cref="_byNode"/>, which contains
+    /// only nodes that produced a box this frame. Style entries are compared
+    /// against <see cref="_visited"/> instead, because <c>display:none</c> nodes
+    /// (head, closed dropdowns, options) have no box but are still live and must
+    /// keep their resolved style.
+    /// </para>
+    /// <para>
+    /// Runs only when <see cref="LayoutOptions.ReuseLayoutBoxes"/> is enabled.
+    /// Both loops fill a scratch list first so the dictionaries are not mutated
+    /// during enumeration.
+    /// </para>
+    /// </remarks>
     private void PruneBoxCache()
     {
         _staleBoxes.Clear();
@@ -356,6 +654,18 @@ public sealed partial class LayoutEngine
         }
     }
 
+    /// <summary>
+    /// Builds the frame-level style-cache key from viewport, font, orientation,
+    /// pixel-ratio and renderer-context inputs.
+    /// </summary>
+    /// <returns>A hash that changes whenever a global style input changes.</returns>
+    /// <remarks>
+    /// Viewport width is always included. Viewport height is included only when
+    /// the previous build saw a viewport-height unit or the table contains
+    /// height media queries; otherwise resizing the height alone leaves the key
+    /// stable. This runs before <see cref="_usesViewportHeight"/> is reset for
+    /// the new frame, which is what carries that knowledge forward.
+    /// </remarks>
     private long ComputeStyleSignature()
     {
         var hash = new HashCode();
@@ -379,6 +689,15 @@ public sealed partial class LayoutEngine
     /// when an animated parent's inherited values changed even though the
     /// parent style object itself is reused between frames.
     /// </summary>
+    /// <param name="style">Parent style whose inheritable values are hashed.</param>
+    /// <returns>
+    /// A hash of colour, font, text, writing-mode and border-collapse state.
+    /// </returns>
+    /// <remarks>
+    /// Two parent styles that hash equal may still differ in non-inherited
+    /// properties; that is intentional, because only inherited values can change
+    /// a child's computed style without the child itself changing.
+    /// </remarks>
     private static long InheritedHash(ComputedStyle style)
     {
         var hash = new HashCode();
@@ -404,16 +723,59 @@ public sealed partial class LayoutEngine
 
     // ---------------------------------------------------------------- styles
 
+    /// <summary>
+    /// A cached computed style plus the keys that decide whether it is still valid.
+    /// </summary>
     private sealed class StyleCacheEntry
     {
+        /// <summary>The resolved style returned to callers while the entry is valid.</summary>
         public required ComputedStyle Style;
+
+        /// <summary>DOM revision of the node when the style was resolved.</summary>
         public int Revision;
+
+        /// <summary>
+        /// Parent style captured at resolution time. Validation uses
+        /// <see cref="ParentInheritedHash"/> rather than this reference, so the
+        /// field is not read by the cache.
+        /// </summary>
         public ComputedStyle? Parent;
+
+        /// <summary>Hash of the parent's inheritable values at resolution time.</summary>
         public long ParentInheritedHash;
+
+        /// <summary>Frame signature (<see cref="_styleSignature"/>) at resolution time.</summary>
         public long Signature;
+
+        /// <summary>Renderer-context version used when the entry was created.</summary>
         public long ContextVersion;
     }
 
+    /// <summary>
+    /// Returns the computed style for a node, reusing a cached entry when all
+    /// keys match.
+    /// </summary>
+    /// <param name="node">Node whose style is requested.</param>
+    /// <param name="parent">
+    /// Parent computed style, or <see langword="null"/> for the root.
+    /// </param>
+    /// <returns>
+    /// The node's computed style, shared by reference with later frames while valid.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// A hit requires the node revision, the parent's inherited-value hash, the
+    /// frame signature and the renderer context version to match. Comparing the
+    /// inherited hash instead of the parent object identity avoids re-resolving
+    /// descendants when an animation clones a parent style without changing any
+    /// inherited value.
+    /// </para>
+    /// <para>
+    /// On a miss the rules are matched twice when the scratch buffer is too
+    /// small: the first call reports the required count, the buffer is resized
+    /// and the match is repeated. The resulting entry replaces any previous one.
+    /// </para>
+    /// </remarks>
     private ComputedStyle ResolveStyle(IgniteSupportedDomNode node, ComputedStyle? parent)
     {
         // Compare the inherited values rather than the parent object identity.
@@ -455,6 +817,12 @@ public sealed partial class LayoutEngine
         return style;
     }
 
+    /// <summary>Returns the text a node contributes to layout.</summary>
+    /// <param name="node">Node whose text is requested.</param>
+    /// <returns>
+    /// The text from <see cref="LayoutOptions.TextProvider"/> when supplied,
+    /// otherwise <see cref="IgniteSupportedDomNode.TextContent"/>.
+    /// </returns>
     private string? GetNodeText(IgniteSupportedDomNode node)
     {
         return _options.TextProvider is { } provider ? provider(node) : node.TextContent;
@@ -462,6 +830,41 @@ public sealed partial class LayoutEngine
 
     // -------------------------------------------------------------- box tree
 
+    /// <summary>
+    /// Builds the box tree for a node and its descendants, resolving styles and
+    /// reusing cached boxes when enabled.
+    /// </summary>
+    /// <param name="node">Node to build a box for.</param>
+    /// <param name="parentStyle">
+    /// Parent computed style, or <see langword="null"/> for the root.
+    /// </param>
+    /// <param name="parentBox">Box of the parent, or <see langword="null"/> for the root.</param>
+    /// <param name="positionedAncestor">
+    /// Nearest ancestor that creates a containing block for absolutely positioned
+    /// descendants, or <see langword="null"/> when the viewport is their containing block.
+    /// </param>
+    /// <param name="depth">Zero-based depth used for the recursion cap and box metadata.</param>
+    /// <returns>
+    /// The new or recycled box, or <see langword="null"/> when the node is
+    /// <c>display:none</c>.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// The node is added to <see cref="_visited"/> before the
+    /// <c>display:none</c> check, so pruning keeps styles for live but unpainted
+    /// subtrees. When <see cref="LayoutOptions.ReuseLayoutBoxes"/> is enabled a
+    /// cached box is reset and reused instead of allocated.
+    /// </para>
+    /// <para>
+    /// Animations are applied on top of the cached base style. Absolutely and
+    /// fixed positioned boxes are queued in <see cref="_absolutes"/>; fixed boxes
+    /// record <see langword="null"/> as their containing block and are later
+    /// resolved against the layout viewport. A positioned or transformed box
+    /// becomes the containing block for absolutely positioned descendants.
+    /// The recursion stops adding children once <paramref name="depth"/> reaches
+    /// <see cref="_maxDepth"/>, but still returns the box itself.
+    /// </para>
+    /// </remarks>
     private LayoutBox? BuildBox(
         IgniteSupportedDomNode node,
         ComputedStyle? parentStyle,
@@ -545,11 +948,30 @@ public sealed partial class LayoutEngine
         return box;
     }
 
+    /// <summary>
+    /// Returns whether a style makes its box a containing block for positioned
+    /// descendants.
+    /// </summary>
+    /// <param name="style">Style to inspect.</param>
+    /// <returns>
+    /// <see langword="true"/> for non-static positioning or any transform;
+    /// otherwise <see langword="false"/>.
+    /// </returns>
     private static bool CreatesContainingBlock(ComputedStyle style)
     {
         return style.Position is not Position.Static || style.Transform is not null;
     }
 
+    /// <summary>Lays out the root box against the viewport containing block.</summary>
+    /// <param name="root">Root box built for the frame.</param>
+    /// <param name="viewport">Layout viewport in absolute CSS pixels.</param>
+    /// <remarks>
+    /// A <c>display:contents</c> root generates no box of its own: its margins,
+    /// border and padding are zeroed, its border box is forced to the viewport
+    /// and its children are laid out directly. A regular root fills the viewport
+    /// width when its width is auto, keeps its margins as a left/top offset, and
+    /// only fills the viewport height when the style requests it.
+    /// </remarks>
     private void LayoutRootBox(LayoutBox root, Rect viewport)
     {
         if (root.IsContents)
@@ -587,6 +1009,18 @@ public sealed partial class LayoutEngine
 
     // -------------------------------------------------------------- box sizing
 
+    /// <summary>Resolves the used margin, border and padding of a box.</summary>
+    /// <param name="box">Box whose edges are resolved.</param>
+    /// <param name="cbWidth">
+    /// Width of the containing block, used as the percentage basis for all four
+    /// edges as required by CSS.
+    /// </param>
+    /// <remarks>
+    /// Writes the resolved values back to <see cref="LayoutBox.Margin"/>,
+    /// <see cref="LayoutBox.Border"/> and <see cref="LayoutBox.Padding"/>.
+    /// Border widths on sides whose style is <c>none</c> or <c>hidden</c> are
+    /// forced to zero by <see cref="ResolveBorders"/>.
+    /// </remarks>
     private void PrepareBox(LayoutBox box, float cbWidth)
     {
         var style = box.Style;
@@ -597,6 +1031,18 @@ public sealed partial class LayoutEngine
         box.Margin = style.Margin.Resolve(in context, cbWidth);
     }
 
+    /// <summary>Creates a length context scoped to one element's font metrics.</summary>
+    /// <param name="style">Style of the element being sized.</param>
+    /// <returns>
+    /// A copy of the frame's root context whose font size is the element's used
+    /// font size and whose default percentage basis is that same font size.
+    /// </returns>
+    /// <remarks>
+    /// Properties that resolve percentages against a containing block pass the
+    /// basis explicitly to <see cref="CssLength.Resolve(in LengthContext, float)"/>
+    /// or <see cref="CssLength.ResolveOr(in LengthContext, float, float)"/>. A
+    /// caller that omits a basis gets the element font size as the percentage basis.
+    /// </remarks>
     private LengthContext CreateContext(ComputedStyle style)
     {
         var fontSize = style.ResolveFontSize(in _baseContext);
@@ -607,6 +1053,11 @@ public sealed partial class LayoutEngine
         };
     }
 
+    /// <summary>Resolves border widths, suppressing sides with no visible style.</summary>
+    /// <param name="style">Style providing border widths and styles.</param>
+    /// <param name="context">Length context with the element's font metrics.</param>
+    /// <param name="cbWidth">Containing-block width used as the percentage basis.</param>
+    /// <returns>Used border widths in CSS pixels.</returns>
     private static Thickness ResolveBorders(ComputedStyle style, in LengthContext context, float cbWidth)
     {
         var widths = style.BorderWidth.Resolve(in context, cbWidth);
@@ -618,6 +1069,45 @@ public sealed partial class LayoutEngine
             style.BorderStyleLeft is BorderStyle.None or BorderStyle.Hidden ? 0 : widths.Left);
     }
 
+    /// <summary>
+    /// Resolves a box's edges and used border-box width, then applies a
+    /// zero-height border box at the origin.
+    /// </summary>
+    /// <param name="box">Box to size.</param>
+    /// <param name="cbWidth">Containing-block width in CSS pixels.</param>
+    /// <param name="forcedBorderWidth">
+    /// Explicit used border-box width. When supplied, the style width is ignored
+    /// but min/max clamping and auto margins still apply.
+    /// </param>
+    /// <param name="fillWidth">
+    /// When the width is auto and no intrinsic size exists, use the full
+    /// containing-block width minus horizontal margins.
+    /// </param>
+    /// <param name="shrinkToFit">
+    /// When the width is auto, no intrinsic size exists and
+    /// <paramref name="fillWidth"/> is off, use the smaller of the max-content
+    /// width and the available width.
+    /// </param>
+    /// <param name="allowAutoMargins">
+    /// Resolve <c>margin:auto</c> against the remaining horizontal space.
+    /// Inline-level layout passes <see langword="false"/> because auto margins do
+    /// not absorb space on an inline line.
+    /// </param>
+    /// <returns>The used border-box width in CSS pixels.</returns>
+    /// <remarks>
+    /// <para>
+    /// Width selection order is: <paramref name="forcedBorderWidth"/>, the
+    /// resolved style width, the intrinsic-size provider, then the fill or
+    /// shrink-to-fit fallback. Content-box widths have padding and border added;
+    /// border-box widths are used as-is.
+    /// </para>
+    /// <para>
+    /// The result is clamped by <c>min-width</c>/<c>max-width</c> (adjusted for
+    /// content-box sizing) and can never be negative. The box is left at
+    /// <c>(0, 0)</c> with zero height; the caller supplies the final position and
+    /// height through <see cref="LayoutPreparedBox"/>.
+    /// </para>
+    /// </remarks>
     private float PrepareAndMeasureWidth(
         LayoutBox box,
         float cbWidth,
@@ -678,6 +1168,32 @@ public sealed partial class LayoutEngine
         return width.Value;
     }
 
+    /// <summary>
+    /// Resolves a box's border-box height from its style, intrinsics or
+    /// containing block.
+    /// </summary>
+    /// <param name="box">Box whose height is resolved.</param>
+    /// <param name="cbWidth">
+    /// Containing-block width for percentage padding and borders.
+    /// </param>
+    /// <param name="cbHeight">Containing-block height used as the percentage basis.</param>
+    /// <param name="forcedBorderHeight">
+    /// Explicit height that bypasses style resolution. It is still clamped by
+    /// <c>min-height</c>/<c>max-height</c>.
+    /// </param>
+    /// <param name="fillHeight">
+    /// When the height is auto, no intrinsic size exists and the containing-block
+    /// height is definite, fill that height minus vertical margins.
+    /// </param>
+    /// <returns>
+    /// The used border-box height, or <see langword="null"/> when the height is
+    /// still auto and cannot be resolved before content layout.
+    /// </returns>
+    /// <remarks>
+    /// A content-box height has vertical padding and border added before
+    /// clamping. Min and max heights are adjusted the same way so the comparison
+    /// happens in border-box units.
+    /// </remarks>
     private float? ResolveBorderHeight(
         LayoutBox box,
         float cbWidth,
@@ -734,6 +1250,15 @@ public sealed partial class LayoutEngine
         return height;
     }
 
+    /// <summary>Clamps a border-box height to the box's used min and max height.</summary>
+    /// <param name="box">Box whose constraints apply.</param>
+    /// <param name="cbHeight">Containing-block height used as the percentage basis.</param>
+    /// <param name="value">Border-box height to clamp, in CSS pixels.</param>
+    /// <returns>The clamped height, never negative.</returns>
+    /// <remarks>
+    /// Content-box min and max heights are converted to border-box units by
+    /// adding the vertical padding and border before the comparison.
+    /// </remarks>
     private float ClampBorderHeight(LayoutBox box, float cbHeight, float value)
     {
         var style = box.Style;
@@ -757,6 +1282,16 @@ public sealed partial class LayoutEngine
         return MathF.Max(0, MathF.Max(minHeight, MathF.Min(value, maxHeight)));
     }
 
+    /// <summary>Clamps a border-box width to the style's used min and max width.</summary>
+    /// <param name="style">Style providing the width constraints and box sizing.</param>
+    /// <param name="context">Length context with the element's font metrics.</param>
+    /// <param name="cbWidth">Containing-block width used as the percentage basis.</param>
+    /// <param name="width">Border-box width to clamp, in CSS pixels.</param>
+    /// <returns>The clamped width, never negative.</returns>
+    /// <remarks>
+    /// For content-box sizing, horizontal padding and border are added to both
+    /// constraints so the clamp is performed in border-box units.
+    /// </remarks>
     private static float ClampBorderWidth(
         ComputedStyle style,
         in LengthContext context,
@@ -779,6 +1314,15 @@ public sealed partial class LayoutEngine
         return MathF.Max(0, MathF.Max(min, MathF.Min(width, max)));
     }
 
+    /// <summary>Distributes leftover horizontal space to auto left and right margins.</summary>
+    /// <param name="box">Box whose already-resolved margins may contain auto sides.</param>
+    /// <param name="cbWidth">Containing-block width in CSS pixels.</param>
+    /// <param name="borderWidth">Used border-box width of the box.</param>
+    /// <remarks>
+    /// Only positive leftover space is distributed; an over-constrained box keeps
+    /// its resolved margins. When both sides are auto each receives half, when
+    /// one is auto it receives all of it.
+    /// </remarks>
     private static void ResolveAutoMargins(LayoutBox box, float cbWidth, float borderWidth)
     {
         var style = box.Style;
@@ -815,6 +1359,39 @@ public sealed partial class LayoutEngine
     /// Lays out a box whose width and edges have already been resolved by
     /// <see cref="PrepareAndMeasureWidth"/>. Returns the used border-box height.
     /// </summary>
+    /// <param name="box">Box to lay out. Its edges must already be resolved.</param>
+    /// <param name="borderX">Absolute x coordinate of the border box.</param>
+    /// <param name="borderY">Absolute y coordinate of the border box.</param>
+    /// <param name="cbWidth">Containing-block width passed to content layout.</param>
+    /// <param name="cbHeight">Containing-block height for percentages and min/max clamping.</param>
+    /// <param name="forcedBorderHeight">
+    /// Explicit border-box height supplied by the caller, for example a stretched
+    /// flex item or a table cell stretched to its row.
+    /// </param>
+    /// <param name="fillHeight">
+    /// Fill the containing block's height when the style height is auto and a
+    /// definite containing-block height exists.
+    /// </param>
+    /// <param name="definiteContentHeight">
+    /// Known content height used to derive a border-box height, primarily for
+    /// table cells and flex items with a definite cross size.
+    /// </param>
+    /// <returns>The used border-box height in CSS pixels.</returns>
+    /// <remarks>
+    /// <para>
+    /// Height selection order is: the forced or definite height (clamped to
+    /// min/max), the style height or fill height, an aspect-ratio derivation, and
+    /// finally the content height measured by <see cref="LayoutContent"/>. Auto
+    /// height is clamped again after content layout so an empty element still
+    /// honours its <c>min-height</c>.
+    /// </para>
+    /// <para>
+    /// After layout the method assigns the baseline, border radii, scroll
+    /// metrics and relative/sticky offsets. The returned value is the height of
+    /// the final border box, which may differ from the content height when
+    /// padding or borders are present.
+    /// </para>
+    /// </remarks>
     private float LayoutPreparedBox(
         LayoutBox box,
         float borderX,
@@ -881,6 +1458,14 @@ public sealed partial class LayoutEngine
         return box.BorderBox.Height;
     }
 
+    /// <summary>Resolves the box's corner radii against its final border box.</summary>
+    /// <param name="box">Laid-out box whose border box is final.</param>
+    /// <remarks>
+    /// Four auto corners produce <see cref="CornerRadius.Zero"/> without resolving
+    /// lengths. Otherwise percentage radii use the border-box width as the
+    /// horizontal basis and the border-box height as the vertical basis, as
+    /// implemented by <see cref="ComputedStyle.BorderRadius"/> resolution.
+    /// </remarks>
     private void ResolveRadius(LayoutBox box)
     {
         var style = box.Style;
@@ -898,6 +1483,15 @@ public sealed partial class LayoutEngine
         box.Radius = style.BorderRadius.Resolve(in context, box.BorderBox.Width, box.BorderBox.Height);
     }
 
+    /// <summary>Computes the baseline offset used for alignment of this box.</summary>
+    /// <param name="box">Laid-out box whose baseline is requested.</param>
+    /// <returns>Baseline offset in CSS pixels.</returns>
+    /// <remarks>
+    /// The first line of the box's own text contributes its baseline relative to
+    /// the text origin. Otherwise the bottom of the first in-flow child with a
+    /// non-zero height is converted to an offset from this box's border-box top.
+    /// An empty box falls back to its full border-box height.
+    /// </remarks>
     private static float BaselineOf(LayoutBox box)
     {
         if (box.Text is { Lines.Length: > 0 } text)
@@ -918,6 +1512,16 @@ public sealed partial class LayoutEngine
         return box.BorderBox.Height;
     }
 
+    /// <summary>
+    /// Translates a relatively or stickily positioned box and its descendants.
+    /// </summary>
+    /// <param name="box">Box to offset.</param>
+    /// <remarks>
+    /// <c>left</c> and <c>top</c> win when definite; otherwise the negative of
+    /// <c>right</c> or <c>bottom</c> is used. Percentages resolve against the
+    /// parent's content box, falling back to the viewport at the root. The
+    /// offset does not affect sibling flow positions, only painted geometry.
+    /// </remarks>
     private void ApplyRelativeOffset(LayoutBox box)
     {
         if (box.Style.Position is not (Position.Relative or Position.Sticky))
@@ -949,6 +1553,23 @@ public sealed partial class LayoutEngine
 
     // ------------------------------------------------------------- scrolling
 
+    /// <summary>Computes a box's scrollable overflow and clamps its scroll offsets.</summary>
+    /// <param name="box">Box whose scroll metrics are updated after layout.</param>
+    /// <remarks>
+    /// <para>
+    /// The overflow extent starts at the content box and grows to cover each
+    /// child's margin box (or border box when the margin box is degenerate).
+    /// Only right and bottom overflow is measured; content above or left of the
+    /// origin does not create negative scroll range. The resulting
+    /// <see cref="LayoutBox.ScrollWidth"/> and <see cref="LayoutBox.ScrollHeight"/>
+    /// are at least the content-box size.
+    /// </para>
+    /// <para>
+    /// Non-scroll containers keep zero offsets. Scroll containers clamp the
+    /// offsets from <see cref="LayoutOptions"/> against the padding-box size, so
+    /// a stale offset can never exceed the current range.
+    /// </para>
+    /// </remarks>
     private void UpdateScrollMetrics(LayoutBox box)
     {
         var content = box.ContentBox;
@@ -986,6 +1607,26 @@ public sealed partial class LayoutEngine
 
     // -------------------------------------------------------------- absolutes
 
+    /// <summary>
+    /// Lays out every queued absolute or fixed box that has not been processed yet.
+    /// </summary>
+    /// <param name="viewport">
+    /// Layout viewport used for fixed boxes and as the fallback containing block.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// Fixed boxes always use <see cref="_layoutViewport"/>; absolute boxes use
+    /// the nearest positioned ancestor's padding box, or the viewport when there
+    /// is none. Insets and sizes are resolved by
+    /// <see cref="LayoutAbsoluteBox"/>.
+    /// </para>
+    /// <para>
+    /// The method is re-entrant because laying out an absolute box can discover
+    /// nested absolutes: <see cref="_absoluteLaidOut"/> makes each box run once,
+    /// and <see cref="LayoutAbsoluteBox"/> calls this method again after content
+    /// layout to drain the additions.
+    /// </para>
+    /// </remarks>
     private void ProcessAbsoluteBoxes(Rect viewport)
     {
         for (var i = 0; i < _absolutes.Count; i++)
@@ -1007,6 +1648,28 @@ public sealed partial class LayoutEngine
         }
     }
 
+    /// <summary>Resolves the used width, height and position of one out-of-flow box.</summary>
+    /// <param name="box">Absolute or fixed box to lay out.</param>
+    /// <param name="containingBlock">
+    /// Padding box of the positioned ancestor, or the viewport for fixed boxes
+    /// and absolutes without a positioned ancestor.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// Width and height come from their style when definite or from the sum of
+    /// opposite insets when both are present. Width otherwise shrinks to fit,
+    /// while height stays content-based. Horizontal position prefers
+    /// <c>left</c>, then <c>right</c>, then the static position recorded during
+    /// normal flow; vertical position follows the same order for <c>top</c>,
+    /// <c>bottom</c> and the static position.
+    /// </para>
+    /// <para>
+    /// After content layout the method drains nested absolutes through
+    /// <see cref="ProcessAbsoluteBoxes"/>. Out-of-flow boxes stay in the layout
+    /// tree at their absolute coordinates and do not advance normal flow; paint
+    /// order is handled by the display-list builder.
+    /// </para>
+    /// </remarks>
     private void LayoutAbsoluteBox(LayoutBox box, Rect containingBlock)
     {
         var style = box.Style;
@@ -1104,6 +1767,22 @@ public sealed partial class LayoutEngine
 
     // ------------------------------------------------------------- intrinsic
 
+    /// <summary>Computes and caches a box's max-content border-box width.</summary>
+    /// <param name="box">Box to measure.</param>
+    /// <returns>Max-content width including padding and border, in CSS pixels.</returns>
+    /// <remarks>
+    /// <para>
+    /// The result is cached on <see cref="LayoutBox.IntrinsicWidth"/> for the
+    /// current layout pass. A definite non-percentage style width short-circuits
+    /// measurement, and an intrinsic-size provider is preferred over content
+    /// measurement. Percentage widths are treated as indefinite because they have
+    /// no max-content value independent of the containing block.
+    /// </para>
+    /// <para>
+    /// The value is the content measurement plus resolved padding and border, so
+    /// callers can compare it directly with border-box widths.
+    /// </para>
+    /// </remarks>
     private float MeasureMaxContentWidth(LayoutBox box)
     {
         if (box.HasIntrinsicWidth)
@@ -1143,6 +1822,17 @@ public sealed partial class LayoutEngine
         return result;
     }
 
+    /// <summary>Measures the max-content content width of text and child boxes.</summary>
+    /// <param name="box">Box whose content is measured.</param>
+    /// <param name="context">Length context used for child margins.</param>
+    /// <returns>Content width without the box's own padding and border, in CSS pixels.</returns>
+    /// <remarks>
+    /// The measurement treats inline-level containers, flex rows and grid
+    /// containers as one line, so their text and child widths are summed. Block
+    /// containers use the widest child instead. Out-of-flow and
+    /// <c>display:contents</c> children are skipped; child margins are included
+    /// in the contribution.
+    /// </remarks>
     private float MeasureContentMaxWidth(LayoutBox box, in LengthContext context)
     {
         var textWidth = 0f;
@@ -1192,6 +1882,16 @@ public sealed partial class LayoutEngine
 
     // ------------------------------------------------------------------ text
 
+    /// <summary>
+    /// Identifies one shaped text layout: the transformed text, text style,
+    /// quantised available width and the wrapping-related style values.
+    /// </summary>
+    /// <remarks>
+    /// <c>Width</c> is stored as quarter-pixel units rounded up, or
+    /// <see cref="int.MaxValue"/> for an unbounded width. The <c>white-space</c>,
+    /// <c>overflow-wrap</c>, line-clamp and text-overflow values are part of the
+    /// key because they change line breaking even when text and style are equal.
+    /// </remarks>
     private readonly record struct TextLayoutKey(
         string Text,
         TextStyle Style,
@@ -1201,6 +1901,10 @@ public sealed partial class LayoutEngine
         int LineClamp,
         TextOverflow Overflow);
 
+    /// <summary>Builds the immutable text style used for measurement and painting.</summary>
+    /// <param name="style">Computed style providing font and decoration settings.</param>
+    /// <param name="color">Optional colour override; uses the style colour when omitted.</param>
+    /// <returns>A text style with lengths resolved against the element's font metrics.</returns>
     private TextStyle CreateTextStyle(ComputedStyle style, uint? color = null)
     {
         var context = CreateContext(style);
@@ -1208,11 +1912,41 @@ public sealed partial class LayoutEngine
         return style.ToTextStyle(in context, fontSize, color ?? style.Color);
     }
 
+    /// <summary>Asks the host for a text colour override for one node.</summary>
+    /// <param name="node">Node that owns the text.</param>
+    /// <param name="text">Transformed text that will be drawn.</param>
+    /// <returns>
+    /// The host-provided colour, or <see langword="null"/> to use the computed style colour.
+    /// </returns>
     private uint? GetTextColor(IgniteSupportedDomNode node, string text)
     {
         return _options.TextColorProvider?.Invoke(node, text);
     }
 
+    /// <summary>Returns a shaped text layout, normally from the two-generation cache.</summary>
+    /// <param name="node">Node that owns the text.</param>
+    /// <param name="style">Computed style that controls wrapping and decoration.</param>
+    /// <param name="text">Raw text before <c>text-transform</c> is applied.</param>
+    /// <param name="maxWidth">Available line width in CSS pixels, or infinity for no limit.</param>
+    /// <param name="textStyle">
+    /// Receives the text style used for shaping and painting.
+    /// </param>
+    /// <returns>A line layout that can be painted at the caller's origin.</returns>
+    /// <remarks>
+    /// <para>
+    /// The cache key rounds the available width up to the next quarter pixel. A
+    /// line that exactly fits must not hit a layout shaped for a narrower width,
+    /// which would wrap it again.
+    /// </para>
+    /// <para>
+    /// Cache lookup checks the current generation first and then the previous
+    /// one, promoting a previous-generation hit. When the current map reaches
+    /// 1024 entries the two maps swap and the new current map is cleared, so
+    /// recent layouts survive one rotation while old ones become collectable.
+    /// Set <see cref="LayoutOptions.CacheTextLayouts"/> to
+    /// <see langword="false"/> for highly dynamic text.
+    /// </para>
+    /// </remarks>
     private TextLayout GetTextLayout(
         IgniteSupportedDomNode node,
         ComputedStyle style,
@@ -1288,6 +2022,19 @@ public sealed partial class LayoutEngine
     /// Uncached text layout that asks the float context for the available band
     /// on every line. It is only used when text overlaps active floats.
     /// </summary>
+    /// <param name="node">Node that owns the text.</param>
+    /// <param name="style">Computed style that controls wrapping and decoration.</param>
+    /// <param name="text">Raw text before <c>text-transform</c> is applied.</param>
+    /// <param name="content">Content box of the containing block.</param>
+    /// <param name="startY">Absolute y coordinate of the first line.</param>
+    /// <param name="floats">Active floats for the block formatting context.</param>
+    /// <returns>A line layout whose line origins already follow the float bands.</returns>
+    /// <remarks>
+    /// The cache is bypassed because each line's width depends on the vertical
+    /// position and on float state that is not part of
+    /// <see cref="TextLayoutKey"/>. <see cref="TextLayoutEngine.LayoutWithBands"/>
+    /// consults <see cref="FloatContext.BandAt"/> for every candidate line.
+    /// </remarks>
     private TextLayout GetTextLayoutInBands(
         IgniteSupportedDomNode node,
         ComputedStyle style,
@@ -1318,6 +2065,15 @@ public sealed partial class LayoutEngine
             });
     }
 
+    /// <summary>Applies <c>text-transform</c> using invariant casing rules.</summary>
+    /// <param name="text">Source text.</param>
+    /// <param name="transform">Transformation to apply.</param>
+    /// <returns>The transformed text, or the original instance when no transform applies.</returns>
+    /// <remarks>
+    /// <c>capitalize</c> uppercases the first non-whitespace character after any
+    /// whitespace run. Uppercase and lowercase results may allocate a new string;
+    /// callers use the transformed value in cache keys and painting.
+    /// </remarks>
     private static string ApplyTextTransform(string text, TextTransform transform)
     {
         if (transform == TextTransform.None || text.Length == 0)
@@ -1356,6 +2112,26 @@ public sealed partial class LayoutEngine
 
     // -------------------------------------------------------------- dispatch
 
+    /// <summary>Selects the formatting context for a box and lays out its contents.</summary>
+    /// <param name="box">Box whose content is laid out.</param>
+    /// <param name="content">Content box in absolute coordinates.</param>
+    /// <param name="definiteContentHeight">
+    /// Known content height, or <see cref="float.NaN"/> when the height depends on content.
+    /// </param>
+    /// <returns>The used content height in CSS pixels, never negative for normal flow.</returns>
+    /// <remarks>
+    /// <para>
+    /// A box that establishes a block formatting context, and the root box,
+    /// receives an owned <see cref="FloatContext"/> that is reset for this pass;
+    /// other boxes share their parent's context so line boxes and BFC roots can
+    /// see the same floats.
+    /// </para>
+    /// <para>
+    /// <c>display:contents</c> always uses block-child layout. Otherwise tables,
+    /// flex containers, grid containers and normal block flow are dispatched to
+    /// their dedicated implementations.
+    /// </para>
+    /// </remarks>
     private float LayoutContent(LayoutBox box, Rect content, float definiteContentHeight)
     {
         if (EstablishesBlockFormattingContext(box.Style) || ReferenceEquals(box, _root))
@@ -1393,6 +2169,12 @@ public sealed partial class LayoutEngine
         return LayoutBlockChildren(box, content, definiteContentHeight);
     }
 
+    /// <summary>Returns whether a box participates in an inline formatting context.</summary>
+    /// <param name="box">Box to classify.</param>
+    /// <returns>
+    /// <see langword="true"/> for <c>inline</c>, <c>inline-block</c>,
+    /// <c>inline-flex</c>, <c>inline-grid</c> and <c>inline-table</c>.
+    /// </returns>
     private static bool IsInlineLevel(LayoutBox box)
     {
         return box.Style.Display is Display.Inline or Display.InlineBlock or Display.InlineFlex
@@ -1403,6 +2185,17 @@ public sealed partial class LayoutEngine
     /// True when the box starts a new block formatting context, which means it
     /// gets its own float context and its border box avoids the parent's floats.
     /// </summary>
+    /// <param name="style">Style of the box being classified.</param>
+    /// <returns>
+    /// <see langword="true"/> for floats, absolutes and fixed boxes,
+    /// <c>flow-root</c>, inline-blocks, tables and table cells/captions,
+    /// flex and grid containers, and scroll containers.
+    /// </returns>
+    /// <remarks>
+    /// The root box is treated as a BFC root by callers even though its style is
+    /// not inspected here. A BFC root encloses its floats and must not overlap
+    /// an ancestor's floats.
+    /// </remarks>
     private static bool EstablishesBlockFormattingContext(ComputedStyle style)
     {
         return style.Float != Float.None
@@ -1414,6 +2207,10 @@ public sealed partial class LayoutEngine
             || style.IsScrollContainer;
     }
 
+    /// <summary>Finds a child by reference rather than by value equality.</summary>
+    /// <param name="children">Sibling list to search.</param>
+    /// <param name="child">Child instance to locate.</param>
+    /// <returns>The zero-based index, or <c>-1</c> when the child is not present.</returns>
     private static int IndexOfChild(List<LayoutBox> children, LayoutBox child)
     {
         for (var i = 0; i < children.Count; i++)
@@ -1432,6 +2229,14 @@ public sealed partial class LayoutEngine
     /// unstable, which would let equal-order siblings swap paint and layout
     /// positions between frames.
     /// </summary>
+    /// <param name="items">
+    /// Flow children to sort in place by <see cref="ComputedStyle.Order"/>.
+    /// </param>
+    /// <remarks>
+    /// Insertion sort with O(n^2) worst-case cost. Flex and grid containers
+    /// usually have few children, and the stability guarantee is worth more here
+    /// than an unstable O(n log n) sort.
+    /// </remarks>
     private static void StableSortByOrder(List<LayoutBox> items)
     {
         for (var i = 1; i < items.Count; i++)
@@ -1450,6 +2255,13 @@ public sealed partial class LayoutEngine
         }
     }
 
+    /// <summary>Formats a float with at most three fractional digits for diagnostics.</summary>
+    /// <param name="value">Value to format.</param>
+    /// <returns>A culture-invariant string such as <c>12.5</c>.</returns>
+    /// <remarks>
+    /// Used where a compact, stable representation is needed; it is not suitable
+    /// for serializing full-precision geometry.
+    /// </remarks>
     private static string FormatFloat(float value)
     {
         return value.ToString("0.###", CultureInfo.InvariantCulture);
