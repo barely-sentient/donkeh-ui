@@ -100,16 +100,41 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
         }
         else if (state.Dock == DevToolsDock.Right)
         {
-            className += " dt-dock-right";
+            className += " dt-dock-right dt-dockw-" + state.DockRightWidth;
         }
         else
         {
-            className += " dt-dock-bottom";
+            className += " dt-dock-bottom dt-dockh-" + state.DockBottomHeight;
         }
 
         if (hidden)
         {
             className += " dt-hidden";
+        }
+
+        Node? splitter = null;
+
+        if (!Props.Standalone && state.Dock != DevToolsDock.Window)
+        {
+            splitter = state.Dock == DevToolsDock.Right
+                ? _.H(
+                    "div",
+                    new Props
+                    {
+                        ClassName = "dt-splitter dt-splitter-right",
+                        OnPointerDown = (x, y) => ResizeRight(state),
+                        OnPointerMove = (x, y) => ResizeRight(state),
+                        OnPointerUp = (x, y) => ResizeRight(state)
+                    })
+                : _.H(
+                    "div",
+                    new Props
+                    {
+                        ClassName = "dt-splitter dt-splitter-bottom",
+                        OnPointerDown = (x, y) => ResizeBottom(state),
+                        OnPointerMove = (x, y) => ResizeBottom(state),
+                        OnPointerUp = (x, y) => ResizeBottom(state)
+                    });
         }
 
         var picker = state.Tab == DevToolsTab.Elements && state.ColorPickerRuleIndex >= 0
@@ -125,7 +150,42 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
             BuildToolbar(state),
             _.H("div", new Props { ClassName = bodyClass }, BuildBody(state)),
             BuildStatusBar(state),
+            splitter,
             picker);
+    }
+
+    private void ResizeBottom(DevToolsState state)
+    {
+        var max = Math.Clamp(state.ViewportHeight - 120, 160, 900);
+        var height = Math.Clamp(
+            state.ViewportHeight - (int)MathF.Round(state.PointerY),
+            160,
+            max);
+
+        if (height == state.DockBottomHeight)
+        {
+            return;
+        }
+
+        state.DockBottomHeight = height;
+        RequestUpdate();
+    }
+
+    private void ResizeRight(DevToolsState state)
+    {
+        var max = Math.Clamp(state.ViewportWidth - 320, 280, 1000);
+        var width = Math.Clamp(
+            state.ViewportWidth - (int)MathF.Round(state.PointerX),
+            280,
+            max);
+
+        if (width == state.DockRightWidth)
+        {
+            return;
+        }
+
+        state.DockRightWidth = width;
+        RequestUpdate();
     }
 
     private void RequestUpdate()
@@ -145,7 +205,8 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
                 "div",
                 new Props { ClassName = "dt-tabs" },
                 BuildTab(state, DevToolsTab.Elements, "Elements"),
-                BuildTab(state, DevToolsTab.Performance, "Performance")),
+                BuildTab(state, DevToolsTab.Performance, "Performance"),
+                BuildTab(state, DevToolsTab.Animations, "Animations")),
             _.H(
                 "div",
                 new Props
@@ -250,6 +311,11 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
         if (state.Tab == DevToolsTab.Performance)
         {
             return BuildPerformance(state);
+        }
+
+        if (state.Tab == DevToolsTab.Animations)
+        {
+            return BuildAnimations(state);
         }
 
         return _.H(
@@ -1411,6 +1477,134 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
     }
 
     private readonly record struct Declaration(int RuleIndex, string Property, string Value);
+
+    // ------------------------------------------------------------- animations
+
+    private Node BuildAnimations(DevToolsState state)
+    {
+        if (state.Table is not { } table)
+        {
+            return _.H("div", new Props { ClassName = "dt-dim" }, _.Text("No stylesheet."));
+        }
+
+        var frames = table.Keyframes;
+        var groups = new List<AnimationGroup>();
+        var index = new Dictionary<string, AnimationGroup>(StringComparer.Ordinal);
+
+        for (var i = 0; i < frames.Count; i++)
+        {
+            var frame = frames[i];
+            var name = InternTable.GetString(frame.NameId) ?? "?";
+
+            if (!index.TryGetValue(name, out var group))
+            {
+                group = new AnimationGroup(name);
+                index[name] = group;
+                groups.Add(group);
+            }
+
+            group.Keyframes.Add(frame);
+        }
+
+        if (groups.Count == 0)
+        {
+            return _.H("div", new Props { ClassName = "dt-dim" }, _.Text("No @keyframes registered."));
+        }
+
+        AnimationGroup? selected = null;
+
+        if (state.SelectedAnimation is { } selectedName)
+        {
+            index.TryGetValue(selectedName, out selected);
+        }
+
+        selected ??= groups[0];
+
+        var list = new List<Node?>();
+
+        foreach (var group in groups)
+        {
+            var name = group.Name;
+            var className = ReferenceEquals(group, selected)
+                ? "dt-anim-row dt-anim-selected"
+                : "dt-anim-row";
+
+            list.Add(
+                _.H(
+                    "div",
+                    new Props
+                    {
+                        ClassName = className,
+                        OnClick = () =>
+                        {
+                            state.SelectedAnimation = name;
+                            RequestUpdate();
+                        }
+                    },
+                    _.H("span", new Props { ClassName = "dt-anim-name" }, _.Text("@" + name)),
+                    _.H(
+                        "span",
+                        new Props { ClassName = "dt-anim-count" },
+                        _.Text(group.Keyframes.Count.ToString(CultureInfo.InvariantCulture)))));
+        }
+
+        var detail = new List<Node?>
+        {
+            _.H("div", new Props { ClassName = "dt-anim-title" }, _.Text("@keyframes " + selected.Name)),
+            _.H(
+                "div",
+                new Props { ClassName = "dt-dim" },
+                _.Text(selected.Keyframes.Count + " declarations"))
+        };
+
+        var stops = new List<(string Key, List<CssKeyframe> Frames)>();
+        var stopIndex = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        foreach (var frame in selected.Keyframes)
+        {
+            var key = SelectorText(table, frame.KeyId);
+
+            if (!stopIndex.TryGetValue(key, out var stop))
+            {
+                stop = stops.Count;
+                stopIndex[key] = stop;
+                stops.Add((key, []));
+            }
+
+            stops[stop].Frames.Add(frame);
+        }
+
+        foreach (var (key, keyframes) in stops)
+        {
+            detail.Add(_.H("div", new Props { ClassName = "dt-anim-stop" }, _.Text(key)));
+
+            foreach (var frame in keyframes)
+            {
+                var property = InternTable.GetString(frame.PropertyId) ?? "?";
+                var value = InternTable.GetString(frame.ValueId) ?? "?";
+
+                detail.Add(
+                    _.H(
+                        "div",
+                        new Props { ClassName = "dt-anim-decl" },
+                        _.H("span", new Props { ClassName = "dt-anim-prop" }, _.Text(property)),
+                        _.H("span", new Props { ClassName = "dt-dim" }, _.Text(": ")),
+                        _.H("span", new Props { ClassName = "dt-anim-value" }, _.Text(value))));
+            }
+        }
+
+        return _.H(
+            "div",
+            new Props { ClassName = "dt-animations" },
+            _.H("div", new Props { ClassName = "dt-anim-list" }, _.F(list.ToArray())),
+            _.H("div", new Props { ClassName = "dt-anim-detail" }, _.F(detail.ToArray())));
+    }
+
+    private sealed class AnimationGroup(string name)
+    {
+        public string Name { get; } = name;
+        public List<CssKeyframe> Keyframes { get; } = [];
+    }
 
     // ------------------------------------------------------------ performance
 

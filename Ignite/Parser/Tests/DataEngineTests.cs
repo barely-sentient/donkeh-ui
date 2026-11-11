@@ -158,4 +158,28 @@ public class DataEngineTests
 
         Assert.Single(table.Rules);
     }
+
+    [Fact]
+    public void KeepsLongKeyframesNameAndStopIntact()
+    {
+        var table = Build(
+            "@keyframes progress-bar-stripes { 0% { background-position-x: 1rem; } }");
+
+        var frame = Assert.Single(table.Keyframes);
+        Assert.Equal("progress-bar-stripes", InternTable.GetString(frame.NameId));
+        Assert.Equal("0%", SelectorText(table, frame.KeyId));
+    }
+
+    private static string SelectorText(DataTable table, int selectorId)
+    {
+        var tokens = table.GetSelectorSpan(selectorId);
+        var builder = new System.Text.StringBuilder();
+
+        for (var i = 0; i < tokens.Length; i++)
+        {
+            builder.Append(InternTable.GetString(tokens[i].InternedId));
+        }
+
+        return builder.ToString();
+    }
 }

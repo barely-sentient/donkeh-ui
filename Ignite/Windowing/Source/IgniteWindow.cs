@@ -88,6 +88,7 @@ public sealed class IgniteWindow : IDisposable
     private ElementNode? _pressed;
     private ElementNode? _pointerTarget;
     private bool _inspectPressed;
+    private StandardCursor _cursorKind = StandardCursor.Arrow;
     private ElementNode? _focused;
     private string? _editText;
     private int _caretIndex;
@@ -166,6 +167,7 @@ public sealed class IgniteWindow : IDisposable
             _devTools.InspectMode = false;
             _devTools.Hovered = null;
             _devTools.ColorPickerRuleIndex = -1;
+            SetCursor(StandardCursor.Arrow);
         }
 
         _devTools.Refresh();
@@ -194,6 +196,7 @@ public sealed class IgniteWindow : IDisposable
         _devTools.InspectMode = false;
         _devTools.Hovered = null;
         _devTools.ColorPickerRuleIndex = -1;
+        SetCursor(StandardCursor.Arrow);
         _devTools.Refresh();
         _devToolsPanel?.Tick();
         _needsLayout = true;
@@ -379,14 +382,16 @@ public sealed class IgniteWindow : IDisposable
         var appWidth = width;
         var appHeight = height;
         var docked = _settings.EnableDevTools && _devTools.Visible && _devTools.Dock != DevToolsDock.Window;
+        _devTools.ViewportWidth = width;
+        _devTools.ViewportHeight = height;
 
         if (docked && _devTools.Dock == DevToolsDock.Bottom)
         {
-            appHeight = Math.Max(1, height - (int)InspectorStyles.DockBottomHeight);
+            appHeight = Math.Max(1, height - _devTools.DockBottomHeight);
         }
         else if (docked && _devTools.Dock == DevToolsDock.Right)
         {
-            appWidth = Math.Max(1, width - (int)InspectorStyles.DockRightWidth);
+            appWidth = Math.Max(1, width - _devTools.DockRightWidth);
         }
 
         if (_needsLayout
@@ -2020,6 +2025,8 @@ public sealed class IgniteWindow : IDisposable
     {
         _mouseX = x;
         _mouseY = y;
+        _devTools.PointerX = x;
+        _devTools.PointerY = y;
 
         if (_scrollDrag is not null)
         {
@@ -2029,6 +2036,7 @@ public sealed class IgniteWindow : IDisposable
 
         if (_pointerTarget is not null)
         {
+            UpdateCursor(_pointerTarget);
             InvokePointer(_pointerTarget, "pointermove", x, y);
             return;
         }
@@ -2046,7 +2054,7 @@ public sealed class IgniteWindow : IDisposable
         }
 
         var element = HitTest(x, y);
-
+        UpdateCursor(element);
         if (_devTools.InspectMode)
         {
             _devTools.Hovered = element is not null && !IsInDevToolsTree(element)
@@ -2059,6 +2067,9 @@ public sealed class IgniteWindow : IDisposable
 
     private void OnMouseDown(MouseButton button)
     {
+        _devTools.PointerX = _mouseX;
+        _devTools.PointerY = _mouseY;
+
         if (_devTools.InspectMode)
         {
             var inspectHit = HitTest(_mouseX, _mouseY);
@@ -2076,7 +2087,7 @@ public sealed class IgniteWindow : IDisposable
         {
             _pointerTarget = pointerTarget;
             _pressed = null;
-            SetActive(null);
+            SetActive(pointerTarget);
             InvokePointer(pointerTarget, "pointerdown", _mouseX, _mouseY);
             return;
         }
@@ -2137,6 +2148,9 @@ public sealed class IgniteWindow : IDisposable
 
     private void OnMouseUp(MouseButton button)
     {
+        _devTools.PointerX = _mouseX;
+        _devTools.PointerY = _mouseY;
+
         if (_inspectPressed)
         {
             _inspectPressed = false;
@@ -2154,6 +2168,7 @@ public sealed class IgniteWindow : IDisposable
         {
             InvokePointer(_pointerTarget, "pointerup", _mouseX, _mouseY);
             _pointerTarget = null;
+            SetActive(null);
             return;
         }
 
@@ -3053,6 +3068,55 @@ public sealed class IgniteWindow : IDisposable
         }
     }
 
+    private void UpdateCursor(ElementNode? element)
+    {
+        if (element is not null && element.HasClass("dt-splitter"))
+        {
+            SetCursor(element.HasClass("dt-splitter-bottom")
+                ? StandardCursor.VResize
+                : StandardCursor.HResize);
+        }
+        else
+        {
+            SetCursor(StandardCursor.Arrow);
+        }
+    }
+
+    private void SetCursor(StandardCursor cursor)
+    {
+        if (_cursorKind == cursor)
+        {
+            return;
+        }
+
+        _cursorKind = cursor;
+
+        if (_input is null)
+        {
+            return;
+        }
+
+        foreach (var mouse in _input.Mice)
+        {
+            try
+            {
+                var pointer = mouse.Cursor;
+
+                if (pointer is null)
+                {
+                    continue;
+                }
+
+                pointer.Type = CursorType.Standard;
+                pointer.StandardCursor = cursor;
+            }
+            catch
+            {
+                // Cursor changes are best-effort per backend.
+            }
+        }
+    }
+
     private void SetHovered(ElementNode? element)
     {
         if (ReferenceEquals(_hovered, element))
@@ -3085,8 +3149,15 @@ public sealed class IgniteWindow : IDisposable
             return;
         }
 
+        var wasDevTools = _activeChain.Count > 0 && IsInDevToolsTree(_activeChain[0]);
         SetChainState(_activeChain, element, static node => node.IsActive = true,
             static node => node.IsActive = false);
+
+        if (wasDevTools || element is not null && IsInDevToolsTree(element))
+        {
+            _lastDevToolsVersion = -1;
+        }
+
         _needsLayout = true;
     }
 

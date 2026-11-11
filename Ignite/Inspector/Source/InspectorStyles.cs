@@ -30,8 +30,8 @@ public static class InspectorStyles
             background-color: #202124;
             color: #e8eaed;
             font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-            font-size: 12px;
-            line-height: 1.4;
+            font-size: 13px;
+            line-height: 1.45;
             border: 1px solid #3c4043;
         }
 
@@ -69,8 +69,8 @@ public static class InspectorStyles
             display: flex;
             flex-direction: row;
             align-items: center;
-            height: 36px;
-            min-height: 36px;
+            height: 38px;
+            min-height: 38px;
             background-color: #292a2d;
             border-bottom-width: 1px;
             border-bottom-style: solid;
@@ -82,7 +82,7 @@ public static class InspectorStyles
         #ignite-devtools .dt-tabs {
             display: flex;
             flex-direction: row;
-            height: 36px;
+            height: 38px;
         }
 
         #ignite-devtools .dt-tab {
@@ -90,7 +90,7 @@ public static class InspectorStyles
             align-items: center;
             padding-left: 12px;
             padding-right: 12px;
-            height: 36px;
+            height: 38px;
             color: #9aa0a6;
             border-bottom-width: 2px;
             border-bottom-style: solid;
@@ -195,6 +195,30 @@ public static class InspectorStyles
             overflow: visible;
         }
 
+        #ignite-devtools .dt-splitter {
+            position: absolute;
+            background-color: transparent;
+            z-index: 10;
+        }
+
+        #ignite-devtools .dt-splitter-bottom {
+            left: 0;
+            right: 0;
+            top: 0;
+            height: 6px;
+        }
+
+        #ignite-devtools .dt-splitter-right {
+            top: 0;
+            bottom: 0;
+            left: 0;
+            width: 6px;
+        }
+
+        #ignite-devtools .dt-splitter:active {
+            background-color: #007fd4;
+        }
+
         #ignite-devtools .dt-elements {
             display: flex;
             flex-direction: row;
@@ -202,6 +226,102 @@ public static class InspectorStyles
             overflow: hidden;
             width: 100%;
             height: 100%;
+        }
+
+        #ignite-devtools .dt-animations {
+            display: flex;
+            flex-direction: row;
+            flex: 1;
+            overflow: hidden;
+            width: 100%;
+            height: 100%;
+        }
+
+        #ignite-devtools.dt-dock-right .dt-animations {
+            flex-direction: column;
+        }
+
+        #ignite-devtools .dt-anim-list {
+            flex: 0 0 42%;
+            overflow: auto;
+            background-color: #202124;
+            border-right-width: 1px;
+            border-right-style: solid;
+            border-right-color: #3c4043;
+            padding: 6px;
+        }
+
+        #ignite-devtools.dt-dock-right .dt-anim-list {
+            flex: 0 0 40%;
+            border-right-width: 0;
+            border-bottom-width: 1px;
+            border-bottom-style: solid;
+            border-bottom-color: #3c4043;
+        }
+
+        #ignite-devtools .dt-anim-detail {
+            flex: 1;
+            overflow: auto;
+            padding: 10px;
+        }
+
+        #ignite-devtools .dt-anim-row {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            height: 24px;
+            padding-left: 6px;
+            padding-right: 6px;
+            border-radius: 3px;
+        }
+
+        #ignite-devtools .dt-anim-row:hover {
+            background-color: #2a2d2e;
+        }
+
+        #ignite-devtools .dt-anim-selected {
+            background-color: #0e3a5f;
+        }
+
+        #ignite-devtools .dt-anim-name {
+            color: #8ab4f8;
+            font-family: Consolas, "Courier New", monospace;
+        }
+
+        #ignite-devtools .dt-anim-count {
+            color: #9aa0a6;
+            font-size: 11px;
+            margin-left: auto;
+            padding-left: 8px;
+        }
+
+        #ignite-devtools .dt-anim-title {
+            color: #e8eaed;
+            font-family: Consolas, "Courier New", monospace;
+            font-size: 14px;
+            margin-bottom: 6px;
+        }
+
+        #ignite-devtools .dt-anim-stop {
+            color: #f0b26b;
+            font-family: Consolas, "Courier New", monospace;
+            margin-top: 10px;
+            margin-bottom: 2px;
+        }
+
+        #ignite-devtools .dt-anim-decl {
+            display: flex;
+            flex-direction: row;
+            padding-left: 12px;
+            font-family: Consolas, "Courier New", monospace;
+        }
+
+        #ignite-devtools .dt-anim-prop {
+            color: #e8a87c;
+        }
+
+        #ignite-devtools .dt-anim-value {
+            color: #a5d6a7;
         }
 
         #ignite-devtools.dt-dock-right .dt-elements {
@@ -241,8 +361,8 @@ public static class InspectorStyles
             display: flex;
             flex-direction: row;
             align-items: center;
-            height: 20px;
-            min-height: 20px;
+            height: 22px;
+            min-height: 22px;
             white-space: nowrap;
             padding-right: 8px;
         }
@@ -264,7 +384,7 @@ public static class InspectorStyles
             min-width: 14px;
             text-align: center;
             color: #9aa0a6;
-            font-size: 10px;
+            font-size: 11px;
         }
 
         #ignite-devtools .dt-caret-empty {
@@ -286,9 +406,9 @@ public static class InspectorStyles
             padding-left: 4px;
             padding-right: 4px;
             margin-left: 6px;
-            font-size: 9px;
-            height: 13px;
-            line-height: 13px;
+            font-size: 10px;
+            height: 14px;
+            line-height: 14px;
         }
 
         #ignite-devtools .dt-attr {
@@ -311,7 +431,7 @@ public static class InspectorStyles
         #ignite-devtools .dt-selected-head {
             color: #e8eaed;
             font-family: Consolas, "Courier New", monospace;
-            font-size: 13px;
+            font-size: 14px;
             padding-bottom: 6px;
             border-bottom-width: 1px;
             border-bottom-style: solid;
@@ -320,7 +440,7 @@ public static class InspectorStyles
 
         #ignite-devtools .dt-section-title {
             color: #9aa0a6;
-            font-size: 10px;
+            font-size: 11px;
             letter-spacing: 1px;
             margin-top: 12px;
             margin-bottom: 6px;
@@ -350,7 +470,7 @@ public static class InspectorStyles
 
         #ignite-devtools .dt-origin {
             color: #9aa0a6;
-            font-size: 10px;
+            font-size: 11px;
             margin-left: auto;
             padding-left: 8px;
         }
@@ -359,7 +479,7 @@ public static class InspectorStyles
             display: flex;
             flex-direction: row;
             align-items: center;
-            min-height: 20px;
+            min-height: 22px;
             margin-top: 2px;
             font-family: Consolas, "Courier New", monospace;
         }
@@ -389,11 +509,11 @@ public static class InspectorStyles
             border-radius: 2px;
             padding: 0 2px;
             margin: 0;
-            height: 18px;
-            min-height: 18px;
+            height: 20px;
+            min-height: 20px;
             font-family: Consolas, "Courier New", monospace;
-            font-size: 12px;
-            line-height: 18px;
+            font-size: 13px;
+            line-height: 20px;
             outline-width: 0;
             outline-style: none;
             white-space: nowrap;
@@ -432,7 +552,7 @@ public static class InspectorStyles
         }
 
         #ignite-devtools .dt-add-row {
-            min-height: 20px;
+            min-height: 22px;
             margin-top: 2px;
         }
 
@@ -623,20 +743,20 @@ public static class InspectorStyles
 
         #ignite-devtools .dt-card-label {
             color: #9aa0a6;
-            font-size: 10px;
+            font-size: 11px;
             letter-spacing: 0.5px;
         }
 
         #ignite-devtools .dt-card-value {
             color: #e8eaed;
-            font-size: 19px;
+            font-size: 20px;
             font-weight: 600;
             margin-top: 2px;
         }
 
         #ignite-devtools .dt-card-sub {
             color: #9aa0a6;
-            font-size: 10px;
+            font-size: 11px;
         }
 
         #ignite-devtools .dt-graph {
@@ -676,7 +796,7 @@ public static class InspectorStyles
             gap: 14px;
             margin-bottom: 6px;
             color: #9aa0a6;
-            font-size: 10px;
+            font-size: 11px;
         }
 
         #ignite-devtools .dt-legend-dot {
@@ -710,7 +830,7 @@ public static class InspectorStyles
             padding-left: 8px;
             padding-right: 8px;
             color: #9aa0a6;
-            font-size: 10px;
+            font-size: 11px;
         }
 
         #ignite-devtools .dt-status-gap {
@@ -734,6 +854,24 @@ public static class InspectorStyles
             builder.Append(i);
             builder.Append(" { height: ");
             builder.Append(i);
+            builder.Append("px; }\n");
+        }
+
+        for (var h = 160; h <= 900; h++)
+        {
+            builder.Append("#ignite-devtools.dt-dockh-");
+            builder.Append(h);
+            builder.Append(" { height: ");
+            builder.Append(h);
+            builder.Append("px; }\n");
+        }
+
+        for (var w = 280; w <= 1000; w++)
+        {
+            builder.Append("#ignite-devtools.dt-dockw-");
+            builder.Append(w);
+            builder.Append(" { width: ");
+            builder.Append(w);
             builder.Append("px; }\n");
         }
 

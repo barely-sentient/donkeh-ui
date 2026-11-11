@@ -21,7 +21,8 @@ public enum DevToolsDock
 public enum DevToolsTab
 {
     Elements,
-    Performance
+    Performance,
+    Animations
 }
 
 /// <summary>A range of rules that came from one stylesheet.</summary>
@@ -41,6 +42,24 @@ public sealed class DevToolsState
     public bool Visible { get; set; }
 
     public DevToolsDock Dock { get; set; } = DevToolsDock.Bottom;
+
+    /// <summary>Height of the bottom dock in CSS pixels.</summary>
+    public int DockBottomHeight { get; set; } = (int)InspectorStyles.DockBottomHeight;
+
+    /// <summary>Width of the right dock in CSS pixels.</summary>
+    public int DockRightWidth { get; set; } = (int)InspectorStyles.DockRightWidth;
+
+    /// <summary>The window viewport, used to clamp dock resizing.</summary>
+    public int ViewportWidth { get; set; }
+
+    /// <summary>The window viewport, used to clamp dock resizing.</summary>
+    public int ViewportHeight { get; set; }
+
+    /// <summary>Last pointer position in window client coordinates.</summary>
+    public float PointerX { get; set; }
+
+    /// <summary>Last pointer position in window client coordinates.</summary>
+    public float PointerY { get; set; }
 
     public DevToolsTab Tab { get; set; } = DevToolsTab.Elements;
 
@@ -78,6 +97,9 @@ public sealed class DevToolsState
 
     /// <summary>The declaration whose colour swatch opened the picker, or -1.</summary>
     public int ColorPickerRuleIndex { get; set; } = -1;
+
+    /// <summary>The @keyframes name selected in the Animations tab.</summary>
+    public string? SelectedAnimation { get; set; }
 
     /// <summary>The current colour text shown in the picker.</summary>
     public string ColorPickerValue { get; set; } = string.Empty;

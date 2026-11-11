@@ -964,32 +964,42 @@ namespace Ignite.DataEngine
 
         private int InternPreludeText(int start, int end)
         {
-            var length = 0;
-            // Rough capacity.
-            var buffer = new char[Math.Max(16, (end - start) * 8)];
+            // Size the buffer from the actual token text so long single-token
+            // preludes (for example @keyframes progress-bar-stripes) are not
+            // truncated by a fixed capacity estimate.
+            var capacity = 0;
             var previousEnd = -1;
+
+            for (var i = start; i < end; i++)
+            {
+                var token = _tokens[i];
+
+                if (previousEnd >= 0 && token.StartIndex > previousEnd)
+                {
+                    capacity++;
+                }
+
+                capacity += InternTable.GetString(token.InternedId)?.Length ?? 0;
+                previousEnd = token.EndIndex;
+            }
+
+            var length = 0;
+            var buffer = new char[capacity];
+            previousEnd = -1;
 
             for (var i = start; i < end; i++)
             {
                 var token = _tokens[i];
                 if (previousEnd >= 0 && token.StartIndex > previousEnd)
                 {
-                    if (length < buffer.Length)
-                    {
-                        buffer[length++] = ' ';
-                    }
+                    buffer[length++] = ' ';
                 }
 
                 var text = InternTable.GetString(token.InternedId);
                 if (text is not null)
                 {
-                    foreach (var ch in text)
-                    {
-                        if (length < buffer.Length)
-                        {
-                            buffer[length++] = ch;
-                        }
-                    }
+                    text.CopyTo(0, buffer, length, text.Length);
+                    length += text.Length;
                 }
 
                 previousEnd = token.EndIndex;
