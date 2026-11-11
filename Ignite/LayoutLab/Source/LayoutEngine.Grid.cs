@@ -7,6 +7,64 @@ public sealed partial class LayoutEngine
     /// tracks, gaps and item alignment. Auto placement is row-major, matching the
     /// default <c>grid-auto-flow</c>.
     /// </summary>
+    /// <param name="box">
+    /// The grid container; its style supplies the track templates, gaps,
+    /// auto-flow mode and default item alignment.
+    /// </param>
+    /// <param name="content">
+    /// Content box in absolute CSS pixels. Its width is the available inline
+    /// size for column tracks and its origin anchors every placed item.
+    /// </param>
+    /// <param name="definiteContentHeight">
+    /// Definite content-box height, or <see langword="null"/> when the block size
+    /// is indefinite. Percent and <c>fr</c> row tracks need a definite height;
+    /// when it is missing they fall back to intrinsic sizing.
+    /// </param>
+    /// <returns>
+    /// The used content height: the sum of the resolved row sizes plus the
+    /// inter-row gaps, floored at zero. The width is already known from
+    /// <paramref name="content"/>.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// The pass runs in this order: expand <c>repeat(auto-fill|auto-fit, ...)</c>
+    /// against the available space; place every item; grow the implicit track
+    /// lists from the placement extents; resolve column sizes from items'
+    /// max-content contributions; measure each item at its resolved cell width to
+    /// obtain a natural height; resolve row sizes from those heights; compute
+    /// track positions; then position, stretch and lay out each item inside its
+    /// cell.
+    /// </para>
+    /// <para>
+    /// Track sizing follows the same order for both axes (see
+    /// <see cref="ResolveTrackSizes"/>): fixed and percentage tracks resolve
+    /// their sizing function, <c>fit-content()</c> tracks clamp their
+    /// contribution to the limit, and intrinsic/auto tracks take their items'
+    /// contributions. If a definite axis size leaves positive free space it is
+    /// distributed to <c>fr</c> tracks by fraction, or evenly to auto tracks when
+    /// there are no flexible tracks. Negative free space is never distributed,
+    /// so overflowing items overflow the container rather than shrinking fixed
+    /// tracks.
+    /// </para>
+    /// <para>
+    /// Tracks beyond the explicit template are implicit and take their sizing
+    /// function from <c>grid-auto-columns</c> / <c>grid-auto-rows</c>, repeating
+    /// that pattern from the first implicit track. An unspecified template
+    /// therefore makes every track implicit.
+    /// </para>
+    /// <para>
+    /// In column flow the placement algorithm runs transposed, including line
+    /// names and named areas, but placements are converted back to row/column
+    /// axes before sizing.
+    /// </para>
+    /// <para>
+    /// Returns zero when there are no in-flow children, even if the template
+    /// declares explicit rows; a grid container with no items contributes no
+    /// height here. Children come from a per-depth pooled list that is released
+    /// in a <see langword="finally"/> block, so the method allocates only the
+    /// track and contribution arrays.
+    /// </para>
+    /// </remarks>
     private float LayoutGrid(LayoutBox box, Rect content, float? definiteContentHeight)
     {
         var style = box.Style;
@@ -210,8 +268,39 @@ public sealed partial class LayoutEngine
         }
     }
 
+    /// <summary>
+    /// One item's resolved cell in the canonical row/column axes: zero-based
+    /// start indices plus spans of at least one track.
+    /// </summary>
+    /// <param name="Row">Zero-based row index of the first covered track.</param>
+    /// <param name="Column">Zero-based column index of the first covered track.</param>
+    /// <param name="RowSpan">Number of rows covered, at least one.</param>
+    /// <param name="ColumnSpan">Number of columns covered, at least one.</param>
+    /// <remarks>
+    /// The placement is always stored in row/column order even when
+    /// <c>grid-auto-flow: column</c> transposes the placement algorithm; see
+    /// <see cref="ToPlacement"/>. Indices are track indices, not CSS line
+    /// numbers, and may address implicit tracks beyond the explicit template.
+    /// </remarks>
     private readonly record struct GridItemPlacement(int Row, int Column, int RowSpan, int ColumnSpan);
 
+    /// <summary>
+    /// Converts a placement expressed in the algorithm's working axes back to
+    /// canonical row/column indices.
+    /// </summary>
+    /// <param name="columnFlow">Whether the placement pass ran transposed.</param>
+    /// <param name="row">Working-axis row (the placement column in column flow).</param>
+    /// <param name="column">Working-axis column (the placement row in column flow).</param>
+    /// <param name="rowSpan">Span along <paramref name="row"/>.</param>
+    /// <param name="columnSpan">Span along <paramref name="column"/>.</param>
+    /// <returns>
+    /// A canonical placement. For column flow the row/column and their spans are
+    /// swapped; otherwise the values pass through unchanged.
+    /// </returns>
+    /// <remarks>
+    /// Column flow swaps <c>grid-row</c> and <c>grid-column</c> before
+    /// placement, so undo the swap here before track sizing and positioning.
+    /// </remarks>
     private static GridItemPlacement ToPlacement(
         bool columnFlow,
         int row,
@@ -233,6 +322,58 @@ public sealed partial class LayoutEngine
     ///    auto-placement cursor.
     /// Column flow runs the same algorithm on transposed axes.
     /// </summary>
+    /// <param name="items">
+    /// In-flow children in paint order; the array indexes match this list.
+    /// </param>
+    /// <param name="initialColumns">
+    /// Column count available before placement, normally the explicit template's
+    /// track count. Raised to at least one.
+    /// </param>
+    /// <param name="columnFlow">
+    /// <see langword="true"/> for <c>grid-auto-flow: column</c>; row and column
+    /// inputs are swapped for the duration of the algorithm.
+    /// </param>
+    /// <param name="columnLineNames">Line names for the working column axis.</param>
+    /// <param name="rowLineNames">Line names for the working row axis.</param>
+    /// <param name="areas">
+    /// Named areas, already transposed for column flow, or
+    /// <see langword="null"/>.
+    /// </param>
+    /// <param name="autoFlow">
+    /// Auto-flow mode; the <see cref="GridAutoFlow.Dense"/> bit selects dense
+    /// packing.
+    /// </param>
+    /// <param name="columnCount">
+    /// Receives the number of columns the placement grid grew to, at least one.
+    /// </param>
+    /// <param name="rowCount">
+    /// Receives the number of rows the placement grid grew to, at least one.
+    /// </param>
+    /// <returns>
+    /// A placement for every entry in <paramref name="items"/>, in the same
+    /// order.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// Occupancy is tracked in a jagged <c>List&lt;bool[]&gt;</c> that grows on
+    /// demand (see <see cref="EnsureGridCapacity"/>); cells outside the tracked
+    /// grid are treated as free. Because no item can be placed before the grid
+    /// covers it, the pass is effectively O(items x candidate cells) with small
+    /// constants and allocates only the grid and the placement arrays.
+    /// </para>
+    /// <para>
+    /// Named lines and areas are resolved once up front, before any item is
+    /// placed, so a named area that spans tracks beyond the explicit template
+    /// still reserves the right cells. A <c>span</c> whose start is auto is
+    /// anchored from its end line, matching the CSS fallback.
+    /// </para>
+    /// <para>
+    /// Sparse packing advances a single cursor and never revisits earlier rows,
+    /// which can leave holes. Dense packing restarts the search from row/column
+    /// zero for every item and back-fills those holes. In step 2 the sparse
+    /// variant keeps one cursor per locked row.
+    /// </para>
+    /// </remarks>
     private GridItemPlacement[] PlaceGridItems(
         List<LayoutBox> items,
         int initialColumns,
@@ -441,6 +582,35 @@ public sealed partial class LayoutEngine
     }
 
     /// <summary>Resolves named lines and named areas into numeric line numbers.</summary>
+    /// <param name="placement">
+    /// Parsed placement; may contain start/end names or a named span.
+    /// </param>
+    /// <param name="lineNames">Names for each line of one axis, indexable by line.</param>
+    /// <param name="areas">Named areas for the container, or <see langword="null"/>.</param>
+    /// <param name="columnAxis">
+    /// <see langword="true"/> when <paramref name="placement"/> describes the
+    /// column axis, selecting the area's column bounds instead of its row bounds.
+    /// </param>
+    /// <returns>
+    /// A placement with names replaced by 1-based line numbers. Names that cannot
+    /// be found are dropped so the remaining auto/definite sides can still place
+    /// the item.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// An area name takes precedence over a line name on the same side and yields
+    /// both bounds at once, so the item spans the whole area. Line names are
+    /// matched case-sensitively and the first match at or after the search origin
+    /// wins, which lets repeated names (for example the implicit lines of a
+    /// repeated track pattern) resolve in order.
+    /// </para>
+    /// <para>
+    /// A span with only a start name keeps its size and leaves the end auto; a
+    /// span with only an end name is anchored backwards from that line. When both
+    /// names resolve, the line distance determines the span. A span with neither
+    /// name stays fully auto.
+    /// </para>
+    /// </remarks>
     private static GridPlacement ResolveNamedPlacement(
         GridPlacement placement,
         string[][] lineNames,
@@ -553,6 +723,21 @@ public sealed partial class LayoutEngine
         return placement with { StartName = null, EndName = null };
     }
 
+    /// <summary>Finds the first line at or after a start index carrying a name.</summary>
+    /// <param name="lineNames">
+    /// Names for each line; index <c>i</c> is the line before track <c>i</c>.
+    /// </param>
+    /// <param name="name">
+    /// Line name to match, compared with <see cref="StringComparison.Ordinal"/>.
+    /// </param>
+    /// <param name="from">
+    /// Zero-based line index to start from; negative values are clamped to zero.
+    /// </param>
+    /// <returns>The zero-based line index, or -1 when the name is absent.</returns>
+    /// <remarks>
+    /// A line may have several names, so every name slot is checked. The ordinal
+    /// comparison makes line names case-sensitive, as CSS custom identifiers are.
+    /// </remarks>
     private static int FindLine(string[][] lineNames, string name, int from)
     {
         for (var i = Math.Max(0, from); i < lineNames.Length; i++)
@@ -571,6 +756,23 @@ public sealed partial class LayoutEngine
         return -1;
     }
 
+    /// <summary>Resolves one axis of a placement to a zero-based start track index.</summary>
+    /// <param name="placement">Placement for one axis, after named resolution.</param>
+    /// <param name="span">Number of tracks the item covers, at least one.</param>
+    /// <param name="trackCount">Current track count, used to resolve negative lines.</param>
+    /// <param name="startAuto">
+    /// Whether the start side is auto. Passed separately because a named-area
+    /// resolution can replace the placement's own flag.
+    /// </param>
+    /// <returns>
+    /// A zero-based start index, or -1 when the item has no definite position on
+    /// this axis and must be auto-placed.
+    /// </returns>
+    /// <remarks>
+    /// A definite end line plus a span anchors the item backwards:
+    /// <c>max(0, end - span)</c>. The clamp prevents a negative index when the
+    /// span is larger than the number of lines before the end.
+    /// </remarks>
     private static int ResolveGridLine(GridPlacement placement, int span, int trackCount, bool startAuto)
     {
         if (startAuto || placement.Start == 0)
@@ -587,6 +789,22 @@ public sealed partial class LayoutEngine
         return NormalizeGridLine(placement.Start, trackCount);
     }
 
+    /// <summary>Converts a CSS grid line number to a zero-based track index.</summary>
+    /// <param name="line">
+    /// 1-based line number; negative counts backwards from the end; 0 means auto.
+    /// </param>
+    /// <param name="trackCount">Number of explicit tracks at call time.</param>
+    /// <returns>
+    /// The zero-based track index, or -1 for line 0. Negative indices produced by
+    /// an out-of-range negative line are clamped to zero.
+    /// </returns>
+    /// <remarks>
+    /// Line 1 maps to track 0 and line <c>trackCount + 1</c> maps to the implicit
+    /// track one past the end. A negative line counts backwards using
+    /// <c>trackCount + line</c>, so -1 maps to the last explicit track
+    /// (<c>trackCount - 1</c>); in CSS -1 is the grid's end line, which would be
+    /// index <c>trackCount</c>.
+    /// </remarks>
     private static int NormalizeGridLine(int line, int trackCount)
     {
         if (line == 0)
@@ -597,6 +815,20 @@ public sealed partial class LayoutEngine
         return line > 0 ? line - 1 : Math.Max(0, trackCount + line);
     }
 
+    /// <summary>Grows the occupancy grid so it covers at least the requested extents.</summary>
+    /// <param name="occupied">Jagged occupancy grid, rows of column flags; grown in place.</param>
+    /// <param name="rowCount">Current row count, raised to cover <paramref name="rows"/>.</param>
+    /// <param name="columnCount">
+    /// Current column count, raised to cover <paramref name="columns"/>.
+    /// </param>
+    /// <param name="rows">Minimum number of rows that must be addressable.</param>
+    /// <param name="columns">Minimum number of columns that must be addressable.</param>
+    /// <remarks>
+    /// Adds row arrays and widens existing rows with <c>Array.Resize</c>. Both
+    /// counts are at least one. Growth is not geometric: every call widens only
+    /// to the requested column count, so repeated single-column growth can copy
+    /// each row repeatedly.
+    /// </remarks>
     private static void EnsureGridCapacity(
         List<bool[]> occupied,
         ref int rowCount,
@@ -623,6 +855,19 @@ public sealed partial class LayoutEngine
         }
     }
 
+    /// <summary>Tests whether a rectangular span of cells is unoccupied.</summary>
+    /// <param name="occupied">Occupancy grid to inspect.</param>
+    /// <param name="row">Zero-based first row of the span.</param>
+    /// <param name="column">Zero-based first column of the span.</param>
+    /// <param name="rowSpan">Number of rows in the span.</param>
+    /// <param name="columnSpan">Number of columns in the span.</param>
+    /// <returns><see langword="true"/> when none of the covered cells is occupied.</returns>
+    /// <remarks>
+    /// Cells outside the tracked grid count as free, and the scan returns
+    /// <see langword="true"/> immediately on reaching them. The caller is
+    /// expected to grow the grid afterwards, so placement can always extend into
+    /// new implicit tracks.
+    /// </remarks>
     private static bool GridAreaFree(
         List<bool[]> occupied,
         int row,
@@ -656,6 +901,18 @@ public sealed partial class LayoutEngine
         return true;
     }
 
+    /// <summary>Marks every cell of a rectangular span as occupied.</summary>
+    /// <param name="occupied">Occupancy grid, extended in place as needed.</param>
+    /// <param name="row">Zero-based first row of the span.</param>
+    /// <param name="column">Zero-based first column of the span.</param>
+    /// <param name="rowSpan">Number of rows to mark.</param>
+    /// <param name="columnSpan">Number of columns to mark.</param>
+    /// <remarks>
+    /// Adds missing rows and widens rows that are too narrow, then sets the
+    /// covered flags. Unlike <see cref="EnsureGridCapacity"/>, this can grow
+    /// beyond the declared row/column counts, which makes
+    /// <c>occupied.Count</c> the true post-placement row count.
+    /// </remarks>
     private static void MarkOccupied(
         List<bool[]> occupied,
         int row,
@@ -685,6 +942,23 @@ public sealed partial class LayoutEngine
         }
     }
 
+    /// <summary>Finds the first free column in one row for a row-locked item.</summary>
+    /// <param name="occupied">Occupancy grid to search.</param>
+    /// <param name="row">Zero-based row to scan.</param>
+    /// <param name="rowSpan">Rows the item covers, all of which must be free.</param>
+    /// <param name="columnSpan">Columns the item covers.</param>
+    /// <param name="columnCount">
+    /// Current column count; the scan may return this value to overflow.
+    /// </param>
+    /// <param name="start">First column to try; negative values are clamped to zero.</param>
+    /// <returns>
+    /// The first free starting column, or <paramref name="columnCount"/> when no
+    /// position fits, signalling that an implicit column must be added.
+    /// </returns>
+    /// <remarks>
+    /// The upper bound is inclusive so the overflow column itself is reported
+    /// rather than silently returning the last column.
+    /// </remarks>
     private static int FindFreeColumn(
         List<bool[]> occupied,
         int row,
@@ -704,6 +978,23 @@ public sealed partial class LayoutEngine
         return columnCount;
     }
 
+    /// <summary>Finds the first free row for an item with a definite column.</summary>
+    /// <param name="occupied">Occupancy grid to search.</param>
+    /// <param name="column">Zero-based first column of the item.</param>
+    /// <param name="columnSpan">Columns the item covers, all of which must be free.</param>
+    /// <param name="rowSpan">Rows the item covers.</param>
+    /// <param name="rowCount">
+    /// Current row count; the scan may return this value to overflow.
+    /// </param>
+    /// <param name="start">First row to try; negative values are clamped to zero.</param>
+    /// <returns>
+    /// The first free starting row, or <paramref name="rowCount"/> when no
+    /// position fits, signalling that an implicit row must be added.
+    /// </returns>
+    /// <remarks>
+    /// Sparse auto-placement passes the current cursor row so earlier rows are
+    /// never revisited; dense placement passes zero.
+    /// </remarks>
     private static int FindFreeRow(
         List<bool[]> occupied,
         int column,
@@ -723,6 +1014,21 @@ public sealed partial class LayoutEngine
         return rowCount;
     }
 
+    /// <summary>Searches the whole grid from the origin for the first free cell.</summary>
+    /// <param name="occupied">Occupancy grid to search.</param>
+    /// <param name="rowSpan">Rows the item covers.</param>
+    /// <param name="columnSpan">Columns the item covers.</param>
+    /// <param name="columnCount">Current column count.</param>
+    /// <param name="row">Receives the zero-based row of the first fit.</param>
+    /// <param name="column">Receives the zero-based column of the first fit.</param>
+    /// <returns>
+    /// <see langword="true"/> when a position fit within the current width; see
+    /// <see cref="FindFreeCellFrom"/> for the failure semantics.
+    /// </returns>
+    /// <remarks>
+    /// This is the dense auto-placement entry point: it always restarts at
+    /// row 0, column 0 so earlier holes are back-filled.
+    /// </remarks>
     private static bool FindFreeCell(
         List<bool[]> occupied,
         int rowSpan,
@@ -734,6 +1040,33 @@ public sealed partial class LayoutEngine
         return FindFreeCellFrom(occupied, 0, 0, rowSpan, columnSpan, columnCount, out row, out column);
     }
 
+    /// <summary>Searches row-major from a cursor for the first free cell.</summary>
+    /// <param name="occupied">Occupancy grid to search.</param>
+    /// <param name="startRow">Row of the cursor.</param>
+    /// <param name="startColumn">Column of the cursor in <paramref name="startRow"/>.</param>
+    /// <param name="rowSpan">Rows the item covers.</param>
+    /// <param name="columnSpan">Columns the item covers.</param>
+    /// <param name="columnCount">
+    /// Current column count; the item must fit entirely within it.
+    /// </param>
+    /// <param name="row">
+    /// Receives the zero-based row of the fit, or <c>occupied.Count</c> on
+    /// failure.
+    /// </param>
+    /// <param name="column">
+    /// Receives the zero-based column of the fit, or zero on failure.
+    /// </param>
+    /// <returns>
+    /// <see langword="true"/> when a fit was found. <see langword="false"/> means
+    /// the item is wider than the current grid or no cell remained; the caller
+    /// then grows the implicit columns and places at the reported overflow row.
+    /// </returns>
+    /// <remarks>
+    /// A cursor column at or past <paramref name="columnCount"/> advances to the
+    /// next row. The scan stops at the first row after the tracked grid, where
+    /// cells count as free, so a non-spanning item always advances rather than
+    /// failing. Negative cursor components are clamped to zero.
+    /// </remarks>
     private static bool FindFreeCellFrom(
         List<bool[]> occupied,
         int startRow,
@@ -773,6 +1106,20 @@ public sealed partial class LayoutEngine
         return false;
     }
 
+    /// <summary>
+    /// The result of expanding a track template: concrete tracks plus an
+    /// optional name for every line, including both outer edges.
+    /// </summary>
+    /// <param name="Tracks">Expanded tracks in order, with auto-repeat already replicated.</param>
+    /// <param name="LineNames">
+    /// Names per line. Index <c>i</c> names the line before track <c>i</c>; there
+    /// are <c>Tracks.Length + 1</c> entries, the last naming the end line.
+    /// </param>
+    /// <remarks>
+    /// An empty result means the template was unspecified, so all tracks are
+    /// implicit. The arrays are newly allocated by <see cref="ExpandTracks"/> and
+    /// are not shared with the parsed <see cref="GridTrackList"/>.
+    /// </remarks>
     private readonly record struct ExpandedTracks(GridTrack[] Tracks, string[][] LineNames);
 
     /// <summary>
@@ -780,6 +1127,32 @@ public sealed partial class LayoutEngine
     /// that fit in the available space. A fixed or <c>minmax()</c> minimum gives
     /// the repeat size; patterns without one fall back to a single copy.
     /// </summary>
+    /// <param name="list">Parsed template, or <see langword="null"/> for none.</param>
+    /// <param name="available">
+    /// Size of the axis in CSS pixels. May be <see cref="float.NaN"/> for an
+    /// indefinite axis, which disables repetition.
+    /// </param>
+    /// <param name="gap">Gap between tracks in CSS pixels, included in the repeat size.</param>
+    /// <param name="context">Length context used to resolve fixed, percent and fr minimums.</param>
+    /// <param name="itemCount">Item count used to bound <c>auto-fit</c> collapsing.</param>
+    /// <returns>
+    /// Concrete tracks and line names, or empty arrays when the template is
+    /// empty/unspecified.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// The repeated pattern is inserted in place of the parser's placeholder
+    /// track. Line names around the placeholder are preserved, and each copy
+    /// contributes its own internal names, so named lines inside a repeat resolve
+    /// to every copy.
+    /// </para>
+    /// <para>
+    /// <c>auto-fit</c> is approximated rather than implemented exactly: the
+    /// repeat count is clamped to the number of items, but empty copies are not
+    /// collapsed to zero width afterwards. As a result the collapsed space is not
+    /// redistributed to flexible tracks.
+    /// </para>
+    /// </remarks>
     private static ExpandedTracks ExpandTracks(
         GridTrackList? list,
         float available,
@@ -847,6 +1220,13 @@ public sealed partial class LayoutEngine
         return new ExpandedTracks(tracks.ToArray(), ToNameArrays(names));
     }
 
+    /// <summary>Copies per-line name lists into a jagged array.</summary>
+    /// <param name="names">One list per grid line, including the trailing end line.</param>
+    /// <returns>A new outer array whose entries are newly allocated name arrays.</returns>
+    /// <remarks>
+    /// The copy breaks the link to the temporary <see cref="List{T}"/> used while
+    /// expanding repeats, so the returned line names can outlive the expansion.
+    /// </remarks>
     private static string[][] ToNameArrays(List<List<string>> names)
     {
         var result = new string[names.Count][];
@@ -859,6 +1239,33 @@ public sealed partial class LayoutEngine
         return result;
     }
 
+    /// <summary>Counts how many copies of an auto-repeat pattern fit on one axis.</summary>
+    /// <param name="pattern">Tracks inside <c>repeat()</c>; must be non-empty.</param>
+    /// <param name="available">
+    /// Axis size in CSS pixels; non-finite or non-positive values yield one
+    /// copy.
+    /// </param>
+    /// <param name="gap">Gap between tracks in CSS pixels.</param>
+    /// <param name="context">Length context for resolving the pattern's minimums.</param>
+    /// <returns>The number of copies, clamped to the range 1 to 1024.</returns>
+    /// <remarks>
+    /// <para>
+    /// The repeat size is the sum of each track's minimum: a fixed length, a
+    /// percentage, or a <c>minmax()</c> with a definite first argument. Internal
+    /// gaps are added once per pattern. The count is
+    /// <c>floor((available + gap) / (repeatSize + gap))</c>, which is the standard
+    /// auto-repeat formula and avoids a trailing gap being counted twice.
+    /// </para>
+    /// <para>
+    /// A pattern containing <c>auto</c>, an intrinsic minimum, or an <c>fr</c>
+    /// track with an intrinsic minimum falls back to a single copy, because the
+    /// repeat size then depends on content that is not known yet. A
+    /// <c>fit-content()</c> track resolves its stored minimum, which is
+    /// <c>auto</c>, to the fallback zero, so such a pattern measures smaller than
+    /// its real limit. The 1024 cap matches the parser's accepted repeat range
+    /// and bounds the expanded track array.
+    /// </para>
+    /// </remarks>
     private static int CountAutoRepeats(
         GridTrack[] pattern,
         float available,
@@ -912,6 +1319,23 @@ public sealed partial class LayoutEngine
         return Math.Clamp(count, 1, 1024);
     }
 
+    /// <summary>Extends a track array to cover implicit tracks.</summary>
+    /// <param name="tracks">Explicit tracks; returned unchanged when already long enough.</param>
+    /// <param name="count">Required track count, normally the placement extent.</param>
+    /// <param name="implicitTracks">
+    /// Parsed <c>grid-auto-rows</c> or <c>grid-auto-columns</c> pattern, or
+    /// <see langword="null"/> for the default.
+    /// </param>
+    /// <returns>
+    /// An array of exactly <paramref name="count"/> tracks. When no growth was
+    /// needed this is the input array itself, not a copy.
+    /// </returns>
+    /// <remarks>
+    /// Implicit tracks repeat the auto pattern starting with the first implicit
+    /// track, so the pattern index is <c>i - explicitCount</c> modulo the pattern
+    /// length. With no pattern, each implicit track is
+    /// <see cref="GridTrack.Auto"/>.
+    /// </remarks>
     private static GridTrack[] GrowTracks(
         GridTrack[] tracks,
         int count,
@@ -939,6 +1363,56 @@ public sealed partial class LayoutEngine
         return grown;
     }
 
+    /// <summary>
+    /// Resolves final track sizes from tracks, items' contributions and free
+    /// space.
+    /// </summary>
+    /// <param name="tracks">Tracks to size, in order.</param>
+    /// <param name="available">
+    /// Size of the axis in CSS pixels, or <see cref="float.NaN"/> when the axis is
+    /// indefinite (for example an auto-height grid's rows).
+    /// </param>
+    /// <param name="contributions">
+    /// Per-track content contribution in CSS pixels: the largest max-content
+    /// outer size of any item, divided by the item's span so spanning items do not
+    /// inflate every covered track.
+    /// </param>
+    /// <param name="gap">Gap between tracks in CSS pixels.</param>
+    /// <param name="context">Length context used to resolve fixed and percentage minimums.</param>
+    /// <returns>One non-negative size in CSS pixels per input track.</returns>
+    /// <remarks>
+    /// <para>
+    /// Sizing order. Fixed and percentage tracks resolve their minimum against
+    /// <paramref name="available"/>; <c>fit-content()</c> tracks take
+    /// <c>min(limit, contribution)</c>; auto, min-content and max-content tracks
+    /// take their contribution. The caller supplies one contribution per track,
+    /// so <c>min-content</c> and <c>max-content</c> tracks currently receive the
+    /// same max-content-based size. Flexible tracks start at zero and accumulate
+    /// their <c>fr</c> total. The running total includes one gap between each
+    /// pair of tracks.
+    /// </para>
+    /// <para>
+    /// On a definite axis, positive free space (<c>available - total</c>) goes to
+    /// <c>fr</c> tracks in proportion to their fractions. If no track has a
+    /// positive fraction it is split evenly across the collected auto tracks
+    /// (which can include flexible tracks with a zero fraction) instead; this
+    /// implements <c>align-content/justify-content: stretch</c> for auto tracks.
+    /// Negative free space is ignored: no track is shrunk, so overflowing
+    /// content overflows the container. The maximum side of <c>minmax()</c> and
+    /// the <see cref="GridTrack.Maximum"/> field are not applied beyond the
+    /// cases above.
+    /// </para>
+    /// <para>
+    /// On an indefinite axis there is no free space to distribute. <c>fr</c>
+    /// tracks fall back to their contributions and behave like auto tracks.
+    /// </para>
+    /// <para>
+    /// A flexible track's intrinsic contribution is ignored whenever at least
+    /// one <c>fr</c> track has a positive fraction, because the free-space
+    /// branch runs first; this differs from the CSS min-content floor for
+    /// <c>1fr</c> tracks.
+    /// </para>
+    /// </remarks>
     private float[] ResolveTrackSizes(
         GridTrack[] tracks,
         float available,
@@ -1027,6 +1501,14 @@ public sealed partial class LayoutEngine
         return sizes;
     }
 
+    /// <summary>Computes the leading edge of every track from its size and the gap.</summary>
+    /// <param name="sizes">Resolved track sizes in CSS pixels.</param>
+    /// <param name="gap">Gap between tracks in CSS pixels.</param>
+    /// <returns>Offsets, relative to the grid content box origin, one per track.</returns>
+    /// <remarks>
+    /// The cursor starts at zero and advances by each size plus one gap, so the
+    /// returned positions do not include a gap before the first track.
+    /// </remarks>
     private static float[] GridPositions(float[] sizes, float gap)
     {
         var positions = new float[sizes.Length];
@@ -1041,6 +1523,20 @@ public sealed partial class LayoutEngine
         return positions;
     }
 
+    /// <summary>Measures a cell spanning one or more tracks, including internal gaps.</summary>
+    /// <param name="sizes">Resolved track sizes in CSS pixels.</param>
+    /// <param name="start">Zero-based index of the first track.</param>
+    /// <param name="span">Number of tracks covered.</param>
+    /// <param name="gap">Gap between tracks in CSS pixels.</param>
+    /// <returns>
+    /// The span's size in CSS pixels; zero when <paramref name="start"/> is out
+    /// of range.
+    /// </returns>
+    /// <remarks>
+    /// The loop stops at the end of <paramref name="sizes"/>, so an oversized span
+    /// is silently truncated rather than reading past the array. A gap is added
+    /// between consecutive tracks but not before the first or after the last.
+    /// </remarks>
     private static float GridSpanSize(float[] sizes, int start, int span, float gap)
     {
         var total = 0f;
@@ -1058,6 +1554,22 @@ public sealed partial class LayoutEngine
         return total;
     }
 
+    /// <summary>
+    /// Resolves an item's <c>justify-self</c> against the container's
+    /// <c>justify-items</c>.
+    /// </summary>
+    /// <param name="item">Computed style of the grid item.</param>
+    /// <param name="container">Computed style of the grid container.</param>
+    /// <returns>
+    /// The effective inline-axis alignment; never <see cref="JustifySelf.Auto"/>.
+    /// </returns>
+    /// <remarks>
+    /// Only an explicit <c>auto</c> falls back to the container. The container's
+    /// <see cref="JustifyItems.Normal"/> and <see cref="JustifyItems.Legacy"/>
+    /// map to <see cref="JustifySelf.Stretch"/>, matching the grid default. An
+    /// item-level <see cref="JustifySelf.Normal"/> is returned unchanged and is
+    /// treated like start by the offset helper.
+    /// </remarks>
     private static JustifySelf EffectiveJustifySelf(ComputedStyle item, ComputedStyle container)
     {
         return item.JustifySelf switch
@@ -1076,6 +1588,17 @@ public sealed partial class LayoutEngine
         };
     }
 
+    /// <summary>Computes the inline-axis offset of an item inside its cell.</summary>
+    /// <param name="justify">Effective <c>justify-self</c> alignment.</param>
+    /// <param name="free">
+    /// Free space in the cell after margins and item width, in CSS pixels.
+    /// </param>
+    /// <returns>Zero, half the free space, or all of it, depending on the alignment.</returns>
+    /// <remarks>
+    /// Non-positive free space returns zero, so an overflowing item stays at its
+    /// start edge. End/right/self-end push the item fully to the end; center
+    /// splits the space; start, stretch, normal and self-start stay at zero.
+    /// </remarks>
     private static float AlignGridOffset(JustifySelf justify, float free)
     {
         if (free <= 0)
@@ -1091,6 +1614,17 @@ public sealed partial class LayoutEngine
         };
     }
 
+    /// <summary>Computes the block-axis offset of an item inside its cell.</summary>
+    /// <param name="align">Effective <c>align-self</c> alignment.</param>
+    /// <param name="free">
+    /// Free space in the cell after margins and item height, in CSS pixels.
+    /// </param>
+    /// <returns>Zero, half the free space, or all of it, depending on the alignment.</returns>
+    /// <remarks>
+    /// Non-positive free space returns zero. Flex-end/end/self-end push the item
+    /// fully to the end; center splits the space; start, stretch and baseline stay
+    /// at zero. Baseline alignment is therefore approximated as start.
+    /// </remarks>
     private static float AlignGridOffset(AlignItems align, float free)
     {
         if (free <= 0)
