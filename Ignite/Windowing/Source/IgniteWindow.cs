@@ -40,7 +40,8 @@ public sealed class IgniteWindow : IDisposable
     private LayoutResult? _layoutResult;
     private Node? _root;
     private Node? _appRoot;
-    private RendererContext _context = new();
+    private readonly RendererContext _context = new();
+    private readonly RendererContext _devToolsContext = new();
     private readonly DevToolsState _devTools = new();
     private DevToolsWindowHost? _devToolsWindow;
     private InspectorPanel? _devToolsPanel;
@@ -48,17 +49,28 @@ public sealed class IgniteWindow : IDisposable
     private Node? _devToolsRoot;
     private LayoutEngine? _devToolsLayoutEngine;
     private LayoutResult? _devToolsLayout;
+    private int _lastDevToolsVersion = -1;
+    private int _lastDevToolsWidth = -1;
+    private int _lastDevToolsHeight = -1;
+    private int _lastDevToolsDock = -1;
+    private bool _lastDevToolsVisible;
+    private float _lastDevToolsDpi;
     private double _lastDevToolsRefresh;
+    private double _performanceSampleTimer;
 
     private bool _needsLayout = true;
+    private bool _needsPaint;
     private bool _disposed;
     private bool _gpuDisposed;
     private int _lastUiVersion = -1;
+    private int _lastInspectorAppVersion = -1;
     private int _lastWidth;
     private int _lastHeight;
     private int _lastAppWidth;
     private int _lastAppHeight;
     private float _lastDpi;
+    private int _cachedLayoutBoxCount;
+    private int _cachedNodeCount;
 
     private string? _screenshotPath;
 
@@ -260,6 +272,9 @@ public sealed class IgniteWindow : IDisposable
             Size = new Vector2D<int>(width, height),
             Title = string.IsNullOrWhiteSpace(_settings.Title) ? "Ignite" : _settings.Title,
             VSync = _settings.VSync,
+            FramesPerSecond = _settings.TargetFramesPerSecond > 0
+                ? _settings.TargetFramesPerSecond
+                : 0,
             Samples = _settings.Samples > 0 ? _settings.Samples : null,
             WindowBorder = _settings.Frameless
                 ? WindowBorder.Hidden
@@ -361,7 +376,7 @@ public sealed class IgniteWindow : IDisposable
             || MathF.Abs(_lastDpi - dpi) > 0.001f)
         {
             var start = Stopwatch.GetTimestamp();
-            var options = CreateLayoutOptions(appWidth, appHeight, dpi);
+            var options = CreateLayoutOptions(appWidth, appHeight, dpi, _context, isApp: true);
             _layoutResult = _layoutEngine!.Layout(_root, options);
             LastLayoutMilliseconds = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
             _lastUiVersion = _ui.Version;
@@ -371,13 +386,54 @@ public sealed class IgniteWindow : IDisposable
             _lastAppHeight = appHeight;
             _lastDpi = dpi;
             _needsLayout = false;
+            _needsPaint = false;
+            _cachedLayoutBoxCount = CountLayoutBoxes(_layoutResult.Root);
+            _cachedNodeCount = CountNodes(_appRoot);
+        }
+        else if (_needsPaint && _layoutResult is not null)
+        {
+            // Scroll offsets never affect geometry, so a scroll only rebuilds
+            // the display list rather than the whole box tree.
+            var start = Stopwatch.GetTimestamp();
+            var options = CreateLayoutOptions(
+                _lastAppWidth,
+                _lastAppHeight,
+                _lastDpi,
+                _context,
+                isApp: true);
+            _layoutResult = _layoutEngine!.Repaint(_layoutResult, options);
+            LastLayoutMilliseconds = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+            _needsPaint = false;
         }
 
-        if (_settings.EnableDevTools && _devToolsRoot is not null && _devToolsLayoutEngine is not null)
+        var devToolsVisible = _settings.EnableDevTools
+            && _devTools.Visible
+            && _devTools.Dock != DevToolsDock.Window;
+
+        if (devToolsVisible
+            && _devToolsRoot is not null
+            && _devToolsLayoutEngine is not null
+            && (_lastDevToolsVersion != _devToolsUi!.Version
+                || _lastDevToolsWidth != width
+                || _lastDevToolsHeight != height
+                || _lastDevToolsDock != (int)_devTools.Dock
+                || _lastDevToolsVisible != devToolsVisible
+                || MathF.Abs(_lastDevToolsDpi - dpi) > 0.001f))
         {
             _devToolsLayout = _devToolsLayoutEngine.Layout(
                 _devToolsRoot,
-                CreateLayoutOptions(width, height, dpi));
+                CreateLayoutOptions(width, height, dpi, _devToolsContext, isApp: false));
+            _lastDevToolsVersion = _devToolsUi.Version;
+            _lastDevToolsWidth = width;
+            _lastDevToolsHeight = height;
+            _lastDevToolsDock = (int)_devTools.Dock;
+            _lastDevToolsVisible = devToolsVisible;
+            _lastDevToolsDpi = dpi;
+        }
+        else if (!devToolsVisible)
+        {
+            _devToolsLayout = null;
+            _lastDevToolsVisible = false;
         }
 
         var renderStart = Stopwatch.GetTimestamp();
@@ -410,15 +466,32 @@ public sealed class IgniteWindow : IDisposable
         {
             _devTools.Layout = _layoutResult;
             _devTools.Context = _context;
-            _devTools.Performance.Sample(
-                LastFrameMilliseconds,
-                LastLayoutMilliseconds,
-                LastRenderMilliseconds,
-                LastUpdateMilliseconds,
-                FrameCount,
-                LastInstructionCount,
-                CountLayoutBoxes(_layoutResult?.Root),
-                CountNodes(_appRoot));
+
+            // Sampling the process, the heap and the tree walk every frame is
+            // far more expensive than the frame itself. A live monitor only
+            // needs a handful of updates per second.
+            if (_devTools.Visible && _devTools.Tab == DevToolsTab.Performance)
+            {
+                _performanceSampleTimer += delta;
+
+                if (_performanceSampleTimer >= 0.25)
+                {
+                    _performanceSampleTimer = 0;
+                    _devTools.Performance.Sample(
+                        LastFrameMilliseconds,
+                        LastLayoutMilliseconds,
+                        LastRenderMilliseconds,
+                        LastUpdateMilliseconds,
+                        FrameCount,
+                        LastInstructionCount,
+                        _cachedLayoutBoxCount,
+                        _cachedNodeCount);
+                }
+            }
+            else
+            {
+                _performanceSampleTimer = 0;
+            }
         }
 
         if (_screenshotPath is { } path)
@@ -431,20 +504,10 @@ public sealed class IgniteWindow : IDisposable
 
     private void UpdateDevTools(double delta)
     {
-        if (!_settings.EnableDevTools)
+        if (!_settings.EnableDevTools || _devToolsPanel is null)
         {
             return;
         }
-
-        _lastDevToolsRefresh += delta;
-
-        if (_lastDevToolsRefresh >= 0.1 || _devTools.Version == 0)
-        {
-            _lastDevToolsRefresh = 0;
-            _devTools.Refresh();
-        }
-
-        _devToolsPanel?.Tick();
 
         if (_devTools.Visible && _devTools.Dock == DevToolsDock.Window)
         {
@@ -455,6 +518,31 @@ public sealed class IgniteWindow : IDisposable
         {
             _devToolsWindow?.Close();
         }
+
+        if (!_devTools.Visible)
+        {
+            _lastDevToolsRefresh = 0;
+            return;
+        }
+
+        _lastDevToolsRefresh += delta;
+
+        // The Performance tab is a live monitor and refreshes on a timer. The
+        // Elements tab only needs to rebuild when the mounted app changed or
+        // the user selected something, which already bumps the state version.
+        var appChanged = _ui.Version != _lastInspectorAppVersion;
+        var due = _devTools.Tab == DevToolsTab.Performance
+            ? _lastDevToolsRefresh >= 0.2
+            : appChanged;
+
+        if (due || _devTools.Version == 0)
+        {
+            _lastDevToolsRefresh = 0;
+            _lastInspectorAppVersion = _ui.Version;
+            _devTools.Refresh();
+        }
+
+        _devToolsPanel.Tick();
     }
 
     private static int CountLayoutBoxes(LayoutBox? box)
@@ -554,17 +642,22 @@ public sealed class IgniteWindow : IDisposable
         }
     }
 
-    private LayoutOptions CreateLayoutOptions(int width, int height, float dpi)
+    private LayoutOptions CreateLayoutOptions(
+        int width,
+        int height,
+        float dpi,
+        RendererContext context,
+        bool isApp)
     {
-        _context.ViewportWidth = width;
-        _context.ViewportHeight = height;
+        context.ViewportWidth = width;
+        context.ViewportHeight = height;
 
         var options = new LayoutOptions
         {
             ViewportWidth = width,
             ViewportHeight = height,
             DevicePixelRatio = dpi,
-            Context = _context,
+            Context = context,
             TextMeasurer = _measurer,
             TextProvider = GetDisplayText,
             TextColorProvider = GetTextColorOverride,
@@ -578,7 +671,15 @@ public sealed class IgniteWindow : IDisposable
             EnableCaching = true
         };
 
-        _lengthContext = options.CreateRootLengthContext();
+        // The app and the inspector must not share a RendererContext: each
+        // layout writes its viewport into the context, and a changed context
+        // version invalidates every cached style. Sharing one context while
+        // docked made both trees restyle on every frame.
+        if (isApp)
+        {
+            _lengthContext = options.CreateRootLengthContext();
+        }
+
         return options;
     }
 
@@ -898,6 +999,13 @@ public sealed class IgniteWindow : IDisposable
 
     private bool BuildOverlays(out InstructionBuffer overlay, out ConstantPool constants)
     {
+        if (_openSelect is null && _focused is null)
+        {
+            overlay = null!;
+            constants = null!;
+            return false;
+        }
+
         overlay = new InstructionBuffer(64);
         constants = new ConstantPool();
 
@@ -1801,7 +1909,7 @@ public sealed class IgniteWindow : IDisposable
 
         node.ScrollOffsetX = x;
         node.ScrollOffsetY = y;
-        _needsLayout = true;
+        _needsPaint = true;
     }
 
     private void AdvanceScrollAnimations(double delta)
@@ -1851,7 +1959,7 @@ public sealed class IgniteWindow : IDisposable
 
         if (changed)
         {
-            _needsLayout = true;
+            _needsPaint = true;
         }
     }
 
@@ -2400,6 +2508,11 @@ public sealed class IgniteWindow : IDisposable
 
     private void SetActive(ElementNode? element)
     {
+        if (element is null && _activeChain.Count == 0)
+        {
+            return;
+        }
+
         SetChainState(_activeChain, element, static node => node.IsActive = true,
             static node => node.IsActive = false);
         _needsLayout = true;
@@ -2428,9 +2541,12 @@ public sealed class IgniteWindow : IDisposable
         }
     }
 
-    private ElementNode? HitTest(float x, float y) => HitTestBox(x, y)?.Node is ElementNode element
-        ? element
-        : FindElement(HitTestBox(x, y)?.Node);
+    private ElementNode? HitTest(float x, float y)
+    {
+        var box = HitTestBox(x, y);
+        var node = box?.Node;
+        return node as ElementNode ?? FindElement(node);
+    }
 
     private LayoutBox? HitTestBox(float x, float y)
     {

@@ -73,7 +73,7 @@ public sealed partial class LayoutEngine
         _resolver = new StyleResolver(_table, _valueCache, _options);
 
         _instructions.Clear();
-        _constants = new ConstantPool();
+        _constants.Clear();
         _byNode.Clear();
         _absolutes.Clear();
         _absoluteLaidOut.Clear();
@@ -94,6 +94,61 @@ public sealed partial class LayoutEngine
             : new OptimisationResult(_instructions, _constants, OptimisationStats.Empty);
 
         return new LayoutResult(_root, frame.Instructions, frame.Constants, _byNode, frame.Stats);
+    }
+
+    /// <summary>
+    /// Rebuilds only the display list for a layout whose geometry is still
+    /// valid. Scroll offsets never move boxes, so a scroll can repaint without
+    /// rebuilding the box tree or re-resolving styles.
+    /// </summary>
+    public LayoutResult Repaint(LayoutResult previous, LayoutOptions? options)
+    {
+        ArgumentNullException.ThrowIfNull(previous);
+
+        _options = options ?? new LayoutOptions();
+        _maxDepth = Math.Max(1, _options.MaxLayoutDepth);
+        _baseContext = _options.CreateRootLengthContext();
+        _rendererContext = _options.CreateRendererContext();
+        _contextVersion = _rendererContext.Version;
+        _styleSignature = ComputeStyleSignature();
+        _measurer = _options.TextMeasurer ?? SimpleTextMeasurer.Instance;
+        _resolver = new StyleResolver(_table, _valueCache, _options);
+
+        _instructions.Clear();
+        _constants.Clear();
+        _byNode.Clear();
+
+        foreach (var pair in previous.Boxes)
+        {
+            _byNode[pair.Key] = pair.Value;
+        }
+
+        _root = previous.Root;
+
+        var viewport = new Rect(0, 0, MathF.Max(0, _options.ViewportWidth), MathF.Max(0, _options.ViewportHeight));
+
+        if (_root is not null)
+        {
+            RefreshScrollMetrics(_root);
+            BuildDisplayList(_root, viewport);
+        }
+
+        var frame = _options.Optimise
+            ? Optimiser.Run(_instructions, _constants, viewport, _options)
+            : new OptimisationResult(_instructions, _constants, OptimisationStats.Empty);
+
+        return new LayoutResult(_root, frame.Instructions, frame.Constants, _byNode, frame.Stats);
+    }
+
+    /// <summary>Re-clamps scroll offsets without touching box geometry.</summary>
+    private void RefreshScrollMetrics(LayoutBox box)
+    {
+        UpdateScrollMetrics(box);
+
+        for (var i = 0; i < box.Children.Count; i++)
+        {
+            RefreshScrollMetrics(box.Children[i]);
+        }
     }
 
     /// <summary>Drops every cached style and text layout.</summary>
@@ -182,7 +237,7 @@ public sealed partial class LayoutEngine
             return null;
         }
 
-        var box = new LayoutBox(node, style, depth)
+        var box = new LayoutBox(node, style, depth, node.Children.Length)
         {
             Parent = parentBox,
             IsContents = style.Display == Display.Contents

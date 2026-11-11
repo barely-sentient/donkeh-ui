@@ -12,6 +12,12 @@ public sealed class ComputedStyle
     /// <summary>Sentinel for <c>currentColor</c>.</summary>
     public const uint CurrentColor = 0x00000001;
 
+    /// <summary>
+    /// Paint specs derived from this style. They are immutable and are reused
+    /// across frames so background painting does not allocate each layout.
+    /// </summary>
+    internal BackgroundImageSpec[]? CachedBackgroundSpecs;
+
     public Display Display { get; set; } = Display.Block;
     public Position Position { get; set; } = Position.Static;
     public Float Float { get; set; } = Float.None;

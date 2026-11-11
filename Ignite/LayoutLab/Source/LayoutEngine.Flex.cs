@@ -479,22 +479,34 @@ public sealed partial class LayoutEngine
                     borderX = content.X + physical + item.Margin.Left;
                     borderY = content.Y + lineCrossStart[lineOf[i]] + crossOffset + item.Margin.Top;
 
-                    PrepareAndMeasureWidth(item, content.Width, mainSize, false, false, false);
-
                     var stretch = align == AlignItems.Stretch && IsCrossSizeAuto(item.Style, row);
                     var forcedHeight = stretch
                         ? MathF.Max(0, lineCross[lineOf[i]] - item.Margin.Vertical)
                         : (float?)null;
 
-                    LayoutPreparedBox(
-                        item,
-                        borderX,
-                        borderY,
-                        content.Width,
-                        definiteContentHeight ?? float.NaN,
-                        forcedHeight,
-                        fillHeight: false,
-                        definiteContentHeight: null);
+                    // The measure pass already laid this item out at the same
+                    // main size. If the cross size did not change, moving the
+                    // finished subtree is exact and avoids a second recursive
+                    // layout of everything inside it.
+                    if (forcedHeight is null
+                        || MathF.Abs(forcedHeight.Value - item.BorderBox.Height) < 0.5f)
+                    {
+                        MoveMeasuredItem(item, borderX, borderY);
+                    }
+                    else
+                    {
+                        PrepareAndMeasureWidth(item, content.Width, mainSize, false, false, false);
+
+                        LayoutPreparedBox(
+                            item,
+                            borderX,
+                            borderY,
+                            content.Width,
+                            definiteContentHeight ?? float.NaN,
+                            forcedHeight,
+                            fillHeight: false,
+                            definiteContentHeight: null);
+                    }
                 }
                 else
                 {
@@ -506,17 +518,24 @@ public sealed partial class LayoutEngine
                         ? MathF.Max(0, lineCross[lineOf[i]] - item.Margin.Horizontal)
                         : crossSizes[i];
 
-                    PrepareAndMeasureWidth(item, content.Width, forcedWidth, false, false, false);
+                    if (MathF.Abs(forcedWidth - item.BorderBox.Width) < 0.5f)
+                    {
+                        MoveMeasuredItem(item, borderX, borderY);
+                    }
+                    else
+                    {
+                        PrepareAndMeasureWidth(item, content.Width, forcedWidth, false, false, false);
 
-                    LayoutPreparedBox(
-                        item,
-                        borderX,
-                        borderY,
-                        content.Width,
-                        definiteContentHeight ?? content.Height,
-                        forcedBorderHeight: mainSize,
-                        fillHeight: false,
-                        definiteContentHeight: null);
+                        LayoutPreparedBox(
+                            item,
+                            borderX,
+                            borderY,
+                            content.Width,
+                            definiteContentHeight ?? content.Height,
+                            forcedBorderHeight: mainSize,
+                            fillHeight: false,
+                            definiteContentHeight: null);
+                    }
                 }
 
                 position += outerMainSize + mainGap + justifyBetween;
@@ -536,6 +555,22 @@ public sealed partial class LayoutEngine
         }
 
         return MathF.Max(0, mainAvailable);
+    }
+
+    private static void MoveMeasuredItem(LayoutBox item, float borderX, float borderY)
+    {
+        var dx = borderX - item.BorderBox.X;
+        var dy = borderY - item.BorderBox.Y;
+
+        if (dx != 0 || dy != 0)
+        {
+            item.Translate(dx, dy);
+        }
+
+        // Auto margins may have changed during placement, so rebuild the
+        // derived boxes at the final position instead of leaving a stale
+        // margin box behind.
+        item.ApplyBorderBox(borderX, borderY, item.BorderBox.Width, item.BorderBox.Height);
     }
 
     private List<LayoutBox> CollectFlowChildren(LayoutBox box)

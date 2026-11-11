@@ -332,29 +332,43 @@ public sealed partial class LayoutEngine
             return;
         }
 
-        for (var i = 0; i < images.Length; i++)
+        var specs = style.CachedBackgroundSpecs;
+
+        if (specs is null)
+        {
+            specs = new BackgroundImageSpec[images.Length];
+
+            for (var i = 0; i < images.Length; i++)
+            {
+                var source = images[i];
+                specs[i] = new BackgroundImageSpec
+                {
+                    Kind = source.Kind,
+                    Url = source.Url,
+                    GradientKind = source.GradientKind,
+                    Angle = source.Angle,
+                    Center = source.Center,
+                    Radius = source.Radius,
+                    Stops = source.Stops,
+                    Repeat = style.BackgroundRepeat,
+                    Clip = style.BackgroundClip,
+                    Origin = style.BackgroundOrigin,
+                    Fixed = style.BackgroundFixed
+                };
+            }
+
+            style.CachedBackgroundSpecs = specs;
+        }
+
+        for (var i = 0; i < specs.Length; i++)
         {
             var source = images[i];
+            var spec = specs[i];
 
-            if (source.Kind == ImageKind.None)
+            if (spec.Kind == ImageKind.None)
             {
                 continue;
             }
-
-            var spec = new BackgroundImageSpec
-            {
-                Kind = source.Kind,
-                Url = source.Url,
-                GradientKind = source.GradientKind,
-                Angle = source.Angle,
-                Center = source.Center,
-                Radius = source.Radius,
-                Stops = source.Stops,
-                Repeat = style.BackgroundRepeat,
-                Clip = style.BackgroundClip,
-                Origin = style.BackgroundOrigin,
-                Fixed = style.BackgroundFixed
-            };
 
             var id = _constants.AddBackground(spec);
             _instructions.Add(new Instruction(

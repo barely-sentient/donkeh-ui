@@ -30,12 +30,21 @@ if (dockIndex >= 0 && dockIndex + 1 < args.Length)
 var showPerformance = args.Contains("--perf", StringComparer.OrdinalIgnoreCase);
 
 var bootstrap = File.ReadAllText(bootstrapPath);
+
+var fpsIndex = Array.FindIndex(args, a => string.Equals(a, "--fps", StringComparison.OrdinalIgnoreCase));
+var targetFps = fpsIndex >= 0 && fpsIndex + 1 < args.Length
+    && int.TryParse(args[fpsIndex + 1], out var parsedFps)
+    ? parsedFps
+    : 144;
+
 var window = new IgniteWindow(WindowSettings.Default with
 {
     Width = 1280,
     Height = 900,
     Title = "Bootstrap + Ignite",
-    DevToolsPosition = dock
+    DevToolsPosition = dock,
+    VSync = args.Contains("--vsync", StringComparer.OrdinalIgnoreCase),
+    TargetFramesPerSecond = targetFps
 });
 
 if (showDevTools)
@@ -72,14 +81,30 @@ if (captureIndex >= 0 && captureIndex + 1 < args.Length)
 {
     var path = Path.GetFullPath(args[captureIndex + 1]);
     var frameIndex = Array.FindIndex(args, a => string.Equals(a, "--capture-frame", StringComparison.OrdinalIgnoreCase));
+    var msIndex = Array.FindIndex(args, a => string.Equals(a, "--capture-ms", StringComparison.OrdinalIgnoreCase));
     var captureFrame = frameIndex >= 0 && frameIndex + 1 < args.Length
         && int.TryParse(args[frameIndex + 1], out var parsedFrame)
         ? parsedFrame
         : 4;
+    var captureMs = msIndex >= 0 && msIndex + 1 < args.Length
+        && double.TryParse(args[msIndex + 1], out var parsedMs)
+        ? parsedMs
+        : 0;
+    var elapsed = 0d;
 
-    window.BeforeFrame += (host, _) =>
+    window.BeforeFrame += (host, delta) =>
     {
-        if (host.FrameCount == captureFrame)
+        if (captureMs > 0)
+        {
+            elapsed += delta * 1000;
+
+            if (elapsed >= captureMs)
+            {
+                captureMs = 0;
+                host.RequestScreenshot(path);
+            }
+        }
+        else if (host.FrameCount == captureFrame)
         {
             host.RequestScreenshot(path);
         }
@@ -88,17 +113,57 @@ if (captureIndex >= 0 && captureIndex + 1 < args.Length)
 
 if (args.Contains("--smoke", StringComparer.OrdinalIgnoreCase))
 {
+    var smokeFrameIndex = Array.FindIndex(
+        args,
+        a => string.Equals(a, "--smoke-frames", StringComparison.OrdinalIgnoreCase));
+    var smokeFrames = smokeFrameIndex >= 0
+        && smokeFrameIndex + 1 < args.Length
+        && int.TryParse(args[smokeFrameIndex + 1], out var parsedSmokeFrames)
+        ? parsedSmokeFrames
+        : 120;
+
+    long allocationBaseline = 0;
+    var gen0Baseline = 0;
+    var relayout = args.Contains("--relayout", StringComparer.OrdinalIgnoreCase);
+    var layoutSum = 0d;
+    var layoutSamples = 0;
+
+    window.Loaded += _ =>
+    {
+        allocationBaseline = GC.GetTotalAllocatedBytes(precise: false);
+        gen0Baseline = GC.CollectionCount(0);
+    };
+
     window.BeforeFrame += (host, _) =>
     {
-        if (host.FrameCount >= 120)
+        if (relayout)
+        {
+            layoutSum += host.LastLayoutMilliseconds;
+            layoutSamples++;
+
+            if (host.FrameCount > 0)
+            {
+                host.Invalidate();
+            }
+        }
+
+        if (host.FrameCount >= smokeFrames)
         {
             host.SilkWindow?.Close();
         }
     };
 
-    window.Closed += _ => Console.WriteLine(
-        $"frames={window.FrameCount} layoutMs={window.LastLayoutMilliseconds:0.00} " +
-        $"renderMs={window.LastRenderMilliseconds:0.00} instructions={window.LastInstructionCount}");
+    window.Closed += _ =>
+    {
+        var allocated = GC.GetTotalAllocatedBytes(precise: false) - allocationBaseline;
+        var perFrame = window.FrameCount == 0 ? 0 : allocated / (double)window.FrameCount;
+        Console.WriteLine(
+            $"frames={window.FrameCount} layoutMs={window.LastLayoutMilliseconds:0.00} " +
+            $"renderMs={window.LastRenderMilliseconds:0.00} instructions={window.LastInstructionCount} " +
+            $"allocKB={allocated / 1024.0:0.0} allocBPerFrame={perFrame:0} " +
+            $"gen0={GC.CollectionCount(0) - gen0Baseline} " +
+            $"avgLayoutMs={(layoutSamples == 0 ? 0 : layoutSum / layoutSamples):0.000}");
+    };
 }
 
 window.Run(

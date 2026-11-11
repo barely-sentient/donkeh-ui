@@ -13,7 +13,8 @@ namespace Ignite.Windowing
             Frameless = false;
             FullScreen = false;
             Title = "Ignite";
-            VSync = true;
+            VSync = false;
+            TargetFramesPerSecond = 144;
             ClearColor = 0xFFFFFFFF;
             Samples = 4;
             Resizable = true;
@@ -36,8 +37,15 @@ namespace Ignite.Windowing
         /// <summary>The window title.</summary>
         public string? Title;
 
-        /// <summary>Enable vertical sync. On by default for a tear-free frame loop.</summary>
+        /// <summary>Enable vertical sync. Off by default; frames are capped by <see cref="TargetFramesPerSecond"/>.</summary>
         public bool VSync;
+
+        /// <summary>
+        /// Maximum rendered frames per second. Zero leaves the loop uncapped.
+        /// The default of 144 keeps the app responsive without burning a full
+        /// core on frames nobody can see.
+        /// </summary>
+        public int TargetFramesPerSecond;
 
         /// <summary>The window background before the UI is painted.</summary>
         public uint ClearColor;
@@ -62,7 +70,8 @@ namespace Ignite.Windowing
             Width = 1280,
             Height = 800,
             Title = "Ignite",
-            VSync = true,
+            VSync = false,
+            TargetFramesPerSecond = 144,
             ClearColor = 0xFFFFFFFF,
             Samples = 4,
             Resizable = true,

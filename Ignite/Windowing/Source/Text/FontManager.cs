@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -161,18 +162,29 @@ public sealed unsafe class FontManager : IDisposable
             return "sans-serif";
         }
 
+        if (FamilyCache.TryGetValue(family, out var cached))
+        {
+            return cached;
+        }
+
         var comma = family.IndexOf(',');
         var first = comma >= 0 ? family[..comma] : family;
         first = first.Trim().Trim('"', '\'').Trim();
 
-        return first.ToLowerInvariant() switch
+        var normalized = first.ToLowerInvariant() switch
         {
             "" or "sans-serif" or "system-ui" or "ui-sans-serif" or "segoe ui" or "helvetica" or "helvetica neue" or "arial" => "segoe ui",
             "serif" or "ui-serif" or "times" or "times new roman" or "georgia" => "times new roman",
             "monospace" or "ui-monospace" or "consolas" or "courier new" or "courier" => "consolas",
             _ => first
         };
+
+        FamilyCache[family] = normalized;
+        return normalized;
     }
+
+    private static readonly ConcurrentDictionary<string, string> FamilyCache =
+        new(StringComparer.Ordinal);
 
     private (string? Primary, string? Bold, string? Italic, string? BoldItalic) FindFontPaths(FontKey key)
     {

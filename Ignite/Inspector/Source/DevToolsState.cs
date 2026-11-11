@@ -83,6 +83,7 @@ public sealed class PerformanceStats
     private long _lastCpuTimestamp;
     private TimeSpan _lastCpuTime;
     private bool _hasCpuSample;
+    private static readonly Process CurrentProcess = Process.GetCurrentProcess();
 
     public double FrameMilliseconds { get; private set; }
     public double LayoutMilliseconds { get; private set; }
@@ -156,30 +157,30 @@ public sealed class PerformanceStats
 
         try
         {
-            using var process = Process.GetCurrentProcess();
-            PrivateMemory = process.PrivateMemorySize64;
-            ThreadCount = process.Threads.Count;
-
             var now = Stopwatch.GetTimestamp();
-            var cpu = process.TotalProcessorTime;
+            var elapsed = (now - _lastCpuTimestamp) / (double)Stopwatch.Frequency;
 
-            if (_hasCpuSample)
+            // Process-wide counters (thread enumeration and kernel time) are
+            // expensive; a once-per-second snapshot is plenty for the panel.
+            if (!_hasCpuSample || elapsed >= 1.0)
             {
-                var elapsed = (now - _lastCpuTimestamp) / (double)Stopwatch.Frequency;
-                var cpuSeconds = (cpu - _lastCpuTime).TotalSeconds;
+                var cpu = CurrentProcess.TotalProcessorTime;
 
-                if (elapsed > 0.0001)
+                if (_hasCpuSample && elapsed > 0.0001)
                 {
+                    var cpuSeconds = (cpu - _lastCpuTime).TotalSeconds;
                     CpuPercent = Math.Clamp(
                         cpuSeconds / (elapsed * Environment.ProcessorCount) * 100.0,
                         0,
                         100);
                 }
-            }
 
-            _lastCpuTimestamp = now;
-            _lastCpuTime = cpu;
-            _hasCpuSample = true;
+                PrivateMemory = CurrentProcess.PrivateMemorySize64;
+                ThreadCount = CurrentProcess.Threads.Count;
+                _lastCpuTimestamp = now;
+                _lastCpuTime = cpu;
+                _hasCpuSample = true;
+            }
         }
         catch
         {

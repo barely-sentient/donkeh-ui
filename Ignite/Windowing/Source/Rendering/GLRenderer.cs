@@ -29,6 +29,7 @@ public sealed unsafe class GLRenderer : IDisposable
     private uint[] _textureIndices = new uint[256];
 
     private readonly List<DrawRun> _runs = [];
+    private int _runCount;
     private readonly Stack<ClipState> _clips = new();
     private readonly Stack<float> _opacities = new();
     private readonly Stack<Matrix3x2> _transforms = new();
@@ -79,7 +80,7 @@ public sealed unsafe class GLRenderer : IDisposable
         _viewportHeight = Math.Max(1, viewportHeight);
         _dpi = dpi > 0 ? dpi : 1;
 
-        _runs.Clear();
+        _runCount = 0;
         _current = null;
         _clips.Clear();
         _opacities.Clear();
@@ -690,16 +691,30 @@ public sealed unsafe class GLRenderer : IDisposable
 
     private DrawRun StartRun(bool textured, uint texture, bool alphaTexture)
     {
-        var run = new DrawRun(textured, texture, alphaTexture, _clip, _transform, _blend);
-        _runs.Add(run);
+        DrawRun run;
+
+        if (_runCount < _runs.Count)
+        {
+            run = _runs[_runCount];
+            run.Reset(textured, texture, alphaTexture, _clip, _transform, _blend);
+        }
+        else
+        {
+            run = new DrawRun(textured, texture, alphaTexture, _clip, _transform, _blend);
+            _runs.Add(run);
+        }
+
+        _runCount++;
         _current = run;
         return run;
     }
 
     private void ExecuteRuns()
     {
-        foreach (var run in _runs)
+        for (var r = 0; r < _runCount; r++)
         {
+            var run = _runs[r];
+
             if (run.IsTextured ? run.Vertices.Count == 0 : run.Shapes.Count == 0)
             {
                 continue;
@@ -969,25 +984,38 @@ public sealed unsafe class GLRenderer : IDisposable
             Matrix3x2 transform,
             MixBlendMode blend)
         {
+            Reset(textured, texture, alphaTexture, clip, transform, blend);
+        }
+
+        public void Reset(
+            bool textured,
+            uint texture,
+            bool alphaTexture,
+            ClipState clip,
+            Matrix3x2 transform,
+            MixBlendMode blend)
+        {
             IsTextured = textured;
             Texture = texture;
             AlphaTexture = alphaTexture;
             Clip = clip;
             Transform = transform;
             Blend = blend;
+            Shapes.Clear();
+            Vertices.Clear();
         }
 
-        public bool IsTextured { get; }
+        public bool IsTextured { get; private set; }
 
-        public uint Texture { get; }
+        public uint Texture { get; private set; }
 
-        public bool AlphaTexture { get; }
+        public bool AlphaTexture { get; private set; }
 
-        public ClipState Clip { get; }
+        public ClipState Clip { get; private set; }
 
-        public Matrix3x2 Transform { get; }
+        public Matrix3x2 Transform { get; private set; }
 
-        public MixBlendMode Blend { get; }
+        public MixBlendMode Blend { get; private set; }
 
         public List<ShapeInstance> Shapes { get; } = [];
 

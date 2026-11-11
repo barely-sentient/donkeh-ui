@@ -12,11 +12,12 @@ public sealed class LayoutBox
     private float _intrinsicWidth;
     private bool _hasIntrinsicWidth;
 
-    public LayoutBox(IgniteSupportedDomNode node, ComputedStyle style, int depth)
+    public LayoutBox(IgniteSupportedDomNode node, ComputedStyle style, int depth, int childCapacity = 0)
     {
         Node = node;
         Style = style;
         Depth = depth;
+        Children = childCapacity > 0 ? new List<LayoutBox>(childCapacity) : [];
     }
 
     public IgniteSupportedDomNode Node { get; }
@@ -27,7 +28,7 @@ public sealed class LayoutBox
 
     public LayoutBox? Parent { get; internal set; }
 
-    public List<LayoutBox> Children { get; } = [];
+    public List<LayoutBox> Children { get; }
 
     /// <summary>Absolute border-box rect.</summary>
     public Rect BorderBox { get; internal set; }
@@ -201,6 +202,9 @@ public sealed class LayoutResult
     public ConstantPool Constants { get; }
 
     public OptimisationStats Stats { get; }
+
+    /// <summary>The node-to-box map, shared with the engine that built it.</summary>
+    internal IReadOnlyDictionary<IgniteSupportedDomNode, LayoutBox> Boxes => _byNode;
 
     public ReadOnlySpan<Instruction> Opcodes => Instructions.Span;
 

@@ -168,15 +168,36 @@ public readonly record struct ScrollbarSpec(
 public sealed class ConstantPool
 {
     private readonly List<object> _items = [];
-    private readonly Dictionary<object, int> _index = [];
     private readonly Dictionary<TextCommand, int> _texts = [];
     private readonly Dictionary<CornerRadius, int> _radii = [];
     private readonly Dictionary<Matrix3x2, int> _transforms = [];
     private readonly Dictionary<FilterSpec, int> _filters = [];
     private readonly Dictionary<ClipPathSpec, int> _clipPaths = [];
     private readonly Dictionary<MaskSpec, int> _masks = [];
+    private readonly Dictionary<BorderSpec, int> _borders = [];
+    private readonly Dictionary<ShadowSpec, int> _shadows = [];
+    private readonly Dictionary<ImageSpec, int> _images = [];
+    private readonly Dictionary<ScrollbarSpec, int> _scrollbars = [];
+    private readonly Dictionary<BackgroundImageSpec, int> _backgrounds = [];
 
     public int Count => _items.Count;
+
+    /// <summary>Empties the pool so it can be reused for another frame.</summary>
+    public void Clear()
+    {
+        _items.Clear();
+        _texts.Clear();
+        _radii.Clear();
+        _transforms.Clear();
+        _filters.Clear();
+        _clipPaths.Clear();
+        _masks.Clear();
+        _borders.Clear();
+        _shadows.Clear();
+        _images.Clear();
+        _scrollbars.Clear();
+        _backgrounds.Clear();
+    }
 
     public object Get(int id) => _items[id];
 
@@ -211,20 +232,70 @@ public sealed class ConstantPool
             return existing;
         }
 
-        var id = AddCore(command);
+        var id = AddItem(command);
         _texts[command] = id;
         return id;
     }
 
-    public int AddBorder(BorderSpec border) => AddCore(border);
+    public int AddBorder(BorderSpec border)
+    {
+        if (_borders.TryGetValue(border, out var existing))
+        {
+            return existing;
+        }
 
-    public int AddShadow(ShadowSpec shadow) => AddCore(shadow);
+        var id = AddItem(border);
+        _borders[border] = id;
+        return id;
+    }
 
-    public int AddBackground(BackgroundImageSpec background) => AddCore(background);
+    public int AddShadow(ShadowSpec shadow)
+    {
+        if (_shadows.TryGetValue(shadow, out var existing))
+        {
+            return existing;
+        }
 
-    public int AddImage(ImageSpec image) => AddCore(image);
+        var id = AddItem(shadow);
+        _shadows[shadow] = id;
+        return id;
+    }
 
-    public int AddScrollbar(ScrollbarSpec scrollbar) => AddCore(scrollbar);
+    public int AddBackground(BackgroundImageSpec background)
+    {
+        if (_backgrounds.TryGetValue(background, out var existing))
+        {
+            return existing;
+        }
+
+        var id = AddItem(background);
+        _backgrounds[background] = id;
+        return id;
+    }
+
+    public int AddImage(ImageSpec image)
+    {
+        if (_images.TryGetValue(image, out var existing))
+        {
+            return existing;
+        }
+
+        var id = AddItem(image);
+        _images[image] = id;
+        return id;
+    }
+
+    public int AddScrollbar(ScrollbarSpec scrollbar)
+    {
+        if (_scrollbars.TryGetValue(scrollbar, out var existing))
+        {
+            return existing;
+        }
+
+        var id = AddItem(scrollbar);
+        _scrollbars[scrollbar] = id;
+        return id;
+    }
 
     public int AddRadius(CornerRadius radius)
     {
@@ -233,7 +304,7 @@ public sealed class ConstantPool
             return existing;
         }
 
-        var id = AddCore(radius);
+        var id = AddItem(radius);
         _radii[radius] = id;
         return id;
     }
@@ -245,7 +316,7 @@ public sealed class ConstantPool
             return existing;
         }
 
-        var id = AddCore(transform);
+        var id = AddItem(transform);
         _transforms[transform] = id;
         return id;
     }
@@ -257,7 +328,7 @@ public sealed class ConstantPool
             return existing;
         }
 
-        var id = AddCore(filter);
+        var id = AddItem(filter);
         _filters[filter] = id;
         return id;
     }
@@ -269,7 +340,7 @@ public sealed class ConstantPool
             return existing;
         }
 
-        var id = AddCore(clipPath);
+        var id = AddItem(clipPath);
         _clipPaths[clipPath] = id;
         return id;
     }
@@ -281,18 +352,13 @@ public sealed class ConstantPool
             return existing;
         }
 
-        var id = AddCore(mask);
+        var id = AddItem(mask);
         _masks[mask] = id;
         return id;
     }
 
-    private int AddCore(object value)
+    private int AddItem(object value)
     {
-        if (_index.TryGetValue(value, out var existing))
-        {
-            return existing;
-        }
-
         var id = _items.Count;
 
         if (id > ushort.MaxValue)
@@ -302,7 +368,6 @@ public sealed class ConstantPool
         }
 
         _items.Add(value);
-        _index[value] = id;
         return id;
     }
 }
