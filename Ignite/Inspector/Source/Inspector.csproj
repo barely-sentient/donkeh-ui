@@ -11,6 +11,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\..\Data\Source\Data.csproj" />
+        <ProjectReference Include="..\..\DataEngine\Source\DataEngine.csproj" />
         <ProjectReference Include="..\..\Parser\Source\Ignite.Parser.csproj" />
         <ProjectReference Include="..\..\LayoutLab\Source\LayoutLab.csproj" />
         <ProjectReference Include="..\..\UILab\Source\Ignite.UILab.csproj" />

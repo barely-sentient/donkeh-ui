@@ -178,6 +178,21 @@ namespace Ignite.UILab
                 On("click", onClick);
             }
 
+            if (props.OnMouseOver is { } onMouseOver)
+            {
+                On("mouseover", onMouseOver);
+            }
+
+            if (props.OnMouseOut is { } onMouseOut)
+            {
+                On("mouseout", onMouseOut);
+            }
+
+            if (props.OnPaste is { } onPaste)
+            {
+                On("paste", onPaste);
+            }
+
             if (props.OnInput is { } onInput)
             {
                 On("input", onInput);

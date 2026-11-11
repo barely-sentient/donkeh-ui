@@ -1,7 +1,10 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using Ignite.Data;
 using Ignite.Data.Dom;
+using Ignite.DataEngine;
 using Ignite.LayoutLab;
+using Ignite.Parser;
 using Ignite.UILab;
 
 namespace Ignite.Inspector;
@@ -55,10 +58,88 @@ public sealed class DevToolsState
     /// <summary>The element or component selected in the DOM tree.</summary>
     public Node? Selected { get; set; }
 
+    /// <summary>The node under the pointer in the DOM tree, highlighted in the app.</summary>
+    public Node? Hovered { get; set; }
+
+    /// <summary>A CSS class to focus after the panel next renders, if any.</summary>
+    public string? PendingFocusClass { get; set; }
+
+    /// <summary>
+    /// Set by the host when Enter or ';' committed a value, so the panel can
+    /// open a fresh "Add property" row instead of closing the current one.
+    /// </summary>
+    public bool AdvanceAfterCommit { get; set; }
+
     /// <summary>Logical nodes that are expanded in the tree.</summary>
     public HashSet<Node> Expanded { get; } = new(ReferenceEqualityComparer.Instance);
 
     public PerformanceStats Performance { get; } = new();
+
+    private readonly ConcurrentQueue<Action> _pendingEdits = new();
+    private readonly ConcurrentDictionary<ElementNode, int> _elementStyleSelectors =
+        new(ReferenceEqualityComparer.Instance);
+    private int _nextElementStyleId;
+
+    /// <summary>
+    /// Returns the selector id of the inspector-owned rule that targets this
+    /// element, if one has been created.
+    /// </summary>
+    public bool TryGetElementStyleSelector(ElementNode element, out int selectorId) =>
+        _elementStyleSelectors.TryGetValue(element, out selectorId);
+
+    /// <summary>
+    /// Adds a declaration to the selected element's own rule. The first call
+    /// tags the element with a private attribute and creates a selector that
+    /// matches only that element; later calls append to the same rule.
+    /// </summary>
+    public void AddElementStyleDeclaration(ElementNode element, int propertyId, int valueId)
+    {
+        var table = Table ?? throw new InvalidOperationException("No stylesheet is loaded.");
+
+        if (_elementStyleSelectors.TryGetValue(element, out var existing))
+        {
+            table.AddRule(existing, propertyId, valueId, -1, -1);
+            return;
+        }
+
+        var marker = "ignite-" + Interlocked.Increment(ref _nextElementStyleId);
+        element.SetAttribute(
+            InternTable.Intern("data-ignite-style"),
+            InternTable.Intern(marker));
+
+        var property = InternTable.GetString(propertyId) ?? string.Empty;
+        var value = InternTable.GetString(valueId) ?? string.Empty;
+        var css = "[data-ignite-style=\"" + marker + "\"] { " + property + ": " + value + "; }";
+        var start = table.RuleCount;
+
+        new Ignite.DataEngine.DataEngine(MediaConditionCompiler.Instance)
+            .Build(Tokenizer.Parse(css), table);
+
+        if (table.RuleCount > start)
+        {
+            _elementStyleSelectors[element] = table.GetRule(start).SelectorId;
+        }
+    }
+
+    /// <summary>
+    /// Raised on the host frame thread after an inspector edit changed the
+    /// stylesheet. The host drops cached styles and lays the tree out again.
+    /// </summary>
+    public Action? StylesChanged { get; set; }
+
+    /// <summary>
+    /// Queues a stylesheet mutation so it runs on the window's frame thread.
+    /// The inspector can live in a separate window on another thread.
+    /// </summary>
+    public void QueueEdit(Action edit) => _pendingEdits.Enqueue(edit);
+
+    public bool TryDequeueEdit(out Action edit) => _pendingEdits.TryDequeue(out edit!);
+
+    public void NotifyStylesChanged()
+    {
+        StylesChanged?.Invoke();
+        Refresh();
+    }
 
     public long Version => Interlocked.Read(ref _version);
 

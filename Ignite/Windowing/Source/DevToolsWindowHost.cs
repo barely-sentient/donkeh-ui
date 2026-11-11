@@ -72,6 +72,7 @@ internal sealed class DevToolsWindowHost
                 }
 
                 host.UI.FindComponent<InspectorPanel>()?.Tick();
+                host.FocusPendingDevToolsInput();
             };
 
             window.Closed += _ =>
@@ -91,8 +92,9 @@ internal sealed class DevToolsWindowHost
                 _.C<InspectorPanel, InspectorPanelProps>(props),
                 InspectorStyles.Css + InspectorStyles.HeightClasses);
         }
-        catch
+        catch (Exception exception)
         {
+            Console.Error.WriteLine("[devtools-window] " + exception);
             _open = false;
         }
         finally

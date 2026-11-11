@@ -58,6 +58,12 @@ namespace Ignite.UILab
 
         public Action? OnClick { get; init; }
 
+        public Action? OnMouseOver { get; init; }
+
+        public Action? OnMouseOut { get; init; }
+
+        public Action<string>? OnPaste { get; init; }
+
         public Action<string>? OnInput { get; init; }
 
         public Action<string>? OnChange { get; init; }

@@ -60,6 +60,9 @@ public sealed class IgniteWindow : IDisposable
 
     private bool _needsLayout = true;
     private bool _needsPaint;
+    private bool _needsDevToolsPaint;
+    private readonly InstructionBuffer _devToolsOverlay = new(16);
+    private readonly ConstantPool _devToolsOverlayConstants = new();
     private bool _disposed;
     private bool _gpuDisposed;
     private int _lastUiVersion = -1;
@@ -96,6 +99,7 @@ public sealed class IgniteWindow : IDisposable
         _settings = settings;
         _measurer = new TrueTypeTextMeasurer(_fonts);
         _devTools.Dock = settings.DevToolsPosition;
+        _devTools.StylesChanged += OnDevToolsStylesChanged;
         RebuildStyles();
     }
 
@@ -387,6 +391,7 @@ public sealed class IgniteWindow : IDisposable
             _lastDpi = dpi;
             _needsLayout = false;
             _needsPaint = false;
+            _needsDevToolsPaint = false;
             _cachedLayoutBoxCount = CountLayoutBoxes(_layoutResult.Root);
             _cachedNodeCount = CountNodes(_appRoot);
         }
@@ -429,11 +434,32 @@ public sealed class IgniteWindow : IDisposable
             _lastDevToolsDock = (int)_devTools.Dock;
             _lastDevToolsVisible = devToolsVisible;
             _lastDevToolsDpi = dpi;
+            _needsDevToolsPaint = false;
         }
         else if (!devToolsVisible)
         {
             _devToolsLayout = null;
             _lastDevToolsVisible = false;
+            _needsDevToolsPaint = false;
+        }
+        else if (_needsDevToolsPaint
+            && _devToolsLayout is not null
+            && _devToolsLayoutEngine is not null)
+        {
+            // Scroll offsets are paint-time state. A wheel over the inspector
+            // updates the node offset, so its display list has to be rebuilt
+            // just like the app's.
+            _devToolsLayout = _devToolsLayoutEngine.Repaint(
+                _devToolsLayout,
+                CreateLayoutOptions(width, height, dpi, _devToolsContext, isApp: false));
+            _needsDevToolsPaint = false;
+        }
+
+        _devToolsOverlay.Clear();
+
+        if (_focused is not null && IsInDevToolsTree(_focused))
+        {
+            BuildCaretOverlay(_devToolsOverlay);
         }
 
         var renderStart = Stopwatch.GetTimestamp();
@@ -448,9 +474,31 @@ public sealed class IgniteWindow : IDisposable
 
         if (_layoutResult is not null)
         {
-            if (BuildOverlays(out var overlay, out var overlayConstants))
+            var hasOverlay = BuildOverlays(out var overlay, out var overlayConstants);
+
+            if (hasOverlay && _devToolsOverlay.Count > 0)
+            {
+                _renderer.Render(
+                    _layoutResult,
+                    overlay.Span,
+                    overlayConstants,
+                    _devToolsLayout,
+                    _devToolsOverlay.Span,
+                    _devToolsOverlayConstants);
+            }
+            else if (hasOverlay)
             {
                 _renderer.Render(_layoutResult, overlay.Span, overlayConstants, _devToolsLayout);
+            }
+            else if (_devToolsOverlay.Count > 0)
+            {
+                _renderer.Render(
+                    _layoutResult,
+                    ReadOnlySpan<Instruction>.Empty,
+                    _devToolsOverlayConstants,
+                    _devToolsLayout,
+                    _devToolsOverlay.Span,
+                    _devToolsOverlayConstants);
             }
             else
             {
@@ -504,7 +552,19 @@ public sealed class IgniteWindow : IDisposable
 
     private void UpdateDevTools(double delta)
     {
-        if (!_settings.EnableDevTools || _devToolsPanel is null)
+        if (!_settings.EnableDevTools)
+        {
+            return;
+        }
+
+        // The inspector may live in its own window on another thread, so edits
+        // are queued and applied here, on the frame thread, before layout.
+        while (_devTools.TryDequeueEdit(out var edit))
+        {
+            edit();
+        }
+
+        if (_devToolsPanel is null)
         {
             return;
         }
@@ -543,6 +603,70 @@ public sealed class IgniteWindow : IDisposable
         }
 
         _devToolsPanel.Tick();
+
+        if (_devTools.Dock != DevToolsDock.Window)
+        {
+            FocusPendingDevToolsInput();
+        }
+    }
+
+    /// <summary>
+    /// Focuses an inspector control requested by the panel (for example the
+    /// property field of a newly opened "Add property" row).
+    /// </summary>
+    public bool FocusPendingDevToolsInput()
+    {
+        if (_devTools.PendingFocusClass is not { } className || _devToolsRoot is null)
+        {
+            return false;
+        }
+
+        _devTools.PendingFocusClass = null;
+        var element = FindByClass(_devToolsRoot, className);
+
+        if (element is null)
+        {
+            return false;
+        }
+
+        Focus(element);
+        return true;
+    }
+
+    private static ElementNode? FindByClass(IgniteSupportedDomNode? node, string className)
+    {
+        if (node is ElementNode element && element.HasClass(className))
+        {
+            return element;
+        }
+
+        var children = node?.Children;
+
+        if (children is null)
+        {
+            return null;
+        }
+
+        for (var i = 0; i < children.Length; i++)
+        {
+            if (FindByClass(children[i], className) is { } found)
+            {
+                return found;
+            }
+        }
+
+        return null;
+    }
+
+    private void OnDevToolsStylesChanged()
+    {
+        // A declaration was edited. Drop every cached style so the next layout
+        // re-matches the changed rule, and force the inspector to rebuild too.
+        _layoutEngine?.ClearCaches();
+        _devToolsLayoutEngine?.ClearCaches();
+        _needsLayout = true;
+        _needsDevToolsPaint = false;
+        _lastDevToolsVersion = -1;
     }
 
     private static int CountLayoutBoxes(LayoutBox? box)
@@ -663,7 +787,7 @@ public sealed class IgniteWindow : IDisposable
             TextColorProvider = GetTextColorOverride,
             IntrinsicSizeProvider = GetIntrinsicSize,
             ImageProvider = GetImage,
-            CustomPainter = PaintElementContent,
+            CustomPainter = isApp ? PaintElementContent : PaintDevToolsContent,
             Optimise = true,
             CullOffscreen = true,
             MergeDraws = true,
@@ -999,7 +1123,13 @@ public sealed class IgniteWindow : IDisposable
 
     private bool BuildOverlays(out InstructionBuffer overlay, out ConstantPool constants)
     {
-        if (_openSelect is null && _focused is null)
+        var hasHover = _settings.EnableDevTools
+            && _devTools.Visible
+            && _devTools.Hovered is not null;
+
+        if (_openSelect is null
+            && (_focused is null || IsInDevToolsTree(_focused))
+            && !hasHover)
         {
             overlay = null!;
             constants = null!;
@@ -1010,9 +1140,98 @@ public sealed class IgniteWindow : IDisposable
         constants = new ConstantPool();
 
         BuildSelectOverlay(overlay, constants);
-        BuildCaretOverlay(overlay);
+
+        if (_focused is not null && !IsInDevToolsTree(_focused))
+        {
+            BuildCaretOverlay(overlay);
+        }
+
+        BuildHoverOverlay(overlay, constants);
 
         return overlay.Count > 0;
+    }
+
+    private void BuildHoverOverlay(InstructionBuffer overlay, ConstantPool constants)
+    {
+        if (!_settings.EnableDevTools
+            || !_devTools.Visible
+            || _devTools.Hovered is not { } hovered
+            || _layoutResult is not { } layout
+            || !TryFindBox(layout, hovered, out var box))
+        {
+            return;
+        }
+
+        var rect = PaintedBorderBox(box);
+
+        if (rect.Width <= 0 || rect.Height <= 0)
+        {
+            return;
+        }
+
+        overlay.AddDrawRect(rect, 0x33007FD4);
+
+        const uint border = 0xFF007FD4;
+        overlay.AddDrawRect(new Rect(rect.X, rect.Y, rect.Width, 1), border);
+        overlay.AddDrawRect(new Rect(rect.X, rect.Bottom - 1, rect.Width, 1), border);
+        overlay.AddDrawRect(new Rect(rect.X, rect.Y, 1, rect.Height), border);
+        overlay.AddDrawRect(new Rect(rect.Right - 1, rect.Y, 1, rect.Height), border);
+
+        var label = $"{MathF.Round(rect.Width):0} × {MathF.Round(rect.Height):0}";
+        var textStyle = TextStyle.Default with
+        {
+            FontFamily = "Segoe UI",
+            FontSize = 12,
+            Color = 0xFF202124,
+            WhiteSpace = WhiteSpace.NoWrap
+        };
+        var textId = constants.AddText(label, textStyle);
+        var labelWidth = label.Length * 7f + 10f;
+        const float labelHeight = 18f;
+        var labelX = MathF.Min(rect.X, MathF.Max(0, _lastWidth - labelWidth - 4));
+        var labelY = rect.Y - labelHeight - 2;
+
+        if (labelY < 0)
+        {
+            labelY = rect.Y + 2;
+        }
+
+        var labelRect = new Rect(labelX, labelY, labelWidth, labelHeight);
+        var radius = checked((ushort)constants.AddRadius(CornerRadius.All(2)));
+        overlay.AddDrawRoundedRect(labelRect, 0xFFFFFFFF, radius);
+        overlay.Add(Instruction.DrawText(labelRect.Deflate(5, 5, 2, 2), textId));
+    }
+
+    private static bool TryFindBox(
+        LayoutResult layout,
+        IgniteSupportedDomNode node,
+        out LayoutBox box)
+    {
+        if (layout.TryGetBox(node, out box!))
+        {
+            return true;
+        }
+
+        var children = node.Children;
+
+        for (var i = 0; i < children.Length; i++)
+        {
+            if (TryFindBox(layout, children[i], out box))
+            {
+                return true;
+            }
+        }
+
+        for (var parent = node.Parent; parent is not null; parent = parent.Parent)
+        {
+            if (layout.TryGetBox(parent, out box))
+            {
+                return true;
+            }
+        }
+
+        box = null!;
+        return false;
     }
 
     private void BuildSelectOverlay(InstructionBuffer overlay, ConstantPool constants)
@@ -1097,9 +1316,11 @@ public sealed class IgniteWindow : IDisposable
 
     private void BuildCaretOverlay(InstructionBuffer overlay)
     {
+        var layout = LayoutFor(_focused);
+
         if (_focused is null
-            || _layoutResult is null
-            || !_layoutResult.TryGetBox(_focused, out var box)
+            || layout is null
+            || !layout.TryGetBox(_focused, out var box)
             || !TryGetCaretRect(out var caret))
         {
             return;
@@ -1110,6 +1331,20 @@ public sealed class IgniteWindow : IDisposable
             : box.Style.Color;
 
         overlay.AddDrawRect(caret, color);
+    }
+
+    private LayoutResult? LayoutFor(ElementNode? element) => LayoutForNode(element);
+
+    private LayoutResult? LayoutForNode(IgniteSupportedDomNode? node)
+    {
+        if (node is not null
+            && _devToolsRoot is not null
+            && IsInDevToolsTree(node))
+        {
+            return _devToolsLayout;
+        }
+
+        return _layoutResult;
     }
 
     private static bool IsTextControl(ElementNode element)
@@ -1145,9 +1380,11 @@ public sealed class IgniteWindow : IDisposable
 
     private void PlaceCaretFromPoint(ElementNode element, float x)
     {
+        var boxLayout = LayoutFor(element);
+
         if (!IsTextControl(element)
-            || _layoutResult is null
-            || !_layoutResult.TryGetBox(element, out var box))
+            || boxLayout is null
+            || !boxLayout.TryGetBox(element, out var box))
         {
             return;
         }
@@ -1251,12 +1488,13 @@ public sealed class IgniteWindow : IDisposable
     private bool TryGetCaretRect(out Rect caret)
     {
         caret = default;
+        var boxLayout = LayoutFor(_focused);
 
         if (_focused is null
             || !IsTextControl(_focused)
             || !IsCaretVisible
-            || _layoutResult is null
-            || !_layoutResult.TryGetBox(_focused, out var box))
+            || boxLayout is null
+            || !boxLayout.TryGetBox(_focused, out var box))
         {
             return false;
         }
@@ -1404,6 +1642,43 @@ public sealed class IgniteWindow : IDisposable
     }
 
     // --------------------------------------------------------------- controls
+
+    private void PaintDevToolsContent(
+        LayoutBox box,
+        InstructionBuffer instructions,
+        ConstantPool constants)
+    {
+        if (box.Node is not ElementNode element || !element.HasClass("dt-swatch"))
+        {
+            return;
+        }
+
+        if (!ColorPreview.TryParse(GetAttribute(element, "data-color"), out var color))
+        {
+            return;
+        }
+
+        var rect = PaintedBorderBox(box);
+
+        if (rect.Width <= 0 || rect.Height <= 0)
+        {
+            return;
+        }
+
+        var radius = checked((ushort)constants.AddRadius(CornerRadius.All(2)));
+        instructions.AddDrawRoundedRect(rect, 0xFF5F6368, radius);
+
+        var inner = rect.Deflate(1, 1, 1, 1);
+
+        if (inner.Width <= 0 || inner.Height <= 0)
+        {
+            return;
+        }
+
+        // A light base keeps translucent colours readable on the dark panel.
+        instructions.AddDrawRoundedRect(inner, 0xFFFFFFFF, radius);
+        instructions.AddDrawRoundedRect(inner, color, radius);
+    }
 
     private void PaintElementContent(LayoutBox box, InstructionBuffer instructions, ConstantPool constants)
     {
@@ -1636,6 +1911,21 @@ public sealed class IgniteWindow : IDisposable
         }
 
         var element = HitTest(_mouseX, _mouseY);
+
+        if (Environment.GetEnvironmentVariable("IGNITE_STYLE_TRACE") == "1")
+        {
+            Console.WriteLine(
+                $"[down] {_mouseX:0},{_mouseY:0} {element?.Tag} " +
+                $"{string.Join('.', element?.ClassName ?? [])}");
+
+            if (_devToolsRoot is not null
+                && _devToolsLayout is not null
+                && FindByClass(_devToolsRoot, "dt-add") is { } addElement
+                && _devToolsLayout.TryGetBox(addElement, out var addBox))
+            {
+                Console.WriteLine($"[add] {addBox.BorderBox}");
+            }
+        }
 
         if (_openSelect is not null)
         {
@@ -1910,6 +2200,7 @@ public sealed class IgniteWindow : IDisposable
         node.ScrollOffsetX = x;
         node.ScrollOffsetY = y;
         _needsPaint = true;
+        _needsDevToolsPaint = true;
     }
 
     private void AdvanceScrollAnimations(double delta)
@@ -1960,6 +2251,7 @@ public sealed class IgniteWindow : IDisposable
         if (changed)
         {
             _needsPaint = true;
+            _needsDevToolsPaint = true;
         }
     }
 
@@ -2014,7 +2306,7 @@ public sealed class IgniteWindow : IDisposable
     private void UpdateScrollbarDrag(float x, float y)
     {
         if (_scrollDrag is not { } drag
-            || _layoutResult?.TryGetBox(drag.Node, out var box) != true)
+            || LayoutForNode(drag.Node)?.TryGetBox(drag.Node, out var box) != true)
         {
             return;
         }
@@ -2049,6 +2341,19 @@ public sealed class IgniteWindow : IDisposable
 
     private ScrollbarHit? FindScrollbarAt(float x, float y)
     {
+        if (_settings.EnableDevTools
+            && _devTools.Visible
+            && _devTools.Dock != DevToolsDock.Window
+            && _devToolsLayout?.Root is { } devRoot)
+        {
+            var devHit = FindScrollbarAt(devRoot, x, y, 0, 0);
+
+            if (devHit is not null)
+            {
+                return devHit;
+            }
+        }
+
         return _layoutResult?.Root is { } root
             ? FindScrollbarAt(root, x, y, 0, 0)
             : null;
@@ -2130,21 +2435,43 @@ public sealed class IgniteWindow : IDisposable
 
     private void OnKeyDown(IKeyboard keyboard, Key key)
     {
-        if (_settings.EnableDevTools)
-        {
-            var control = keyboard.IsKeyPressed(Key.ControlLeft) || keyboard.IsKeyPressed(Key.ControlRight);
-            var shift = keyboard.IsKeyPressed(Key.ShiftLeft) || keyboard.IsKeyPressed(Key.ShiftRight);
+        var control = keyboard.IsKeyPressed(Key.ControlLeft) || keyboard.IsKeyPressed(Key.ControlRight);
+        var shift = keyboard.IsKeyPressed(Key.ShiftLeft) || keyboard.IsKeyPressed(Key.ShiftRight);
 
-            if ((key == Key.I && control && shift) || key == Key.F12)
-            {
-                ToggleDevTools();
-                return;
-            }
+        if (_settings.EnableDevTools
+            && ((key == Key.I && control && shift) || key == Key.F12))
+        {
+            ToggleDevTools();
+            return;
         }
 
         if (_focused is null)
         {
             return;
+        }
+
+        if (key == Key.V && control && IsTextControl(_focused))
+        {
+            var text = keyboard.ClipboardText;
+
+            if (!string.IsNullOrEmpty(text))
+            {
+                if (_focused.TryGetEventHandler("paste", out var pasteHandler)
+                    && pasteHandler is not null)
+                {
+                    Invoke(_focused, "paste", text);
+                    return;
+                }
+
+                _editText ??= string.Empty;
+                _caretIndex = Math.Clamp(_caretIndex, 0, _editText.Length);
+                _editText = _editText.Insert(_caretIndex, text);
+                _caretIndex += text.Length;
+                ResetCaretBlink();
+                CascadeEdit(_focused);
+                Invoke(_focused, "input", _editText);
+                return;
+            }
         }
 
         if (_focused.Tag is "select")
@@ -2254,6 +2581,11 @@ public sealed class IgniteWindow : IDisposable
                 break;
 
             case Key.Enter:
+                if (IsInDevToolsTree(_focused) && _focused.HasClass("dt-value-input"))
+                {
+                    _devTools.AdvanceAfterCommit = true;
+                }
+
                 CommitEdit(_focused);
                 Invoke(_focused, "change", _editText ?? string.Empty);
                 _needsLayout = true;
@@ -2327,6 +2659,24 @@ public sealed class IgniteWindow : IDisposable
             return;
         }
 
+        if (IsInDevToolsTree(_focused))
+        {
+            if (character == ':' && _focused.HasClass("dt-prop-input"))
+            {
+                FocusNext();
+                return;
+            }
+
+            if (character == ';' && _focused.HasClass("dt-value-input"))
+            {
+                _devTools.AdvanceAfterCommit = true;
+                CommitEdit(_focused);
+                Invoke(_focused, "change", _editText ?? string.Empty);
+                _needsLayout = true;
+                return;
+            }
+        }
+
         _editText ??= string.Empty;
         _caretIndex = Math.Clamp(_caretIndex, 0, _editText.Length);
         _editText = _editText.Insert(_caretIndex, character.ToString());
@@ -2362,6 +2712,11 @@ public sealed class IgniteWindow : IDisposable
         }
 
         _needsLayout = true;
+
+        if (IsInDevToolsTree(element))
+        {
+            _lastDevToolsVersion = -1;
+        }
     }
 
     private void CommitEdit(ElementNode element)
@@ -2376,6 +2731,11 @@ public sealed class IgniteWindow : IDisposable
         }
 
         _needsLayout = true;
+
+        if (IsInDevToolsTree(element))
+        {
+            _lastDevToolsVersion = -1;
+        }
     }
 
     private void Focus(ElementNode? element, bool focusVisible = false)
@@ -2399,6 +2759,7 @@ public sealed class IgniteWindow : IDisposable
             {
                 element.IsFocusVisible = visible;
                 _needsLayout = true;
+                _lastDevToolsVersion = -1;
             }
 
             return;
@@ -2440,12 +2801,18 @@ public sealed class IgniteWindow : IDisposable
         }
 
         _needsLayout = true;
+        _lastDevToolsVersion = -1;
     }
 
     private void FocusNext()
     {
         var focusable = new List<ElementNode>();
-        CollectFocusable(_root, focusable);
+        var root = _focused is not null
+            && _devToolsRoot is not null
+            && IsInDevToolsTree(_focused)
+            ? _devToolsRoot
+            : _root;
+        CollectFocusable(root, focusable);
 
         if (focusable.Count == 0)
         {
@@ -2454,6 +2821,19 @@ public sealed class IgniteWindow : IDisposable
 
         var index = _focused is null ? -1 : focusable.IndexOf(_focused);
         Focus(focusable[(index + 1) % focusable.Count], focusVisible: true);
+    }
+
+    private bool IsInDevToolsTree(IgniteSupportedDomNode? node)
+    {
+        for (var current = node; current is not null; current = current.Parent)
+        {
+            if (ReferenceEquals(current, _devToolsRoot))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static void CollectFocusable(Node? node, List<ElementNode> result)
@@ -2499,10 +2879,21 @@ public sealed class IgniteWindow : IDisposable
             return;
         }
 
+        if (_hovered is not null)
+        {
+            Invoke(_hovered, "mouseout");
+        }
+
         SetChainState(_hoverChain, element, static node => node.IsHovered = true,
             static node => node.IsHovered = false);
 
         _hovered = element;
+
+        if (element is not null)
+        {
+            Invoke(element, "mouseover");
+        }
+
         _needsLayout = true;
     }
 
@@ -2585,12 +2976,17 @@ public sealed class IgniteWindow : IDisposable
         // testing has to apply the same accumulated translation.
         var painted = box.BorderBox.Translate(-scrollX, -scrollY);
 
-        if (!painted.Contains(x, y))
+        // A display:contents box has no box of its own; its children are laid
+        // out in the parent. Never reject a point against its (often empty)
+        // border box or the children can never be hit.
+        var isContents = box.IsContents || box.Style.Display == Display.Contents;
+
+        if (!isContents && !painted.Contains(x, y))
         {
             return null;
         }
 
-        if (box.IsScrollContainer)
+        if (box.IsScrollContainer && !isContents)
         {
             var clip = box.PaddingBox.Translate(-scrollX, -scrollY);
 
@@ -2613,7 +3009,10 @@ public sealed class IgniteWindow : IDisposable
             }
         }
 
-        return box;
+        // A contents box has no geometry of its own. Returning it would make
+        // it swallow points that belong to a later sibling (for example the
+        // disclosure triangle next to a tree row's content fragment).
+        return isContents ? null : box;
     }
 
     private static ElementNode? FindElement(IgniteSupportedDomNode? node)
@@ -2639,12 +3038,21 @@ public sealed class IgniteWindow : IDisposable
         {
             if (box.IsScrollContainer)
             {
-                firstScrollContainer ??= box;
+                // overflow:hidden/clip creates a scroll container for clipping
+                // but the user cannot scroll it. Skipping those keeps a text
+                // input (which clips its text) from swallowing the wheel.
+                var userScrollY = box.Style.OverflowY is Overflow.Auto or Overflow.Scroll;
+                var userScrollX = box.Style.OverflowX is Overflow.Auto or Overflow.Scroll;
 
-                if ((vertical != 0 && box.ScrollHeight > box.ClientHeight + 0.5f)
-                    || (horizontal != 0 && box.ScrollWidth > box.ClientWidth + 0.5f))
+                if (userScrollX || userScrollY)
                 {
-                    return box;
+                    firstScrollContainer ??= box;
+
+                    if ((vertical != 0 && userScrollY && box.ScrollHeight > box.ClientHeight + 0.5f)
+                        || (horizontal != 0 && userScrollX && box.ScrollWidth > box.ClientWidth + 0.5f))
+                    {
+                        return box;
+                    }
                 }
             }
 
@@ -2656,11 +3064,13 @@ public sealed class IgniteWindow : IDisposable
 
     private static void Invoke(ElementNode? element, string eventName, string? value = null)
     {
-        var node = element;
+        IgniteSupportedDomNode? node = element;
 
         while (node is not null)
         {
-            if (node.TryGetEventHandler(eventName, out var handler) && handler is not null)
+            if (node is ElementNode current
+                && current.TryGetEventHandler(eventName, out var handler)
+                && handler is not null)
             {
                 try
                 {
@@ -2689,7 +3099,7 @@ public sealed class IgniteWindow : IDisposable
                 return;
             }
 
-            node = node.Parent as ElementNode;
+            node = node.Parent;
         }
     }
 

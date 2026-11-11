@@ -347,8 +347,14 @@ public static class InspectorStyles
         #ignite-devtools .dt-decl {
             display: flex;
             flex-direction: row;
+            align-items: center;
+            min-height: 20px;
             margin-top: 2px;
             font-family: Consolas, "Courier New", monospace;
+        }
+
+        #ignite-devtools .dt-decl:hover {
+            background-color: #2a2d2e;
         }
 
         #ignite-devtools .dt-prop {
@@ -361,6 +367,69 @@ public static class InspectorStyles
 
         #ignite-devtools .dt-value {
             color: #a5d6a7;
+        }
+
+        #ignite-devtools .dt-prop-input,
+        #ignite-devtools .dt-value-input {
+            background-color: transparent;
+            border-width: 0;
+            border-style: none;
+            border-color: transparent;
+            border-radius: 2px;
+            padding: 0 2px;
+            margin: 0;
+            height: 18px;
+            min-height: 18px;
+            font-family: Consolas, "Courier New", monospace;
+            font-size: 12px;
+            line-height: 18px;
+            outline-width: 0;
+            outline-style: none;
+            white-space: nowrap;
+            overflow: hidden;
+        }
+
+        #ignite-devtools .dt-prop-input {
+            width: 140px;
+            min-width: 140px;
+            color: #e8a87c;
+        }
+
+        #ignite-devtools .dt-value-input {
+            flex: 0 1 300px;
+            width: 300px;
+            min-width: 80px;
+            color: #a5d6a7;
+        }
+
+        #ignite-devtools .dt-prop-input:focus,
+        #ignite-devtools .dt-value-input:focus {
+            background-color: #1e1e1e;
+            outline-width: 1px;
+            outline-style: solid;
+            outline-color: #007fd4;
+        }
+
+        #ignite-devtools .dt-swatch {
+            display: block;
+            flex: 0 0 12px;
+            width: 12px;
+            height: 12px;
+            min-width: 12px;
+            margin-right: 6px;
+            margin-left: 2px;
+        }
+
+        #ignite-devtools .dt-add-row {
+            min-height: 20px;
+            margin-top: 2px;
+        }
+
+        #ignite-devtools .dt-add {
+            color: #8ab4f8;
+            padding-left: 4px;
+            padding-right: 4px;
+            cursor: pointer;
         }
 
         #ignite-devtools .dt-computed-row {

@@ -467,6 +467,49 @@ namespace Ignite.Data
         }
 
         /// <summary>
+        /// Replaces one declaration's value in place. Used by the inspector to
+        /// make matched rules editable without re-parsing a stylesheet.
+        /// </summary>
+        public void SetRuleValue(int ruleIndex, int valueId)
+        {
+            if ((uint)ruleIndex >= (uint)_rules.Count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(ruleIndex));
+            }
+
+            var rule = _rules[ruleIndex];
+            _rules[ruleIndex] = new Rule
+            {
+                SelectorId = rule.SelectorId,
+                PropertyId = rule.PropertyId,
+                ValueId = valueId,
+                ConditionId = rule.ConditionId,
+                LayerId = rule.LayerId
+            };
+            _hasLastRule = false;
+        }
+
+        /// <summary>Replaces one declaration's property name in place.</summary>
+        public void SetRuleProperty(int ruleIndex, int propertyId)
+        {
+            if ((uint)ruleIndex >= (uint)_rules.Count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(ruleIndex));
+            }
+
+            var rule = _rules[ruleIndex];
+            _rules[ruleIndex] = new Rule
+            {
+                SelectorId = rule.SelectorId,
+                PropertyId = propertyId,
+                ValueId = rule.ValueId,
+                ConditionId = rule.ConditionId,
+                LayerId = rule.LayerId
+            };
+            _hasLastRule = false;
+        }
+
+        /// <summary>
         /// Records a stylesheet import for the host to resolve.
         /// </summary>
         public int AddImport(int urlId, int layerId = -1, int conditionId = -1, int supportsConditionId = -1)

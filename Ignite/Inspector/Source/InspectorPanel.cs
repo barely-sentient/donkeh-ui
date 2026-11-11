@@ -26,6 +26,10 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
     private Action<int>? _setTick;
     private int _tick;
     private long _lastVersion = -1;
+    private int _addingSelector = -1;
+    private string _addProperty = string.Empty;
+    private string _addValue = string.Empty;
+    private const int ElementStyleAddKey = -2;
 
     /// <summary>Called by the host frame loop to pull fresh data into the panel.</summary>
     public void Tick()
@@ -369,7 +373,7 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
         if (element.Id is { } id)
         {
             var value = id.StartsWith('#') ? id[1..] : id;
-            label.Add(_.H("span", new Props { ClassName = "dt-attr" }, _.Text(" id=")));
+            label.Add(_.H("span", new Props { ClassName = "dt-attr" }, _.Text("\u00A0id=")));
             label.Add(_.H("span", new Props { ClassName = "dt-val" }, _.Text("\"" + value + "\"")));
         }
 
@@ -377,7 +381,7 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
 
         if (classes.Length > 0)
         {
-            label.Add(_.H("span", new Props { ClassName = "dt-attr" }, _.Text(" class=")));
+            label.Add(_.H("span", new Props { ClassName = "dt-attr" }, _.Text("\u00A0class=")));
             label.Add(_.H("span", new Props { ClassName = "dt-val" }, _.Text("\"" + string.Join(' ', classes) + "\"")));
         }
 
@@ -386,15 +390,24 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
 
         foreach (var nameId in attributeNames)
         {
-            if (shown++ >= 8 || !element.TryGetAttribute(nameId, out var valueId))
+            if (!element.TryGetAttribute(nameId, out var valueId))
             {
                 continue;
             }
 
             var name = InternTable.GetString(nameId) ?? string.Empty;
+
+            // The inspector tags elements it owns with a private attribute; it
+            // is an implementation detail, not something to show in the tree.
+            if (name.StartsWith("data-ignite-", StringComparison.Ordinal)
+                || shown++ >= 8)
+            {
+                continue;
+            }
+
             var value = InternTable.GetString(valueId) ?? string.Empty;
 
-            label.Add(_.H("span", new Props { ClassName = "dt-attr" }, _.Text(" " + name)));
+            label.Add(_.H("span", new Props { ClassName = "dt-attr" }, _.Text("\u00A0" + name)));
             label.Add(_.H("span", new Props { ClassName = "dt-dim" }, _.Text("=")));
             label.Add(_.H("span", new Props { ClassName = "dt-val" }, _.Text("\"" + value + "\"")));
         }
@@ -441,6 +454,14 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
                 {
                     state.Selected = node;
                     RequestUpdate();
+                },
+                OnMouseOver = () => state.Hovered = node,
+                OnMouseOut = () =>
+                {
+                    if (ReferenceEquals(state.Hovered, node))
+                    {
+                        state.Hovered = null;
+                    }
                 }
             },
             _.H(
@@ -517,22 +538,64 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
         else
         {
             var matches = table.MatchRules(element, state.Context);
+            var hasElementStyle = state.TryGetElementStyleSelector(element, out var elementStyleSelectorId);
+            var elementStyle = new RuleGroup(
+                "inspector",
+                "element.style",
+                elementStyleSelectorId,
+                -1,
+                -1,
+                isElementStyle: true)
+            {
+                Element = element
+            };
+
+            if (hasElementStyle)
+            {
+                for (var i = 0; i < matches.Length; i++)
+                {
+                    var match = matches[i];
+
+                    if (match.SelectorId == elementStyleSelectorId)
+                    {
+                        elementStyle.Declarations.Add(new Declaration(
+                            match.Order,
+                            InternTable.GetString(match.Rule.PropertyId) ?? "?",
+                            InternTable.GetString(match.Rule.ValueId) ?? "?"));
+                    }
+                }
+            }
+
+            output.Add(BuildRuleGroup(state, elementStyle));
+
             var groups = new List<RuleGroup>();
             var index = new Dictionary<(string Origin, int Selector), RuleGroup>();
 
             for (var i = 0; i < matches.Length; i++)
             {
                 var match = matches[i];
+
+                if (hasElementStyle && match.SelectorId == elementStyleSelectorId)
+                {
+                    continue;
+                }
+
                 var origin = OriginFor(state, match.Order);
 
                 if (!index.TryGetValue((origin, match.SelectorId), out var group))
                 {
-                    group = new RuleGroup(origin, SelectorText(table, match.SelectorId));
+                    group = new RuleGroup(
+                        origin,
+                        SelectorText(table, match.SelectorId),
+                        match.SelectorId,
+                        match.Rule.ConditionId,
+                        match.Rule.LayerId);
                     index[(origin, match.SelectorId)] = group;
                     groups.Add(group);
                 }
 
-                group.Declarations.Add((
+                group.Declarations.Add(new Declaration(
+                    match.Order,
                     InternTable.GetString(match.Rule.PropertyId) ?? "?",
                     InternTable.GetString(match.Rule.ValueId) ?? "?"));
             }
@@ -546,30 +609,7 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
 
             foreach (var group in groups)
             {
-                var declarations = new List<Node?>();
-
-                foreach (var (property, value) in group.Declarations)
-                {
-                    declarations.Add(
-                        _.H(
-                            "div",
-                            new Props { ClassName = "dt-decl" },
-                            _.H("span", new Props { ClassName = "dt-prop" }, _.Text(property)),
-                            _.H("span", new Props { ClassName = "dt-colon" }, _.Text(": ")),
-                            _.H("span", new Props { ClassName = "dt-value" }, _.Text(value)),
-                            _.H("span", new Props { ClassName = "dt-dim" }, _.Text(";"))));
-                }
-
-                output.Add(
-                    _.H(
-                        "div",
-                        new Props { ClassName = "dt-rule" },
-                        _.H(
-                            "div",
-                            new Props { ClassName = "dt-rule-head" },
-                            _.H("span", new Props { ClassName = "dt-selector" }, _.Text(group.Selector)),
-                            _.H("span", new Props { ClassName = "dt-origin" }, _.Text(group.Origin))),
-                        _.F(declarations.ToArray())));
+                output.Add(BuildRuleGroup(state, group));
             }
         }
 
@@ -586,8 +626,8 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
             output.Add(BuildComputedRow("margin", ThicknessValue(box.Margin)));
             output.Add(BuildComputedRow("padding", ThicknessValue(box.Padding)));
             output.Add(BuildComputedRow("border", ThicknessValue(box.Border)));
-            output.Add(BuildComputedRow("color", FormatColor(style.Color)));
-            output.Add(BuildComputedRow("background-color", FormatColor(style.BackgroundColor)));
+            output.Add(BuildComputedRow("color", FormatColor(style.Color), color: true));
+            output.Add(BuildComputedRow("background-color", FormatColor(style.BackgroundColor), color: true));
             output.Add(BuildComputedRow("font-family", style.FontFamily));
             output.Add(BuildComputedRow("font-size", style.FontSize.ToString()));
             output.Add(BuildComputedRow("font-weight", style.FontWeight.ToString(CultureInfo.InvariantCulture)));
@@ -611,13 +651,455 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
         return _.F(output.ToArray());
     }
 
-    private static Node BuildComputedRow(string name, string value)
+    private Node BuildRuleGroup(DevToolsState state, RuleGroup group)
+    {
+        var declarations = new List<Node?>();
+
+        foreach (var declaration in group.Declarations)
+        {
+            declarations.Add(BuildDeclaration(state, group, declaration));
+        }
+
+        var addKey = group.IsElementStyle ? ElementStyleAddKey : group.SelectorId;
+
+        if (_addingSelector == addKey)
+        {
+            declarations.Add(BuildAddRow(state, group));
+        }
+        else
+        {
+            declarations.Add(
+                _.H(
+                    "div",
+                    new Props { ClassName = "dt-add-row" },
+                    _.H(
+                        "div",
+                        new Props
+                        {
+                            ClassName = "dt-add",
+                            OnClick = () => BeginAdd(group)
+                        },
+                        _.Text("+ Add property"))));
+        }
+
+        return _.H(
+            "div",
+            new Props { ClassName = "dt-rule" },
+            _.H(
+                "div",
+                new Props { ClassName = "dt-rule-head" },
+                _.H("span", new Props { ClassName = "dt-selector" }, _.Text(group.Selector)),
+                _.H("span", new Props { ClassName = "dt-origin" }, _.Text(group.Origin))),
+            _.F(declarations.ToArray()));
+    }
+
+    private Node BuildDeclaration(DevToolsState state, RuleGroup group, Declaration declaration)
+    {
+        var parts = new List<Node?>();
+        var isColor = ColorPreview.IsColor(declaration.Value);
+
+        parts.Add(_.H("input", new Props
+        {
+            ClassName = "dt-prop-input",
+            Type = "text",
+            Value = declaration.Property,
+            OnChange = value => CommitProperty(state, declaration.RuleIndex, value)
+        }));
+        parts.Add(_.H("span", new Props { ClassName = "dt-colon" }, _.Text(":")));
+
+        if (isColor)
+        {
+            parts.Add(BuildSwatch(declaration.Value));
+        }
+
+        parts.Add(_.H("input", new Props
+        {
+            ClassName = "dt-value-input",
+            Type = "text",
+            Value = declaration.Value,
+            OnInput = value => CommitValueLive(state, group, declaration.RuleIndex, value),
+            OnChange = value => CommitValue(state, group, declaration.RuleIndex, value)
+        }));
+        parts.Add(_.H("span", new Props { ClassName = "dt-dim" }, _.Text(";")));
+
+        return _.H("div", new Props { ClassName = "dt-decl" }, _.F(parts.ToArray()));
+    }
+
+    private Node BuildAddRow(DevToolsState state, RuleGroup group)
     {
         return _.H(
             "div",
-            new Props { ClassName = "dt-computed-row" },
-            _.H("span", new Props { ClassName = "dt-computed-name" }, _.Text(name)),
-            _.H("span", new Props { ClassName = "dt-computed-value" }, _.Text(value)));
+            new Props { ClassName = "dt-decl dt-add-row" },
+            _.H("input", new Props
+            {
+                ClassName = "dt-prop-input dt-add-input",
+                Type = "text",
+                Placeholder = "property",
+                Value = _addProperty,
+                OnInput = value => _addProperty = value,
+                OnChange = value => _addProperty = value,
+                OnPaste = text => PasteDeclarations(state, group, text)
+            }),
+            _.H("span", new Props { ClassName = "dt-colon" }, _.Text(":")),
+            _.H("input", new Props
+            {
+                ClassName = "dt-value-input dt-add-input",
+                Type = "text",
+                Placeholder = "value",
+                Value = _addValue,
+                OnInput = value => _addValue = value,
+                OnChange = value =>
+                {
+                    _addValue = value;
+                    CommitAdd(state, group);
+                }
+            }),
+            _.H(
+                "div",
+                new Props { ClassName = "dt-add", OnClick = () => CommitAdd(state, group) },
+                _.Text("+")));
+    }
+
+    private static Node BuildSwatch(string value)
+    {
+        return _.H(
+            "span",
+            new Props
+            {
+                ClassName = "dt-swatch",
+                Attributes = new Dictionary<string, string> { ["data-color"] = value }
+            });
+    }
+
+    private void BeginAdd(RuleGroup group)
+    {
+        _addingSelector = group.IsElementStyle ? ElementStyleAddKey : group.SelectorId;
+        _addProperty = string.Empty;
+        _addValue = string.Empty;
+        Props.State.PendingFocusClass = "dt-add-input";
+        RequestUpdate();
+    }
+
+    private void CommitValue(DevToolsState state, RuleGroup group, int ruleIndex, string value)
+    {
+        var advance = state.AdvanceAfterCommit;
+        state.AdvanceAfterCommit = false;
+
+        if (state.Table is not { } table)
+        {
+            return;
+        }
+
+        var text = value.Trim().TrimEnd(';').Trim();
+
+        if (text.Length == 0)
+        {
+            return;
+        }
+
+        var valueId = InternTable.Intern(text);
+
+        state.QueueEdit(() =>
+        {
+            if (table.GetRule(ruleIndex).ValueId == valueId)
+            {
+                return;
+            }
+
+            table.SetRuleValue(ruleIndex, valueId);
+            state.NotifyStylesChanged();
+        });
+
+        if (advance)
+        {
+            BeginAdd(group);
+        }
+    }
+
+    private void CommitValueLive(DevToolsState state, RuleGroup group, int ruleIndex, string value)
+    {
+        if (!LooksComplete(value))
+        {
+            return;
+        }
+
+        CommitValue(state, group, ruleIndex, value);
+    }
+
+    private static bool LooksComplete(string value)
+    {
+        var text = value.Trim();
+
+        if (text.Length == 0
+            || text is "-" or "--" or "." or "#"
+            || text.EndsWith(';'))
+        {
+            return false;
+        }
+
+        var open = 0;
+        var quote = '\0';
+
+        foreach (var c in text)
+        {
+            if (quote != '\0')
+            {
+                if (c == quote)
+                {
+                    quote = '\0';
+                }
+
+                continue;
+            }
+
+            if (c is '"' or '\'')
+            {
+                quote = c;
+            }
+            else if (c == '(')
+            {
+                open++;
+            }
+            else if (c == ')')
+            {
+                if (open == 0)
+                {
+                    return false;
+                }
+
+                open--;
+            }
+        }
+
+        return open == 0 && quote == '\0';
+    }
+
+    private void CommitProperty(DevToolsState state, int ruleIndex, string value)
+    {
+        if (state.Table is not { } table)
+        {
+            return;
+        }
+
+        var text = value.Trim();
+
+        if (text.Length == 0)
+        {
+            return;
+        }
+
+        var propertyId = InternTable.Intern(text);
+
+        state.QueueEdit(() =>
+        {
+            if (table.GetRule(ruleIndex).PropertyId == propertyId)
+            {
+                return;
+            }
+
+            table.SetRuleProperty(ruleIndex, propertyId);
+            state.NotifyStylesChanged();
+        });
+    }
+
+    private void CommitAdd(DevToolsState state, RuleGroup group)
+    {
+        var advance = state.AdvanceAfterCommit;
+        state.AdvanceAfterCommit = false;
+
+        if (state.Table is not { } table)
+        {
+            return;
+        }
+
+        var property = _addProperty.Trim();
+        var value = _addValue.Trim();
+
+        if (property.Length == 0 || value.Length == 0)
+        {
+            return;
+        }
+
+        var propertyId = InternTable.Intern(property);
+        var valueId = InternTable.Intern(value);
+
+        if (group.IsElementStyle)
+        {
+            if (group.Element is not { } element)
+            {
+                return;
+            }
+
+            state.QueueEdit(() =>
+            {
+                state.AddElementStyleDeclaration(element, propertyId, valueId);
+                state.NotifyStylesChanged();
+            });
+        }
+        else
+        {
+            var selectorId = group.SelectorId;
+            var conditionId = group.ConditionId;
+            var layerId = group.LayerId;
+
+            state.QueueEdit(() =>
+            {
+                table.AddRule(selectorId, propertyId, valueId, conditionId, layerId);
+                state.NotifyStylesChanged();
+            });
+        }
+
+        if (advance)
+        {
+            BeginAdd(group);
+            return;
+        }
+
+        _addingSelector = -1;
+        _addProperty = string.Empty;
+        _addValue = string.Empty;
+    }
+
+    private void PasteDeclarations(DevToolsState state, RuleGroup group, string text)
+    {
+        if (state.Table is not { } table || string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        var trimmed = text.Trim();
+
+        if (trimmed.Contains('{') && trimmed.Contains('}'))
+        {
+            state.QueueEdit(() =>
+            {
+                new Ignite.DataEngine.DataEngine(
+                        Ignite.DataEngine.MediaConditionCompiler.Instance)
+                    .Build(Tokenizer.Parse(trimmed), table);
+                state.NotifyStylesChanged();
+            });
+            return;
+        }
+
+        var declarations = ParseDeclarations(trimmed);
+
+        if (declarations.Count == 0)
+        {
+            return;
+        }
+
+        var element = group.Element;
+        var selectorId = group.SelectorId;
+        var conditionId = group.ConditionId;
+        var layerId = group.LayerId;
+        var isElementStyle = group.IsElementStyle;
+
+        state.QueueEdit(() =>
+        {
+            foreach (var (property, value) in declarations)
+            {
+                var propertyId = InternTable.Intern(property);
+                var valueId = InternTable.Intern(value);
+
+                if (isElementStyle && element is not null)
+                {
+                    state.AddElementStyleDeclaration(element, propertyId, valueId);
+                }
+                else
+                {
+                    table.AddRule(selectorId, propertyId, valueId, conditionId, layerId);
+                }
+            }
+
+            state.NotifyStylesChanged();
+        });
+    }
+
+    private static List<(string Property, string Value)> ParseDeclarations(string text)
+    {
+        var result = new List<(string Property, string Value)>();
+        var start = 0;
+        var depth = 0;
+        var quote = '\0';
+
+        for (var i = 0; i <= text.Length; i++)
+        {
+            var c = i < text.Length ? text[i] : ';';
+
+            if (quote != '\0')
+            {
+                if (c == quote)
+                {
+                    quote = '\0';
+                }
+
+                continue;
+            }
+
+            if (c is '"' or '\'')
+            {
+                quote = c;
+                continue;
+            }
+
+            if (c == '(')
+            {
+                depth++;
+                continue;
+            }
+
+            if (c == ')')
+            {
+                depth = Math.Max(0, depth - 1);
+                continue;
+            }
+
+            if (c != ';' || depth != 0)
+            {
+                continue;
+            }
+
+            var declaration = text[start..i].Trim();
+            start = i + 1;
+
+            if (declaration.Length == 0)
+            {
+                continue;
+            }
+
+            var colon = declaration.IndexOf(':');
+
+            if (colon <= 0)
+            {
+                continue;
+            }
+
+            var property = declaration[..colon].Trim();
+            var value = declaration[(colon + 1)..].Trim();
+
+            if (property.Length > 0 && value.Length > 0)
+            {
+                result.Add((property, value));
+            }
+        }
+
+        return result;
+    }
+
+    private static Node BuildComputedRow(string name, string value, bool color = false)
+    {
+        var parts = new List<Node?>();
+
+        parts.Add(_.H("span", new Props { ClassName = "dt-computed-name" }, _.Text(name)));
+
+        if (color && ColorPreview.IsColor(value))
+        {
+            parts.Add(BuildSwatch(value));
+        }
+
+        parts.Add(_.H("span", new Props { ClassName = "dt-computed-value" }, _.Text(value)));
+
+        return _.H("div", new Props { ClassName = "dt-computed-row" }, _.F(parts.ToArray()));
     }
 
     private static string ElementLabel(ElementNode element)
@@ -647,7 +1129,7 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
             }
         }
 
-        return "unknown";
+        return "inspector";
     }
 
     private static string SelectorText(DataTable table, int selectorId)
@@ -721,12 +1203,25 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
         return builder.ToString();
     }
 
-    private sealed class RuleGroup(string origin, string selector)
+    private sealed class RuleGroup(
+        string origin,
+        string selector,
+        int selectorId,
+        int conditionId,
+        int layerId,
+        bool isElementStyle = false)
     {
         public string Origin { get; } = origin;
         public string Selector { get; } = selector;
-        public List<(string Property, string Value)> Declarations { get; } = [];
+        public int SelectorId { get; } = selectorId;
+        public int ConditionId { get; } = conditionId;
+        public int LayerId { get; } = layerId;
+        public bool IsElementStyle { get; } = isElementStyle;
+        public ElementNode? Element { get; init; }
+        public List<Declaration> Declarations { get; } = [];
     }
+
+    private readonly record struct Declaration(int RuleIndex, string Property, string Value);
 
     // ------------------------------------------------------------ performance
 
