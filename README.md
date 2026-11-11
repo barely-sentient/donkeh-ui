@@ -17,37 +17,37 @@ stylesheet compiler, a layout/paint engine, a declarative view layer, a native
 window host, and a devtools inspector.
 
 ```text
- CSS text ──► Ignite.Parser.Tokenizer ──► tokens
+ CSS text ──► Donkeh.Parser.Tokenizer ──► tokens
                                             │
                                             ▼
-                                 Ignite.DataEngine.CssStreamParser
+                                 Donkeh.DataEngine.CssStreamParser
                                             │
                                             ▼
-                             Ignite.Data.DataTable (interned, flat)
+                             Donkeh.Data.DataTable (interned, flat)
                                             │
- DOM tree ──► Ignite.Data.DataTable.MatchRules
-                                            │
-                                            ▼
-                          Ignite.LayoutLab.StyleResolver ──► ComputedStyle
+ DOM tree ──► Donkeh.Data.DataTable.MatchRules
                                             │
                                             ▼
-                          Ignite.LayoutLab.LayoutEngine
+                          Donkeh.LayoutLab.StyleResolver ──► ComputedStyle
+                                            │
+                                            ▼
+                          Donkeh.LayoutLab.LayoutEngine
                           block / inline / flex / grid / table / float / text
                                             │
                                             ▼
                      LayoutBox tree + InstructionBuffer + ConstantPool
                                             │
                                             ▼
-                          Ignite.LayoutLab.Optimiser (cull/merge/compact)
+                          Donkeh.LayoutLab.Optimiser (cull/merge/compact)
                                             │
                                             ▼
-                          Ignite.Windowing.GLRenderer ──► window
+                          Donkeh.Windowing.GLRenderer ──► window
 ```
 
-`Ignite.UILab` sits above that pipeline: it produces the DOM-like tree, patches
-it in place, and lets a host mount components with hooks. `Ignite.Windowing`
+`Donkeh.UILab` sits above that pipeline: it produces the DOM-like tree, patches
+it in place, and lets a host mount components with hooks. `Donkeh.Windowing`
 owns the native window, font/image caches, input routing and the OpenGL
-renderer. `Ignite.Inspector` provides the devtools panel.
+renderer. `Donkeh.Inspector` provides the devtools panel.
 
 ---
 
@@ -56,13 +56,13 @@ renderer. `Ignite.Inspector` provides the devtools panel.
 - [Design goals](#design-goals)
 - [Repository layout](#repository-layout)
 - [Modules](#modules)
-  - [Ignite.Parser](#igniteparser)
-  - [Ignite.Data](#ignitedata)
-  - [Ignite.DataEngine](#ignitedataengine)
-  - [Ignite.LayoutLab](#ignitelayoutlab)
-  - [Ignite.UILab](#igniteuilab)
-  - [Ignite.Windowing](#ignitewindowing)
-  - [Ignite.Inspector](#igniteinspector)
+  - [Donkeh.Parser](#igniteparser)
+  - [Donkeh.Data](#ignitedata)
+  - [Donkeh.DataEngine](#ignitedataengine)
+  - [Donkeh.LayoutLab](#ignitelayoutlab)
+  - [Donkeh.UILab](#igniteuilab)
+  - [Donkeh.Windowing](#ignitewindowing)
+  - [Donkeh.Inspector](#igniteinspector)
   - [Tooling projects](#tooling-projects)
 - [Getting started](#getting-started)
 - [End-to-end example](#end-to-end-example)
@@ -80,12 +80,12 @@ renderer. `Ignite.Inspector` provides the devtools panel.
 
 | Goal | How the codebase achieves it |
 | --- | --- |
-| **Declarative first** | UI is a function of state: components, hooks, context, keyed children and in-place reconciliation (`Ignite.UILab`) sit on top of the CSS engine rather than the other way around. |
+| **Declarative first** | UI is a function of state: components, hooks, context, keyed children and in-place reconciliation (`Donkeh.UILab`) sit on top of the CSS engine rather than the other way around. |
 | **A real CSS engine** | A full tokenizer, selector matching with specificity and source order, cascade layers, custom properties, `!important`, shorthand expansion, media/container/supports conditions, keyframes and per-property animations. |
 | **Browser-like, C#-native** | Real CSS, form controls, text editing and `:hover`/`:active`/`:focus` state without a JavaScript runtime — the host writes C# instead. |
 | **Built-in devtools** | The inspector provides a live DOM tree, style editor, colour picker, animation browser and frame/layout/paint profiling. |
 | **Low steady-state cost** | Interned strings and dense integer ids; flat arenas instead of per-rule objects; intrusive hash buckets; reusable instruction and constant buffers; style, text and box caches keyed by revision and viewport. |
-| **Pay only for what you use** | Seven independent assemblies with a strictly layered dependency graph. `Ignite.Parser` has no references at all; a server-side CSS tool can stop after `Ignite.Data`. |
+| **Pay only for what you use** | Seven independent assemblies with a strictly layered dependency graph. `Donkeh.Parser` has no references at all; a server-side CSS tool can stop after `Donkeh.Data`. |
 | **Allocation-conscious hot paths** | `ReadOnlySpan<char>` tokenizer entry points, span-based selector matching, value-type tokens/instructions, pooled buffers, and no per-frame object graph. |
 | **Host-agnostic core** | Layout and paint produce data (`LayoutResult`, `InstructionBuffer`), not draw calls. The GL renderer is one consumer; tests consume the same instructions. |
 | **First-class documentation** | Every public/protected type and member carries XML documentation with summary, remarks, parameters, return values and exceptions. See [Documentation standard](#documentation-standard). |
@@ -99,62 +99,62 @@ renderer. `Ignite.Inspector` provides the devtools panel.
 ├── IgniteCSS.sln
 ├── README.md                        ← this file
 ├── .github/workflows/publish-nuget.yml
-└── Ignite/
+└── Donkeh/
     ├── Directory.Build.props        ← shared NuGet metadata
     ├── Parser/
-    │   ├── Source/                  ← Ignite.Parser
+    │   ├── Source/                  ← Donkeh.Parser
     │   ├── Tests/                   ← tokenizer + matcher + compiler tests
     │   └── Benchmark/               ← tokenizer throughput
     ├── Data/
-    │   ├── Source/                  ← Ignite.Data
+    │   ├── Source/                  ← Donkeh.Data
     │   └── Benchmarks/              ← Bootstrap 5 matcher benchmarks
     ├── DataEngine/
-    │   ├── Source/                  ← Ignite.DataEngine
+    │   ├── Source/                  ← Donkeh.DataEngine
     │   ├── Benchmarks/              ← parse/build/query benchmarks
     │   └── Debugger/                ← CssDebug CLI
     ├── LayoutLab/
-    │   ├── Source/                  ← Ignite.LayoutLab
+    │   ├── Source/                  ← Donkeh.LayoutLab
     │   ├── Tests/                   ← layout, style, paint, text tests
     │   └── Benchmarks/              ← frame/style/text/paint benchmarks
     ├── UILab/
-    │   ├── Source/                  ← Ignite.UILab
+    │   ├── Source/                  ← Donkeh.UILab
     │   └── Tests/                   ← builder and component tests
     ├── Windowing/
-    │   └── Source/                  ← Ignite.Windowing
+    │   └── Source/                  ← Donkeh.Windowing
     └── Inspector/
-        └── Source/                  ← Ignite.Inspector
+        └── Source/                  ← Donkeh.Inspector
 ```
 
 ### Dependency graph
 
 ```text
-Ignite.Parser            no references
-  ├─► Ignite.Data
-  │     └─► Ignite.DataEngine
-  ├─► Ignite.LayoutLab   ──► Ignite.Data
-  └─► Ignite.UILab       ──► Ignite.Data
+Donkeh.Parser            no references
+  ├─► Donkeh.Data
+  │     └─► Donkeh.DataEngine
+  ├─► Donkeh.LayoutLab   ──► Donkeh.Data
+  └─► Donkeh.UILab       ──► Donkeh.Data
 
-Ignite.Inspector         ──► Ignite.Data, Ignite.DataEngine, Ignite.Parser,
-                             Ignite.LayoutLab, Ignite.UILab
+Donkeh.Inspector         ──► Donkeh.Data, Donkeh.DataEngine, Donkeh.Parser,
+                             Donkeh.LayoutLab, Donkeh.UILab
 
-Ignite.Windowing         ──► Ignite.Data, Ignite.DataEngine, Ignite.Parser,
-                             Ignite.LayoutLab, Ignite.UILab, Ignite.Inspector
+Donkeh.Windowing         ──► Donkeh.Data, Donkeh.DataEngine, Donkeh.Parser,
+                             Donkeh.LayoutLab, Donkeh.UILab, Donkeh.Inspector
 ```
 
-A useful way to read this: a CSS-only tool needs `Ignite.Parser` +
-`Ignite.Data` + `Ignite.DataEngine`; a headless layout/layout-test harness adds
-`Ignite.LayoutLab`; a desktop application adds `Ignite.UILab` +
-`Ignite.Windowing`; `Ignite.Inspector` is optional on top.
+A useful way to read this: a CSS-only tool needs `Donkeh.Parser` +
+`Donkeh.Data` + `Donkeh.DataEngine`; a headless layout/layout-test harness adds
+`Donkeh.LayoutLab`; a desktop application adds `Donkeh.UILab` +
+`Donkeh.Windowing`; `Donkeh.Inspector` is optional on top.
 
 All projects target **`net10.0`**, enable nullable reference types and implicit
-usings, and are deterministic. `Ignite.LayoutLab` and `Ignite.Windowing` allow
+usings, and are deterministic. `Donkeh.LayoutLab` and `Donkeh.Windowing` allow
 unsafe blocks for performance-critical memory access.
 
 ---
 
 ## Modules
 
-### Ignite.Parser
+### Donkeh.Parser
 
 **Summary.** A dependency-free CSS tokenizer and an IL-compiled exact-keyword
 matcher. It turns CSS text into a compact `List<Token>` and is the only module
@@ -183,8 +183,8 @@ with no project references.
 **Usage**
 
 ```csharp
-using Ignite.Parser;
-using Ignite.Parser.Objects;
+using Donkeh.Parser;
+using Donkeh.Parser.Objects;
 
 List<Token> tokens = Tokenizer.Parse(css);
 
@@ -216,13 +216,13 @@ foreach (Token token in tokens)
 
 | Project | Class | Tests | Focus |
 | --- | --- | --- | --- |
-| `Ignite/Parser/Tests` | `TokenizerTests` | 7 | Declarations, property/function disambiguation, pseudo selectors, whitespace/comments, numbers/dimensions/percentages, span overload, exact-rule round-trip. |
+| `Donkeh/Parser/Tests` | `TokenizerTests` | 7 | Declarations, property/function disambiguation, pseudo selectors, whitespace/comments, numbers/dimensions/percentages, span overload, exact-rule round-trip. |
 
-**Benchmarks.** `Ignite/Parser/Benchmark` measures raw tokenizer throughput.
+**Benchmarks.** `Donkeh/Parser/Benchmark` measures raw tokenizer throughput.
 
 ---
 
-### Ignite.Data
+### Donkeh.Data
 
 **Summary.** The stylesheet data model and selector matcher. `DataTable` stores
 selectors, declarations and conditions once, as dense integer ids and flat
@@ -255,8 +255,8 @@ arenas, and matches a DOM-like node against them without allocating.
 **Usage**
 
 ```csharp
-using Ignite.Data;
-using Ignite.Data.Dom;
+using Donkeh.Data;
+using Donkeh.Data.Dom;
 
 var node = new IgniteSupportedDomNode { TagName = "div" };
 node.Id = "card";
@@ -294,15 +294,15 @@ source order and cascade layers, so the resolver does not sort.
 
 | Project | Class | Tests | Focus |
 | --- | --- | --- | --- |
-| `Ignite/Parser/Tests` | `MatchingTests` | 18 | Tag/id/class/universal selectors, specificity and source order, every attribute operator, quoted values and `i` flag, empty substring values, unsupported constructs, condition filtering, span overflow, combinators, backtracking, structural and `of-type` pseudos, `An+B`, pseudo specificity. |
-| `Ignite/LayoutLab/Tests` | `InteractionPseudoTests` | 5 | `:hover`, `:focus`, `:focus-visible`, `:focus-within`, `:checked`, `:disabled`, `:link`, text folding. |
+| `Donkeh/Parser/Tests` | `MatchingTests` | 18 | Tag/id/class/universal selectors, specificity and source order, every attribute operator, quoted values and `i` flag, empty substring values, unsupported constructs, condition filtering, span overflow, combinators, backtracking, structural and `of-type` pseudos, `An+B`, pseudo specificity. |
+| `Donkeh/LayoutLab/Tests` | `InteractionPseudoTests` | 5 | `:hover`, `:focus`, `:focus-visible`, `:focus-within`, `:checked`, `:disabled`, `:link`, text folding. |
 
-**Benchmarks.** `Ignite/Data/Benchmarks` runs the matcher against the real
+**Benchmarks.** `Donkeh/Data/Benchmarks` runs the matcher against the real
 Bootstrap 5.3.8 stylesheet and browser-shaped DOMs from 592 to 286,752 elements.
 
 ---
 
-### Ignite.DataEngine
+### Donkeh.DataEngine
 
 **Summary.** The CSS compiler. It streams a token list into a `DataTable`,
 handles at-rules and nesting, flattens selector lists, de-duplicates selectors
@@ -329,7 +329,7 @@ and conditions, and compiles condition preludes into predicates.
 **Usage**
 
 ```csharp
-using Ignite.DataEngine;
+using Donkeh.DataEngine;
 
 // Media queries enabled; @supports/@container are unsupported and fail closed.
 var engine = new DataEngine(MediaConditionCompiler.Instance);
@@ -359,16 +359,16 @@ engine.Build(Tokenizer.Parse(secondSheet), table);
 
 | Project | Class | Tests | Focus |
 | --- | --- | --- | --- |
-| `Ignite/Parser/Tests` | `DataEngineTests` | 11 | Descendant/compound distinction, selector de-duplication, whitespace around combinators, executor sharing, condition caching, compiler failure, condition gaps, lexical normalisation, malformed nesting, long keyframe names/stops. |
-| `Ignite/Parser/Tests` | `MediaConditionTests` | 6 | `min-width`, fractional Bootstrap breakpoints, combined features, media types/orientation, comma OR lists, unsupported features fail closed. |
+| `Donkeh/Parser/Tests` | `DataEngineTests` | 11 | Descendant/compound distinction, selector de-duplication, whitespace around combinators, executor sharing, condition caching, compiler failure, condition gaps, lexical normalisation, malformed nesting, long keyframe names/stops. |
+| `Donkeh/Parser/Tests` | `MediaConditionTests` | 6 | `min-width`, fractional Bootstrap breakpoints, combined features, media types/orientation, comma OR lists, unsupported features fail closed. |
 
-**Tooling.** `Ignite/DataEngine/Debugger` (`CssDebug`) prints selectors, rules
-and pipeline timings from a file, URL or stdin; `Ignite/DataEngine/Benchmarks`
+**Tooling.** `Donkeh/DataEngine/Debugger` (`CssDebug`) prints selectors, rules
+and pipeline timings from a file, URL or stdin; `Donkeh/DataEngine/Benchmarks`
 measures tokenize/build/query on generated 1M, 4M and 16M corpora.
 
 ---
 
-### Ignite.LayoutLab
+### Donkeh.LayoutLab
 
 **Summary.** The layout and paint engine. It resolves matched CSS into
 `ComputedStyle`, builds and positions a `LayoutBox` tree, runs CSS animations,
@@ -383,7 +383,7 @@ and emits a compact display list that any renderer can consume.
 - Box generation and layout: block and inline flow, margin collapsing, floats,
   flexbox, CSS grid, tables, absolute/fixed positioning, scroll containers.
 - Text shaping through an injectable `ITextMeasurer` (the deterministic
-  `SimpleTextMeasurer` by default; `Ignite.Windowing` supplies a TrueType one).
+  `SimpleTextMeasurer` by default; `Donkeh.Windowing` supplies a TrueType one).
 - CSS transitions/keyframe animations with per-node retained state.
 - Display-list building and optimisation (culling, merging, constant
   compaction).
@@ -410,7 +410,7 @@ and emits a compact display list that any renderer can consume.
 **Usage**
 
 ```csharp
-using Ignite.LayoutLab;
+using Donkeh.LayoutLab;
 
 var engine = new LayoutEngine(table);
 
@@ -466,11 +466,11 @@ foreach (Instruction instruction in result.Instructions.Span)
   what makes the warm-frame numbers possible.
 - `SimpleTextMeasurer` is deterministic and dependency-free, which makes tests
   and benchmarks reproducible. Production hosts normally use the TrueType
-  measurer from `Ignite.Windowing`.
+  measurer from `Donkeh.Windowing`.
 
 **Tests**
 
-`Ignite/LayoutLab/Tests` contains **959 tests** across 26 classes.
+`Donkeh/LayoutLab/Tests` contains **959 tests** across 26 classes.
 
 | Class | Tests | Covers |
 | --- | ---: | --- |
@@ -501,14 +501,14 @@ foreach (Instruction instruction in result.Instructions.Span)
 | `KeywordClassTests` | 4 | `CssPropertyIds` classification of keyword properties. |
 | `ScrollbarLayoutTests` | 4 | Track/thumb geometry, click and drag mapping. |
 
-**Benchmarks.** `Ignite/LayoutLab/Benchmarks` measures warm/cold frames, style
+**Benchmarks.** `Donkeh/LayoutLab/Benchmarks` measures warm/cold frames, style
 resolution, text wrapping, paint optimisation and parsing helpers across
 `Block`, `Flex`, `Grid`, `Paint` and `Mixed` scenes. Use `--profile` for a fast
 non-statistical report.
 
 ---
 
-### Ignite.UILab
+### Donkeh.UILab
 
 **Summary.** A small React-shaped view layer. It builds a virtual tree, mounts
 it into the same DOM abstraction the matcher uses, patches it in place, and
@@ -539,8 +539,8 @@ offers components, hooks, context and stylesheet attachment.
 **Usage**
 
 ```csharp
-using Ignite.UILab;
-using static Ignite.UILab._;
+using Donkeh.UILab;
+using static Donkeh.UILab._;
 
 var renderer = new Renderer();
 Node root = renderer.Mount(
@@ -602,12 +602,12 @@ Hooks are protected methods on `Component`: `State`, `StateWithUpdate`,
 
 | Project | Class | Tests | Focus |
 | --- | --- | --- | --- |
-| `Ignite/UILab/Tests` | `BuilderTests` | 6 | Attribute interning, nested children, props/events, empty attributes, text folding, mixed content, fragments. |
-| `Ignite/UILab/Tests` | `ComponentTests` | 7 | In-place state patching, keyed reorder reuse, effects updating state, context, no-op state, unchanged-child revisions, functional updates. |
+| `Donkeh/UILab/Tests` | `BuilderTests` | 6 | Attribute interning, nested children, props/events, empty attributes, text folding, mixed content, fragments. |
+| `Donkeh/UILab/Tests` | `ComponentTests` | 7 | In-place state patching, keyed reorder reuse, effects updating state, context, no-op state, unchanged-child revisions, functional updates. |
 
 ---
 
-### Ignite.Windowing
+### Donkeh.Windowing
 
 **Summary.** The native host. `IgniteWindow` owns a Silk.NET window, the CSS
 table, a reusable `LayoutEngine`, input routing, text editing, scrolling, form
@@ -642,9 +642,9 @@ controls, image/font caches, the OpenGL renderer and optional devtools.
 **Usage**
 
 ```csharp
-using Ignite.UILab;
-using Ignite.Windowing;
-using static Ignite.UILab._;
+using Donkeh.UILab;
+using Donkeh.Windowing;
+using static Donkeh.UILab._;
 
 var window = new IgniteWindow(WindowSettings.Default with
 {
@@ -702,13 +702,13 @@ state changes, so a typical frame uses a handful of draw calls.
 
 **Tests.** There are currently **no automated tests** for the window host or
 the GL renderer: both require a native window and GPU context. The layout and
-instruction layers they consume are covered by `Ignite/LayoutLab/Tests`.
+instruction layers they consume are covered by `Donkeh/LayoutLab/Tests`.
 Manual verification is done with host apps and the inspector. Contributions of
 headless GL harnesses (for example an offscreen framebuffer) would be welcome.
 
 ---
 
-### Ignite.Inspector
+### Donkeh.Inspector
 
 **Summary.** The devtools panel and its state model. It renders a live DOM tree,
 a style editor, colour picker, animation browser and performance view, either
@@ -762,11 +762,11 @@ a good target for future coverage.
 
 | Project | Output | Purpose |
 | --- | --- | --- |
-| `Ignite/DataEngine/Debugger` | `CssDebug` CLI | Dump selectors, rules, counts and timings from a local file, URL or stdin. Supports `--selectors`, `--rules`, `--summary`, `--json`, `--limit`, `--all`, `--no-color`. |
-| `Ignite/Parser/Benchmark` | BenchmarkDotNet | Tokenizer throughput. |
-| `Ignite/Data/Benchmarks` | BenchmarkDotNet | Real Bootstrap 5.3.8 parse and selector matching across 592–286,752 element DOMs. |
-| `Ignite/DataEngine/Benchmarks` | BenchmarkDotNet | Tokenize/build/query on generated 1M/4M/16M character corpora, plus repeated-selector interning. |
-| `Ignite/LayoutLab/Benchmarks` | BenchmarkDotNet | Frames, style resolution, text, paint optimisation and CSS value parsing. |
+| `Donkeh/DataEngine/Debugger` | `CssDebug` CLI | Dump selectors, rules, counts and timings from a local file, URL or stdin. Supports `--selectors`, `--rules`, `--summary`, `--json`, `--limit`, `--all`, `--no-color`. |
+| `Donkeh/Parser/Benchmark` | BenchmarkDotNet | Tokenizer throughput. |
+| `Donkeh/Data/Benchmarks` | BenchmarkDotNet | Real Bootstrap 5.3.8 parse and selector matching across 592–286,752 element DOMs. |
+| `Donkeh/DataEngine/Benchmarks` | BenchmarkDotNet | Tokenize/build/query on generated 1M/4M/16M character corpora, plus repeated-selector interning. |
+| `Donkeh/LayoutLab/Benchmarks` | BenchmarkDotNet | Frames, style resolution, text, paint optimisation and CSS value parsing. |
 
 ---
 
@@ -776,7 +776,7 @@ a good target for future coverage.
 
 - .NET SDK **10.0** (the projects target `net10.0`).
 - Windows, Linux or macOS for the non-UI engine modules.
-- A desktop with OpenGL 3.3 for `Ignite.Windowing`.
+- A desktop with OpenGL 3.3 for `Donkeh.Windowing`.
 
 ### Build and test
 
@@ -806,9 +806,9 @@ dotnet build IgniteCSS.sln -c Release -p:GenerateDocumentationFile=true
 The shortest complete program uses the window host:
 
 ```csharp
-using Ignite.UILab;
-using Ignite.Windowing;
-using static Ignite.UILab._;
+using Donkeh.UILab;
+using Donkeh.Windowing;
+using static Donkeh.UILab._;
 
 var window = new IgniteWindow(WindowSettings.Default with
 {
@@ -853,28 +853,28 @@ var result = engine.Layout(documentRoot, new LayoutOptions
 
 | Project | Framework | Tests | Modules covered |
 | --- | --- | ---: | --- |
-| `Ignite/Parser/Tests` | xUnit | 42 | `Ignite.Parser`, `Ignite.Data`, `Ignite.DataEngine` |
-| `Ignite/LayoutLab/Tests` | xUnit | 959 | `Ignite.LayoutLab` (plus `Ignite.Data` / `Ignite.DataEngine` integration) |
-| `Ignite/UILab/Tests` | xUnit | 13 | `Ignite.UILab` |
+| `Donkeh/Parser/Tests` | xUnit | 42 | `Donkeh.Parser`, `Donkeh.Data`, `Donkeh.DataEngine` |
+| `Donkeh/LayoutLab/Tests` | xUnit | 959 | `Donkeh.LayoutLab` (plus `Donkeh.Data` / `Donkeh.DataEngine` integration) |
+| `Donkeh/UILab/Tests` | xUnit | 13 | `Donkeh.UILab` |
 
 ### Module → test matrix
 
 | Module | Direct test classes | Integration coverage |
 | --- | --- | --- |
-| `Ignite.Parser` | `TokenizerTests` | Every `DataTable`/`DataEngine` test tokenizes real CSS. |
-| `Ignite.Data` | `MatchingTests`, `InteractionPseudoTests` | `StyleResolutionTests`, `LayoutCachingTests`, `BootstrapCompatibilityTests`. |
-| `Ignite.DataEngine` | `DataEngineTests`, `MediaConditionTests` | Every LayoutLab fixture builds its stylesheet through `DataEngine`. |
-| `Ignite.LayoutLab` | 26 classes, 959 tests | `UILab` tests assert layout-facing node revisions. |
-| `Ignite.UILab` | `BuilderTests`, `ComponentTests` | — |
-| `Ignite.Windowing` | none (requires GPU/window) | Consumes LayoutLab output; manual verification. |
-| `Ignite.Inspector` | none | Manual verification; `ColorPreview` is unit-testable. |
+| `Donkeh.Parser` | `TokenizerTests` | Every `DataTable`/`DataEngine` test tokenizes real CSS. |
+| `Donkeh.Data` | `MatchingTests`, `InteractionPseudoTests` | `StyleResolutionTests`, `LayoutCachingTests`, `BootstrapCompatibilityTests`. |
+| `Donkeh.DataEngine` | `DataEngineTests`, `MediaConditionTests` | Every LayoutLab fixture builds its stylesheet through `DataEngine`. |
+| `Donkeh.LayoutLab` | 26 classes, 959 tests | `UILab` tests assert layout-facing node revisions. |
+| `Donkeh.UILab` | `BuilderTests`, `ComponentTests` | — |
+| `Donkeh.Windowing` | none (requires GPU/window) | Consumes LayoutLab output; manual verification. |
+| `Donkeh.Inspector` | none | Manual verification; `ColorPreview` is unit-testable. |
 
 ### Running a subset
 
 ```powershell
-dotnet test Ignite/Parser/Tests
-dotnet test Ignite/LayoutLab/Tests --filter "FullyQualifiedName~FlexLayoutTests"
-dotnet test Ignite/LayoutLab/Tests --filter "FullyQualifiedName~StyleResolutionTests"
+dotnet test Donkeh/Parser/Tests
+dotnet test Donkeh/LayoutLab/Tests --filter "FullyQualifiedName~FlexLayoutTests"
+dotnet test Donkeh/LayoutLab/Tests --filter "FullyQualifiedName~StyleResolutionTests"
 ```
 
 ### Coverage
@@ -894,7 +894,7 @@ written under each test project's `TestResults/` directory.
 > Ryzen 5 8400F, 12 logical cores, Windows 10 22H2, .NET 10.0.10. Treat them as
 > order-of-magnitude guidance, not guarantees.
 
-### Parse and build (`Ignite/DataEngine/Benchmarks`)
+### Parse and build (`Donkeh/DataEngine/Benchmarks`)
 
 | Method | Corpus | Mean | Allocated |
 | --- | ---: | ---: | ---: |
@@ -908,14 +908,14 @@ written under each test project's `TestResults/` directory.
 Tokenization is allocation-free; the build cost is dominated by the flat arenas
 that make subsequent matching cheap and allocation-free.
 
-### Selector matching (`Ignite/Data/Benchmarks`)
+### Selector matching (`Donkeh/Data/Benchmarks`)
 
 - A hot `.btn-primary` (51 matching Bootstrap rules) matches in roughly
   **2.7 µs**, independent of page size.
 - A cold `<title>` rejects nearly the whole table in roughly **0.8 µs**.
 - Full-page passes stay near **1.3 µs per element** at 592 and 286,752 elements.
 
-### Layout (`Ignite/LayoutLab/Benchmarks --profile`)
+### Layout (`Donkeh/LayoutLab/Benchmarks --profile`)
 
 | Scene | Nodes | Cold | Warm | Instructions after optimise |
 | --- | ---: | ---: | ---: | ---: |
@@ -1036,17 +1036,17 @@ Current limitations worth knowing:
 
 ## Packaging and release
 
-`Ignite/Directory.Build.props` supplies shared NuGet metadata. Package ids are:
+`Donkeh/Directory.Build.props` supplies shared NuGet metadata. Package ids are:
 
 | Project | Package id |
 | --- | --- |
-| `Ignite.Parser` | `Ignite.Parser` |
-| `Data` | `Ignite.Data` |
-| `DataEngine` | `Ignite.DataEngine` |
-| `LayoutLab` | `Ignite.LayoutLab` |
-| `UILab` | `Ignite.UILab` |
-| `Windowing` | `Ignite.Windowing` |
-| `Inspector` | `Ignite.Inspector` |
+| `Donkeh.Parser` | `Donkeh.Parser` |
+| `Data` | `Donkeh.Data` |
+| `DataEngine` | `Donkeh.DataEngine` |
+| `LayoutLab` | `Donkeh.LayoutLab` |
+| `UILab` | `Donkeh.UILab` |
+| `Windowing` | `Donkeh.Windowing` |
+| `Inspector` | `Donkeh.Inspector` |
 
 Publishing is tag-driven (`.github/workflows/publish-nuget.yml`): push a tag
 such as `v1.2.3` or `v1.2.3-beta.1`; CI restores, builds, tests, packs
@@ -1065,14 +1065,14 @@ enabled by default.
    dotnet build IgniteCSS.sln -c Release
    dotnet test IgniteCSS.sln -c Release
    ```
-2. **Keep layering intact.** `Ignite.Parser` must stay dependency-free; do not
-   make `Ignite.Data` depend on layout or UI.
+2. **Keep layering intact.** `Donkeh.Parser` must stay dependency-free; do not
+   make `Donkeh.Data` depend on layout or UI.
 3. **Document new API.** Every public/protected member needs XML docs in the
    style described above. Verify with
    `dotnet build -p:GenerateDocumentationFile=true` and fix all `CS1570`,
    `CS1572`, `CS1573`, `CS1574` and `CS1734` warnings.
 4. **Add tests.** Pure value types and parsers belong in the matching test
-   project; layout behaviour belongs in `Ignite/LayoutLab/Tests`. Follow the
+   project; layout behaviour belongs in `Donkeh/LayoutLab/Tests`. Follow the
    existing `TestSupport` helpers rather than duplicating fixture code.
 5. **Measure hot paths.** If a change touches matching, style resolution, layout
    or paint, run the relevant benchmark in `Release` and include before/after

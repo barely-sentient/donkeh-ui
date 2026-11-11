@@ -1,0 +1,29 @@
+<Project>
+
+    <!--
+        Shared NuGet metadata for every project under Donkeh/.
+        All packages are published under the "Donkeh." prefix, e.g.
+        Data -> Donkeh.Data and DataEngine -> Donkeh.DataEngine.
+    -->
+    <PropertyGroup>
+        <PackageId>Donkeh.$(MSBuildProjectName.Replace('Donkeh.', ''))</PackageId>
+
+        <Authors>barely-sentient</Authors>
+        <Company>barely-sentient</Company>
+        <Description>$(PackageId) module for Donkeh, a CSS-driven UI engine for .NET.</Description>
+        <PackageTags>donkeh;css;ui;layout;rendering;dotnet</PackageTags>
+        <PackageProjectUrl>https://github.com/barely-sentient/ignite-ui</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/barely-sentient/ignite-ui.git</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+        <PublishRepositoryUrl>true</PublishRepositoryUrl>
+        <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+
+        <!-- Publish .snupkg symbol packages alongside the .nupkg files. -->
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+        <EmbedUntrackedSources>true</EmbedUntrackedSources>
+        <Deterministic>true</Deterministic>
+        <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+    </PropertyGroup>
+
+</Project>
