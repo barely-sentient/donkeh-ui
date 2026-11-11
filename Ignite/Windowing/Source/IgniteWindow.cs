@@ -275,7 +275,15 @@ public sealed partial class IgniteWindow : IDisposable
     /// <summary>Mounts a tree, optionally sets a stylesheet and enters the frame loop.</summary>
     public void Run(Node? root, string? stylesheet = null)
     {
-        if (stylesheet is not null)
+        // When no stylesheet is supplied explicitly, pick up every stylesheet
+        // declared through [Stylesheet(...)] and merge them into one sheet, so
+        // a developer only has to annotate the source files.
+        if (stylesheet is null)
+        {
+            stylesheet = Ignite.UILab.Stylesheet.Load();
+        }
+
+        if (!string.IsNullOrWhiteSpace(stylesheet))
         {
             SetStylesheet(stylesheet);
         }

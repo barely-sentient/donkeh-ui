@@ -4,13 +4,8 @@ using Ignite.UILab;
 using Ignite.Windowing;
 using static Ignite.UILab._;
 
-var bootstrapPath = Path.Combine(AppContext.BaseDirectory, "bootstrap.min.css");
-
-if (!File.Exists(bootstrapPath))
-{
-    Console.Error.WriteLine($"Bootstrap stylesheet not found at {bootstrapPath}.");
-    return 1;
-}
+[assembly: Ignite.Windowing.StylesheetAttribute("bootstrap.min.css")]
+[assembly: Ignite.Windowing.StylesheetAttribute("Demo.css")]
 
 var showDevTools = args.Contains("--devtools", StringComparer.OrdinalIgnoreCase);
 var dock = DevToolsDock.Bottom;
@@ -28,8 +23,6 @@ if (dockIndex >= 0 && dockIndex + 1 < args.Length)
 }
 
 var showPerformance = args.Contains("--perf", StringComparer.OrdinalIgnoreCase);
-
-var bootstrap = File.ReadAllText(bootstrapPath);
 
 var fpsIndex = Array.FindIndex(args, a => string.Equals(a, "--fps", StringComparison.OrdinalIgnoreCase));
 var targetFps = fpsIndex >= 0 && fpsIndex + 1 < args.Length
@@ -171,8 +164,7 @@ window.Run(
         new Props { Attributes = new Dictionary<string, string> { ["lang"] = "en" } },
         H("head", H("title", Text("Bootstrap + Ignite"))),
         H("body", new Props { ClassName = "bg-body-tertiary" },
-            C<BootstrapDemo>())),
-    bootstrap + "\n" + DemoCss.Value);
+            C<BootstrapDemo>())));
 
 static (Node Node, List<Node> Path)? FindByClass(Node? node, string className, List<Node> path)
 {
@@ -533,33 +525,4 @@ internal sealed class BootstrapDemo : Component
         return H("li", new Props { ClassName = active ? "page-item active" : "page-item" },
             H("a", new Props { ClassName = "page-link", Href = "#" }, Text(label)));
     }
-}
-
-internal static class DemoCss
-{
-    public const string Value = """
-        html, body {
-            height: 100%;
-        }
-
-        body {
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-
-        .app-main {
-            flex: 1;
-            min-height: 0;
-            overflow-y: auto;
-        }
-
-        .demo-progress-72 {
-            width: 72%;
-        }
-
-        .demo-progress-38 {
-            width: 38%;
-        }
-        """;
 }
