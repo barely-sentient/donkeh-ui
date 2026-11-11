@@ -229,7 +229,8 @@ public sealed class LayoutResult
         Dictionary<IgniteSupportedDomNode, LayoutBox> byNode,
         OptimisationStats stats,
         bool hasAnimations = false,
-        bool snapshot = true)
+        bool snapshot = true,
+        bool hasLayoutAnimations = false)
     {
         Root = root;
         Instructions = snapshot ? Snapshot(instructions) : instructions;
@@ -239,6 +240,7 @@ public sealed class LayoutResult
             : byNode;
         Stats = stats;
         HasAnimations = hasAnimations;
+        HasLayoutAnimations = hasLayoutAnimations;
     }
 
     private static InstructionBuffer Snapshot(InstructionBuffer source)
@@ -258,6 +260,9 @@ public sealed class LayoutResult
 
     /// <summary>True when at least one box had a running CSS animation on this frame.</summary>
     public bool HasAnimations { get; }
+
+    /// <summary>True when an active animation can change geometry.</summary>
+    public bool HasLayoutAnimations { get; }
 
     /// <summary>The node-to-box map, shared with the engine that built it.</summary>
     internal IReadOnlyDictionary<IgniteSupportedDomNode, LayoutBox> Boxes => _byNode;

@@ -135,7 +135,8 @@ public sealed partial class LayoutEngine
             _byNode,
             frame.Stats,
             _animations.HasRunningAnimations,
-            snapshot: _options.SnapshotResults);
+            snapshot: _options.SnapshotResults,
+            hasLayoutAnimations: _animations.HasLayoutAnimations);
     }
 
     /// <summary>
@@ -197,7 +198,97 @@ public sealed partial class LayoutEngine
             _byNode,
             frame.Stats,
             previous.HasAnimations,
-            snapshot: _options.SnapshotResults);
+            snapshot: _options.SnapshotResults,
+            hasLayoutAnimations: previous.HasLayoutAnimations);
+    }
+
+    /// <summary>
+    /// Re-evaluates paint-only animations and rebuilds the display list without
+    /// running geometry. Transform/opacity animations do not move boxes, so
+    /// this avoids a full layout allocation every animation frame.
+    /// </summary>
+    public LayoutResult RepaintAnimated(LayoutResult previous, LayoutOptions? options)
+    {
+        ArgumentNullException.ThrowIfNull(previous);
+
+        _options = options ?? new LayoutOptions();
+        _maxDepth = Math.Max(1, _options.MaxLayoutDepth);
+        _baseContext = _options.CreateRootLengthContext();
+        _rendererContext = _options.CreateRendererContext();
+        _contextVersion = _usesViewportHeight || _table.HasHeightMediaQueries
+            ? _rendererContext.Version
+            : _rendererContext.ConditionVersion;
+        _styleSignature = ComputeStyleSignature();
+        _measurer = _options.TextMeasurer ?? SimpleTextMeasurer.Instance;
+        _resolver = new StyleResolver(_table, _valueCache, _options);
+
+        _instructions.Clear();
+        _constants.Clear();
+        _animations.BeginFrame();
+
+        if (!ReferenceEquals(previous.Boxes, _byNode))
+        {
+            _byNode.Clear();
+
+            foreach (var pair in previous.Boxes)
+            {
+                _byNode[pair.Key] = pair.Value;
+            }
+        }
+
+        _root = previous.Root;
+
+        if (_root is not null)
+        {
+            RefreshAnimatedStyles(_root, null);
+        }
+
+        _animations.Prune();
+
+        var viewport = new Rect(0, 0, MathF.Max(0, _options.ViewportWidth), MathF.Max(0, _options.ViewportHeight));
+        _layoutViewport = viewport;
+
+        if (_root is not null)
+        {
+            BuildDisplayList(_root, viewport);
+        }
+
+        var frame = _options.Optimise
+            ? Optimiser.Run(_instructions, _constants, viewport, _options, _optimisedInstructions)
+            : new OptimisationResult(_instructions, _constants, OptimisationStats.Empty);
+
+        return new LayoutResult(
+            _root,
+            frame.Instructions,
+            frame.Constants,
+            _byNode,
+            frame.Stats,
+            _animations.HasRunningAnimations,
+            snapshot: _options.SnapshotResults,
+            hasLayoutAnimations: _animations.HasLayoutAnimations);
+    }
+
+    private void RefreshAnimatedStyles(LayoutBox? box, ComputedStyle? parentStyle)
+    {
+        if (box is null)
+        {
+            return;
+        }
+
+        var baseStyle = _styleCache.TryGetValue(box.Node, out var entry)
+            ? entry.Style
+            : box.Style;
+        var style = _animations.Apply(
+            box.Node,
+            baseStyle,
+            parentStyle,
+            _options.AnimationTimeSeconds);
+        box.Style = style;
+
+        for (var i = 0; i < box.Children.Count; i++)
+        {
+            RefreshAnimatedStyles(box.Children[i], style);
+        }
     }
 
     /// <summary>Re-clamps scroll offsets without touching box geometry.</summary>

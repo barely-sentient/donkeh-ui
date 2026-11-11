@@ -65,9 +65,20 @@ public sealed partial class IgniteWindow : IDisposable
 
     private bool _needsLayout = true;
     private bool _needsPaint;
+    private bool _needsAnimatedPaint;
     private bool _needsDevToolsPaint;
     private readonly InstructionBuffer _devToolsOverlay = new(16);
     private readonly ConstantPool _devToolsOverlayConstants = new();
+    private readonly InstructionBuffer _overlay = new(64);
+    private readonly ConstantPool _overlayConstants = new();
+    private readonly LayoutOptions _appOptions = new();
+    private readonly LayoutOptions _devToolsOptions = new();
+    private readonly Func<IgniteSupportedDomNode, string?> _textProvider;
+    private readonly Func<IgniteSupportedDomNode, string, uint?> _textColorProvider;
+    private readonly Func<IgniteSupportedDomNode, Size?> _intrinsicSizeProvider;
+    private readonly Func<LayoutBox, ImageSpec?> _imageProvider;
+    private readonly Action<LayoutBox, InstructionBuffer, ConstantPool> _appPainter;
+    private readonly Action<LayoutBox, InstructionBuffer, ConstantPool> _devToolsPainter;
     private bool _disposed;
     private bool _gpuDisposed;
     private int _lastUiVersion = -1;
@@ -116,6 +127,12 @@ public sealed partial class IgniteWindow : IDisposable
         _measurer = new TrueTypeTextMeasurer(_fonts);
         _devTools.Dock = settings.DevToolsPosition;
         _devTools.StylesChanged += OnDevToolsStylesChanged;
+        _textProvider = GetDisplayText;
+        _textColorProvider = GetTextColorOverride;
+        _intrinsicSizeProvider = GetIntrinsicSize;
+        _imageProvider = GetImage;
+        _appPainter = PaintElementContent;
+        _devToolsPainter = PaintDevToolsContent;
         RebuildStyles();
     }
 
@@ -431,9 +448,26 @@ public sealed partial class IgniteWindow : IDisposable
             _lastDpi = dpi;
             _needsLayout = false;
             _needsPaint = false;
+            _needsAnimatedPaint = false;
             _needsDevToolsPaint = false;
             _cachedLayoutBoxCount = CountLayoutBoxes(_layoutResult.Root);
             _cachedNodeCount = CountNodes(_appRoot);
+        }
+        else if (_needsAnimatedPaint && _layoutResult is not null)
+        {
+            // Transform/opacity animations only change paint state. Refresh
+            // their styles and the display list without rebuilding geometry.
+            var start = Stopwatch.GetTimestamp();
+            var options = CreateLayoutOptions(
+                _lastAppWidth,
+                _lastAppHeight,
+                _lastDpi,
+                _context,
+                isApp: true);
+            _layoutResult = _layoutEngine!.RepaintAnimated(_layoutResult, options);
+            LastLayoutMilliseconds = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+            _needsAnimatedPaint = false;
+            _needsPaint = false;
         }
         else if (_needsPaint && _layoutResult is not null)
         {
@@ -507,7 +541,15 @@ public sealed partial class IgniteWindow : IDisposable
             if (_animationTimeSeconds - _lastAnimationLayoutTime >= AnimationLayoutInterval)
             {
                 _lastAnimationLayoutTime = _animationTimeSeconds;
-                _needsLayout = true;
+
+                if (_layoutResult.HasLayoutAnimations)
+                {
+                    _needsLayout = true;
+                }
+                else
+                {
+                    _needsAnimatedPaint = true;
+                }
             }
         }
         else
@@ -874,31 +916,29 @@ public sealed partial class IgniteWindow : IDisposable
                 && _devTools.Visible
                 && _devTools.Dock == DevToolsDock.Window);
 
-        var options = new LayoutOptions
-        {
-            ViewportWidth = width,
-            ViewportHeight = height,
-            DevicePixelRatio = dpi,
-            Context = context,
-            TextMeasurer = _measurer,
-            TextProvider = GetDisplayText,
-            TextColorProvider = GetTextColorOverride,
-            IntrinsicSizeProvider = GetIntrinsicSize,
-            ImageProvider = GetImage,
-            CustomPainter = isApp ? PaintElementContent : PaintDevToolsContent,
-            Optimise = true,
-            CullOffscreen = true,
-            MergeDraws = true,
-            CompactConstants = false,
-            EnableCaching = true,
-            ReuseLayoutBoxes = reuseBoxes,
-            SnapshotResults = !reuseBoxes,
-            // The inspector renders live, constantly changing numbers. Caching
-            // those one-off strings would retain thousands of text layouts.
-            CacheTextLayouts = isApp,
-            AnimationsEnabled = true,
-            AnimationTimeSeconds = _animationTimeSeconds
-        };
+        var options = isApp ? _appOptions : _devToolsOptions;
+        options.ViewportWidth = width;
+        options.ViewportHeight = height;
+        options.DevicePixelRatio = dpi;
+        options.Context = context;
+        options.TextMeasurer = _measurer;
+        options.TextProvider = _textProvider;
+        options.TextColorProvider = _textColorProvider;
+        options.IntrinsicSizeProvider = _intrinsicSizeProvider;
+        options.ImageProvider = _imageProvider;
+        options.CustomPainter = isApp ? _appPainter : _devToolsPainter;
+        options.Optimise = true;
+        options.CullOffscreen = true;
+        options.MergeDraws = true;
+        options.CompactConstants = false;
+        options.EnableCaching = true;
+        options.ReuseLayoutBoxes = reuseBoxes;
+        options.SnapshotResults = !reuseBoxes;
+        // The inspector renders live, constantly changing numbers. Caching
+        // those one-off strings would retain thousands of text layouts.
+        options.CacheTextLayouts = isApp;
+        options.AnimationsEnabled = true;
+        options.AnimationTimeSeconds = _animationTimeSeconds;
 
         // The app and the inspector must not share a RendererContext: each
         // layout writes its viewport into the context, and a changed context
@@ -1241,8 +1281,10 @@ public sealed partial class IgniteWindow : IDisposable
             return false;
         }
 
-        overlay = new InstructionBuffer(64);
-        constants = new ConstantPool();
+        overlay = _overlay;
+        constants = _overlayConstants;
+        overlay.Clear();
+        constants.Clear();
 
         BuildSelectOverlay(overlay, constants);
 

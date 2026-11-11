@@ -129,6 +129,35 @@ public class AnimationTests
     }
 
     [Fact]
+    public void PaintOnlyAnimationsRefreshWithoutGeometry()
+    {
+        const string css = """
+            @keyframes spin { to { transform: rotate(360deg); } }
+            .spin { width: 20px; height: 20px; animation: 1s linear infinite spin; }
+            """;
+
+        var table = TestSupport.Build(css);
+        var root = TestSupport.Node("div", "root", null, "spin");
+        var options = TestSupport.Options();
+        var engine = new LayoutEngine(table);
+
+        options.AnimationTimeSeconds = 0;
+        var first = engine.Layout(root, options);
+        var firstBox = TestSupport.Box(first, root);
+        var firstTransform = firstBox.Style.Transform;
+        var firstRect = firstBox.BorderBox;
+
+        options.AnimationTimeSeconds = 0.5;
+        var second = engine.RepaintAnimated(first, options);
+        var secondBox = TestSupport.Box(second, root);
+
+        Assert.True(second.HasAnimations);
+        Assert.False(second.HasLayoutAnimations);
+        Assert.Equal(firstRect, secondBox.BorderBox);
+        Assert.NotEqual(firstTransform, secondBox.Style.Transform);
+    }
+
+    [Fact]
     public void UnmountedAnimatedNodesReleaseTheirAnimationState()
     {
         const string css = """

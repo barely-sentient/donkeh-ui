@@ -29,12 +29,20 @@ internal sealed class AnimationRuntime
     /// <summary>True when at least one animation was active in the current frame.</summary>
     public bool HasRunningAnimations { get; private set; }
 
+    /// <summary>
+    /// True when an active animation changes geometry. Transform and opacity
+    /// animations are paint-only and can refresh the display list without a
+    /// full layout pass.
+    /// </summary>
+    public bool HasLayoutAnimations { get; private set; }
+
     /// <summary>Number of nodes with retained animation state.</summary>
     public int StateCount => _states.Count;
 
     public void BeginFrame()
     {
         HasRunningAnimations = false;
+        HasLayoutAnimations = false;
         _frame++;
     }
 
@@ -566,7 +574,27 @@ internal sealed class AnimationRuntime
         return null;
     }
 
-    private static void ApplyAnimated(
+    private static bool IsPaintOnly(CssProperty property) => property switch
+    {
+        CssProperty.Opacity
+            or CssProperty.Transform
+            or CssProperty.Background
+            or CssProperty.BackgroundColor
+            or CssProperty.BorderColor
+            or CssProperty.BorderTopColor
+            or CssProperty.BorderRightColor
+            or CssProperty.BorderBottomColor
+            or CssProperty.BorderLeftColor
+            or CssProperty.OutlineColor
+            or CssProperty.BoxShadow
+            or CssProperty.Filter
+            or CssProperty.BackdropFilter
+            or CssProperty.ClipPath
+            or CssProperty.Mask => true,
+        _ => false
+    };
+
+    private void ApplyAnimated(
         ComputedStyle style,
         ComputedStyle? parent,
         CssProperty property,
@@ -574,6 +602,11 @@ internal sealed class AnimationRuntime
         string to,
         float t)
     {
+        if (!IsPaintOnly(property))
+        {
+            HasLayoutAnimations = true;
+        }
+
         from = Clean(from);
         to = Clean(to);
 
