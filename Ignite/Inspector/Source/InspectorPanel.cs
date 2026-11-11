@@ -1540,6 +1540,53 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
         };
     }
 
+    /// <summary>
+    /// Expands every logical ancestor of <paramref name="target"/> so its row is
+    /// visible in the DOM tree.
+    /// </summary>
+    public static void ExpandPathTo(DevToolsState state, Node target)
+    {
+        if (state.AppRoot is not null)
+        {
+            ExpandPathTo(
+                state.AppRoot,
+                target,
+                state.Expanded,
+                new HashSet<Node>(ReferenceEqualityComparer.Instance));
+        }
+    }
+
+    private static bool ExpandPathTo(
+        Node node,
+        Node target,
+        HashSet<Node> expanded,
+        HashSet<Node> visited)
+    {
+        if (ReferenceEquals(node, target))
+        {
+            expanded.Add(node);
+            return true;
+        }
+
+        if (!visited.Add(node))
+        {
+            return false;
+        }
+
+        var children = LogicalChildren(node);
+
+        for (var i = 0; i < children.Length; i++)
+        {
+            if (ExpandPathTo(children[i], target, expanded, visited))
+            {
+                expanded.Add(node);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static int CountNodes(Node? node)
     {
         if (node is null)

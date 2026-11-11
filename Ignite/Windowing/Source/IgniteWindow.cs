@@ -3129,11 +3129,7 @@ public sealed class IgniteWindow : IDisposable
         _devTools.Selected = element;
         _devTools.Hovered = null;
         _devTools.InspectMode = false;
-
-        for (var node = (Node?)element; node is not null; node = node.Parent as Node)
-        {
-            _devTools.Expanded.Add(node);
-        }
+        InspectorPanel.ExpandPathTo(_devTools, element);
 
         _devTools.Refresh();
         _lastDevToolsVersion = -1;
