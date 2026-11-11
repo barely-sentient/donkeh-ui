@@ -630,7 +630,7 @@ controls, image/font caches, the OpenGL renderer and optional devtools.
 | Type | Purpose |
 | --- | --- |
 | `IgniteWindow` | Window, stylesheet, layout, input, paint and devtools host. |
-| `WindowSettings` | Width, height, title, VSync/frame cap, clear colour, MSAA samples, resizability, fullscreen/frameless and devtools dock. |
+| `WindowSettings` | Width, height, title, VSync/frame cap, clear colour, MSAA samples, resizability, fullscreen/frameless/maximized, top-most, transparency, min/max size, icon, on-close callback and devtools dock. |
 | `GLRenderer` | Batched OpenGL consumer of `InstructionBuffer` + `ConstantPool`. |
 | `FontManager` | System TrueType discovery, face/atlas caches, metrics. |
 | `TrueTypeTextMeasurer` | `ITextMeasurer` adapter over `FontManager`. |

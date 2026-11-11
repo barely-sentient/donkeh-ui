@@ -1,4 +1,5 @@
 using Donkeh.Inspector;
+using Silk.NET.Maths;
 
 namespace Donkeh.Windowing
 {
@@ -38,6 +39,7 @@ namespace Donkeh.Windowing
             Height = 800;
             Frameless = false;
             FullScreen = false;
+            Maximized = false;
             Title = "Ignite";
             VSync = false;
             TargetFramesPerSecond = 144;
@@ -46,6 +48,8 @@ namespace Donkeh.Windowing
             Resizable = true;
             EnableDevTools = true;
             DevToolsPosition = DevToolsDock.Bottom;
+            TopMost = false;
+            Transparent = false;
         }
 
         /// <summary>
@@ -88,6 +92,14 @@ namespace Donkeh.Windowing
         /// overridden by the display size.
         /// </remarks>
         public bool FullScreen;
+
+        /// <summary>
+        /// Open the window maximized (but not full-screen) on creation.
+        /// </summary>
+        /// <remarks>
+        /// Ignored when <see cref="FullScreen"/> is set, which takes precedence.
+        /// </remarks>
+        public bool Maximized;
 
         /// <summary>The window title.</summary>
         /// <remarks>
@@ -169,6 +181,148 @@ namespace Donkeh.Windowing
         public DevToolsDock DevToolsPosition;
 
         /// <summary>
+        /// Minimum client width in CSS pixels. Zero or negative means no minimum.
+        /// </summary>
+        /// <remarks>
+        /// Enforced both at creation and during live resize. The native window is
+        /// nudged back into range whenever the user (or the platform) tries to
+        /// shrink below this size.
+        /// </remarks>
+        public int MinWidth;
+
+        /// <summary>
+        /// Minimum client height in CSS pixels. Zero or negative means no minimum.
+        /// </summary>
+        /// <remarks>
+        /// See <see cref="MinWidth"/> for the enforcement behaviour.
+        /// </remarks>
+        public int MinHeight;
+
+        /// <summary>
+        /// Maximum client width in CSS pixels. Zero or negative means no maximum.
+        /// </summary>
+        /// <remarks>
+        /// Enforced both at creation and during live resize.
+        /// </remarks>
+        public int MaxWidth;
+
+        /// <summary>
+        /// Maximum client height in CSS pixels. Zero or negative means no maximum.
+        /// </summary>
+        /// <remarks>
+        /// See <see cref="MaxWidth"/> for the enforcement behaviour.
+        /// </remarks>
+        public int MaxHeight;
+
+        /// <summary>
+        /// Minimum client size as a single vector. Setting this updates
+        /// <see cref="MinWidth"/> and <see cref="MinHeight"/>; reading it
+        /// combines them.
+        /// </summary>
+        /// <remarks>
+        /// A convenience alias over <see cref="MinWidth"/> and
+        /// <see cref="MinHeight"/> for hosts that prefer vector-style sizing.
+        /// Non-positive components are treated as "unset".
+        /// </remarks>
+        public Vector2D<int> MinSize
+        {
+            get => new(MinWidth, MinHeight);
+            set { MinWidth = value.X; MinHeight = value.Y; }
+        }
+
+        /// <summary>
+        /// Maximum client size as a single vector. Setting this updates
+        /// <see cref="MaxWidth"/> and <see cref="MaxHeight"/>; reading it
+        /// combines them.
+        /// </summary>
+        /// <remarks>
+        /// A convenience alias over <see cref="MaxWidth"/> and
+        /// <see cref="MaxHeight"/> for hosts that prefer vector-style sizing.
+        /// Non-positive components are treated as "unset".
+        /// </remarks>
+        public Vector2D<int> MaxSize
+        {
+            get => new(MaxWidth, MaxHeight);
+            set { MaxWidth = value.X; MaxHeight = value.Y; }
+        }
+
+        /// <summary>Alias for <see cref="MinSize"/>.</summary>
+        public Vector2D<int> MinimumSize
+        {
+            get => MinSize;
+            set => MinSize = value;
+        }
+
+        /// <summary>Alias for <see cref="MaxSize"/>.</summary>
+        public Vector2D<int> MaximumSize
+        {
+            get => MaxSize;
+            set => MaxSize = value;
+        }
+
+        /// <summary>
+        /// Path to an image file used as the window icon. <see langword="null"/>
+        /// or whitespace leaves the platform default icon in place.
+        /// </summary>
+        /// <remarks>
+        /// The file is decoded with the same image pipeline as other assets, so
+        /// PNG, JPEG, BMP, TGA and GIF are supported. Decoding failures are
+        /// ignored and the default icon is kept. Applied when the native window
+        /// is created.
+        /// </remarks>
+        public string? Icon;
+
+        /// <summary>
+        /// Alias for <see cref="Icon"/> for hosts that name the option
+        /// <c>IconPath</c>.
+        /// </summary>
+        public string? IconPath
+        {
+            get => Icon;
+            set => Icon = value;
+        }
+
+        /// <summary>
+        /// Callback invoked when the native window is about to close, while the
+        /// OpenGL context and input devices have already been released.
+        /// </summary>
+        /// <remarks>
+        /// Use it for non-GPU cleanup. It runs on the frame thread; throwing is
+        /// swallowed so a faulty handler cannot stall teardown. This is the
+        /// settings-level equivalent of <see cref="IgniteWindow.Closed"/>.
+        /// </remarks>
+        public Action<IgniteWindow>? OnClose;
+
+        /// <summary>Alias for <see cref="OnClose"/>.</summary>
+        public Action<IgniteWindow>? OnClosed
+        {
+            get => OnClose;
+            set => OnClose = value;
+        }
+
+        /// <summary>Alias for <see cref="OnClose"/>.</summary>
+        public Action<IgniteWindow>? Closing
+        {
+            get => OnClose;
+            set => OnClose = value;
+        }
+
+        /// <summary>
+        /// Keep the window above all other windows.
+        /// </summary>
+        public bool TopMost;
+
+        /// <summary>
+        /// Make the window's framebuffer transparent, allowing the desktop to
+        /// show through unpainted regions.
+        /// </summary>
+        /// <remarks>
+        /// Support varies by platform and compositor; the request is forwarded
+        /// to the native window options.
+        /// </remarks>
+        public bool Transparent;
+
+        /// <summary>
         /// Gets a new settings value containing the desktop defaults.
         /// </summary>
         /// <value>
@@ -192,7 +346,10 @@ namespace Donkeh.Windowing
             Samples = 4,
             Resizable = true,
             EnableDevTools = true,
-            DevToolsPosition = DevToolsDock.Bottom
+            DevToolsPosition = DevToolsDock.Bottom,
+            TopMost = false,
+            Transparent = false,
+            Maximized = false
         };
     }
 }

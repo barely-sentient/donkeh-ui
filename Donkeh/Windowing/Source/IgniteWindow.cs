@@ -6,8 +6,10 @@ using Donkeh.Inspector;
 using Donkeh.LayoutLab;
 using Donkeh.Parser;
 using Donkeh.UILab;
+using Silk.NET.Core;
 using Silk.NET.Input;
 using Silk.NET.Maths;
+using StbImageSharp;
 using Silk.NET.OpenGL;
 using Silk.NET.Windowing;
 
@@ -63,6 +65,9 @@ public sealed partial class IgniteWindow : IDisposable
 
     /// <summary>The creation options this instance was built with, copied by value.</summary>
     private readonly WindowSettings _settings;
+
+    /// <summary>Reentrancy guard for min/max size clamping in <see cref="OnResize"/>.</summary>
+    private bool _clampingSize;
 
     /// <summary>Author stylesheets in cascade order; the last one wins on ties.</summary>
     private readonly List<string> _stylesheets = [];
@@ -857,6 +862,17 @@ public sealed partial class IgniteWindow : IDisposable
 
         var width = _settings.Width > 0 ? _settings.Width : 1280;
         var height = _settings.Height > 0 ? _settings.Height : 800;
+
+        // Honour the configured minimum/maximum size, if any.
+        if (_settings.MinWidth > 0) width = Math.Max(width, _settings.MinWidth);
+        if (_settings.MinHeight > 0) height = Math.Max(height, _settings.MinHeight);
+        if (_settings.MaxWidth > 0) width = Math.Min(width, _settings.MaxWidth);
+        if (_settings.MaxHeight > 0) height = Math.Min(height, _settings.MaxHeight);
+
+        var windowState = WindowState.Normal;
+        if (_settings.FullScreen) windowState = WindowState.Fullscreen;
+        else if (_settings.Maximized) windowState = WindowState.Maximized;
+
         var options = WindowOptions.Default with
         {
             Size = new Vector2D<int>(width, height),
@@ -869,7 +885,9 @@ public sealed partial class IgniteWindow : IDisposable
             WindowBorder = _settings.Frameless
                 ? WindowBorder.Hidden
                 : _settings.Resizable ? WindowBorder.Resizable : WindowBorder.Fixed,
-            WindowState = _settings.FullScreen ? WindowState.Fullscreen : WindowState.Normal,
+            WindowState = windowState,
+            TopMost = _settings.TopMost,
+            TransparentFramebuffer = _settings.Transparent,
             API = new GraphicsAPI(
                 ContextAPI.OpenGL,
                 ContextProfile.Core,
@@ -884,6 +902,7 @@ public sealed partial class IgniteWindow : IDisposable
         _window.Render += OnRender;
         _window.Resize += OnResize;
         _window.Closing += OnClosing;
+        ApplyWindowIcon();
         _window.Run();
 
         // Silk owns the native window until the loop exits; tearing it down from
@@ -926,7 +945,57 @@ public sealed partial class IgniteWindow : IDisposable
     /// </remarks>
     private void OnResize(Vector2D<int> size)
     {
+        // Enforce configured minimum/maximum client size by nudging the native
+        // window back into range. The guard prevents the synthetic resize that
+        // follows from re-entering this handler.
+        if (!_clampingSize && _window is not null)
+        {
+            var clampedX = size.X;
+            var clampedY = size.Y;
+            if (_settings.MinWidth > 0) clampedX = Math.Max(clampedX, _settings.MinWidth);
+            if (_settings.MinHeight > 0) clampedY = Math.Max(clampedY, _settings.MinHeight);
+            if (_settings.MaxWidth > 0) clampedX = Math.Min(clampedX, _settings.MaxWidth);
+            if (_settings.MaxHeight > 0) clampedY = Math.Min(clampedY, _settings.MaxHeight);
+
+            if (clampedX != size.X || clampedY != size.Y)
+            {
+                _clampingSize = true;
+                try { _window.Size = new Vector2D<int>(clampedX, clampedY); }
+                finally { _clampingSize = false; }
+            }
+        }
+
         _needsLayout = true;
+    }
+
+    /// <summary>
+    /// Decodes <see cref="WindowSettings.Icon"/> and applies it to the native window,
+    /// if a path was supplied. Failures are ignored so a bad icon never prevents
+    /// the window from opening.
+    /// </summary>
+    private void ApplyWindowIcon()
+    {
+        if (string.IsNullOrWhiteSpace(_settings.Icon) || _window is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var data = File.ReadAllBytes(_settings.Icon!);
+            var image = StbImageSharp.ImageResult.FromMemory(data, StbImageSharp.ColorComponents.RedGreenBlueAlpha);
+            if (image.Width <= 0 || image.Height <= 0 || image.Data is null)
+            {
+                return;
+            }
+
+            var raw = new Silk.NET.Core.RawImage(image.Width, image.Height, new Memory<byte>(image.Data));
+            _window.SetWindowIcon(new[] { raw });
+        }
+        catch
+        {
+            // Ignore icon loading failures.
+        }
     }
 
     /// <summary>
@@ -5741,6 +5810,8 @@ public sealed partial class IgniteWindow : IDisposable
         _input?.Dispose();
         _input = null;
         DisposeGpu();
+        try { _settings.OnClose?.Invoke(this); }
+        catch { }
         Closed?.Invoke(this);
     }
 
