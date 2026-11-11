@@ -35,6 +35,16 @@ public static class InspectorStyles
             border: 1px solid #3c4043;
         }
 
+        #ignite-devtools.dt-standalone {
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            width: auto;
+            height: auto;
+            border-width: 0;
+        }
+
         #ignite-devtools.dt-dock-bottom {
             left: 0;
             right: 0;

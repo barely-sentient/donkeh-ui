@@ -87,7 +87,9 @@ internal sealed class DevToolsWindowHost
             };
 
             var props = new InspectorPanelProps { State = state, Standalone = true };
-            window.Run(_.C<InspectorPanel, InspectorPanelProps>(props));
+            window.Run(
+                _.C<InspectorPanel, InspectorPanelProps>(props),
+                InspectorStyles.Css + InspectorStyles.HeightClasses);
         }
         catch
         {

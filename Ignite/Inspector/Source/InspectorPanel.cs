@@ -90,7 +90,11 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
         var hidden = !state.Visible || (state.Dock == DevToolsDock.Window && !Props.Standalone);
         var className = "dt-root";
 
-        if (state.Dock == DevToolsDock.Right)
+        if (Props.Standalone)
+        {
+            className += " dt-standalone";
+        }
+        else if (state.Dock == DevToolsDock.Right)
         {
             className += " dt-dock-right";
         }
