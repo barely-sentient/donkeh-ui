@@ -1,14 +1,20 @@
-# Ignite CSS Engine
+# Ignite
 
-Ignite is a **CSS-driven UI engine for .NET 10**. It parses real stylesheets,
-interns them into a flat table, matches selectors against a DOM-like tree,
-computes the cascade, lays out boxes (block, inline, flex, grid, table and
-floats), and renders a compact display list with OpenGL 3.3 through Silk.NET.
+Ignite is a **declarative-first UI framework for .NET 10**, It is not a CSS
+engine. It ships one. Around that engine it provides a React-like development
+flow (components, hooks, context and keyed reconciliation), built-in devtools
+and performance profiling, and an "as close to a browser as possible" experience
+with C# in place of JavaScript.
 
-The engine is split into small, single-responsibility assemblies so a host can
-use only the layers it needs: a CSS parser with no dependencies, a selector
-matcher, a stylesheet compiler, a layout/paint engine, a React-shaped view
-layer, a native window host, and a devtools inspector.
+The bundled CSS engine parses real stylesheets, interns them into a flat table,
+matches selectors against a DOM-like tree, computes the cascade, lays out boxes
+(block, inline, flex, grid, table and floats), and renders a compact display
+list with OpenGL 3.3 through Silk.NET.
+
+Ignite is split into small, single-responsibility assemblies so a host can use
+only the layers it needs: the dependency-free CSS parser, selector matcher and
+stylesheet compiler, a layout/paint engine, a declarative view layer, a native
+window host, and a devtools inspector.
 
 ```text
  CSS text ──► Ignite.Parser.Tokenizer ──► tokens
@@ -74,7 +80,10 @@ renderer. `Ignite.Inspector` provides the devtools panel.
 
 | Goal | How the codebase achieves it |
 | --- | --- |
-| **Real CSS, not a lookalike** | A full tokenizer, selector matching with specificity and source order, cascade layers, custom properties, `!important`, shorthand expansion, media/container/supports conditions, keyframes and per-property animations. |
+| **Declarative first** | UI is a function of state: components, hooks, context, keyed children and in-place reconciliation (`Ignite.UILab`) sit on top of the CSS engine rather than the other way around. |
+| **A real CSS engine** | A full tokenizer, selector matching with specificity and source order, cascade layers, custom properties, `!important`, shorthand expansion, media/container/supports conditions, keyframes and per-property animations. |
+| **Browser-like, C#-native** | Real CSS, form controls, text editing and `:hover`/`:active`/`:focus` state without a JavaScript runtime — the host writes C# instead. |
+| **Built-in devtools** | The inspector provides a live DOM tree, style editor, colour picker, animation browser and frame/layout/paint profiling. |
 | **Low steady-state cost** | Interned strings and dense integer ids; flat arenas instead of per-rule objects; intrusive hash buckets; reusable instruction and constant buffers; style, text and box caches keyed by revision and viewport. |
 | **Pay only for what you use** | Seven independent assemblies with a strictly layered dependency graph. `Ignite.Parser` has no references at all; a server-side CSS tool can stop after `Ignite.Data`. |
 | **Allocation-conscious hot paths** | `ReadOnlySpan<char>` tokenizer entry points, span-based selector matching, value-type tokens/instructions, pooled buffers, and no per-frame object graph. |
@@ -731,8 +740,8 @@ inside an `IgniteWindow` or in a standalone window.
 window.SharedDevToolsState = new DevToolsState();
 ```
 
-The inspector is a consumer of public engine APIs; it does not change layout or
-matching semantics.
+The inspector is a consumer of public framework APIs; it does not change layout
+or matching semantics.
 
 **Remarks**
 
@@ -766,7 +775,7 @@ a good target for future coverage.
 ### Requirements
 
 - .NET SDK **10.0** (the projects target `net10.0`).
-- Windows, Linux or macOS for the pure engine projects.
+- Windows, Linux or macOS for the non-UI engine modules.
 - A desktop with OpenGL 3.3 for `Ignite.Windowing`.
 
 ### Build and test
@@ -952,7 +961,7 @@ warnings (malformed tags, unknown `cref`s or mismatched `<param>` names).
 
 ## Performance model
 
-The engine's steady-state behaviour is built around a few invariants:
+Ignite's steady-state rendering behaviour is built around a few invariants:
 
 1. **Everything is an id.** Strings are interned once; selectors, rules,
    conditions and attributes compare integers.
@@ -1073,6 +1082,6 @@ enabled by default.
 
 ---
 
-*Ignite is a CSS engine for .NET, not a WebView. It aims to make a useful,
-predictable subset of CSS feel native: parse it, match it, lay it out, paint it,
-and stay fast while doing so.*
+*Ignite is a declarative-first UI framework for .NET, not a WebView. It brings
+the parts of the browser that matter ease of use, components and hooks, form
+controls, devtools and profiling*
