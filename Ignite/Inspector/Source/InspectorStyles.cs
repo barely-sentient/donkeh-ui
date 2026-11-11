@@ -184,6 +184,17 @@ public static class InspectorStyles
             min-height: 0;
         }
 
+        #ignite-devtools .dt-body-perf {
+            display: block;
+            overflow: auto;
+        }
+
+        #ignite-devtools .dt-body-perf .dt-perf {
+            height: auto;
+            min-height: 0;
+            overflow: visible;
+        }
+
         #ignite-devtools .dt-elements {
             display: flex;
             flex-direction: row;
@@ -584,10 +595,10 @@ public static class InspectorStyles
             display: flex;
             flex-direction: column;
             flex: 1;
+            min-height: 0;
             overflow: auto;
             padding: 10px;
             width: 100%;
-            height: 100%;
         }
 
         #ignite-devtools .dt-cards {
@@ -595,6 +606,7 @@ public static class InspectorStyles
             flex-direction: row;
             gap: 8px;
             margin-bottom: 10px;
+            flex-shrink: 0;
         }
 
         #ignite-devtools .dt-card {
@@ -634,6 +646,7 @@ public static class InspectorStyles
             gap: 1px;
             height: 124px;
             min-height: 124px;
+            flex-shrink: 0;
             background-color: #292a2d;
             border-width: 1px;
             border-style: solid;

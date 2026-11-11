@@ -115,12 +115,15 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
         var picker = state.Tab == DevToolsTab.Elements && state.ColorPickerRuleIndex >= 0
             ? BuildColorPicker(state)
             : null;
+        var bodyClass = state.Tab == DevToolsTab.Performance
+            ? "dt-body dt-body-perf"
+            : "dt-body";
 
         return _.H(
             "div",
             new Props { Id = "ignite-devtools", ClassName = className },
             BuildToolbar(state),
-            _.H("div", new Props { ClassName = "dt-body" }, BuildBody(state)),
+            _.H("div", new Props { ClassName = bodyClass }, BuildBody(state)),
             BuildStatusBar(state),
             picker);
     }
