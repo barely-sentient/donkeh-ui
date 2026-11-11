@@ -1,4 +1,6 @@
-﻿namespace Ignite.Windowing
+﻿using Ignite.Inspector;
+
+namespace Ignite.Windowing
 {
     /// <summary>Creation options for an <see cref="IgniteWindow"/>.</summary>
     public struct WindowSettings
@@ -15,6 +17,8 @@
             ClearColor = 0xFFFFFFFF;
             Samples = 4;
             Resizable = true;
+            EnableDevTools = true;
+            DevToolsPosition = DevToolsDock.Bottom;
         }
 
         /// <summary>The logical window width in CSS pixels. Zero uses the default.</summary>
@@ -44,6 +48,14 @@
         /// <summary>Whether the user can resize the window.</summary>
         public bool Resizable;
 
+        /// <summary>
+        /// Enables the built-in inspector. Press Ctrl+Shift+I or F12 to toggle it.
+        /// </summary>
+        public bool EnableDevTools;
+
+        /// <summary>Where the inspector opens when it is first shown.</summary>
+        public DevToolsDock DevToolsPosition;
+
         /// <summary>Builds the defaults used when a field is left at its zero value.</summary>
         public static WindowSettings Default => new()
         {
@@ -53,7 +65,9 @@
             VSync = true,
             ClearColor = 0xFFFFFFFF,
             Samples = 4,
-            Resizable = true
+            Resizable = true,
+            EnableDevTools = true,
+            DevToolsPosition = DevToolsDock.Bottom
         };
     }
 }

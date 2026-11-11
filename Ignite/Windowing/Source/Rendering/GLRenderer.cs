@@ -126,6 +126,40 @@ public sealed unsafe class GLRenderer : IDisposable
         ExecuteRuns();
     }
 
+    /// <summary>
+    /// Consumes the app result, host overlays and a second independent root
+    /// (the inspector) in one batch, so the second root always paints last.
+    /// </summary>
+    public void Render(
+        LayoutResult result,
+        ReadOnlySpan<Instruction> overlay,
+        ConstantPool overlayConstants,
+        LayoutResult? second)
+    {
+        Process(result.Opcodes, result.Constants);
+        Process(overlay, overlayConstants);
+
+        if (second is not null)
+        {
+            Process(second.Opcodes, second.Constants);
+        }
+
+        ExecuteRuns();
+    }
+
+    /// <summary>Consumes the app result followed by a second independent root.</summary>
+    public void Render(LayoutResult result, LayoutResult? second)
+    {
+        Process(result.Opcodes, result.Constants);
+
+        if (second is not null)
+        {
+            Process(second.Opcodes, second.Constants);
+        }
+
+        ExecuteRuns();
+    }
+
     private void Process(ReadOnlySpan<Instruction> opcodes, ConstantPool constants)
     {
         for (var i = 0; i < opcodes.Length; i++)

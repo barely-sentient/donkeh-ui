@@ -1,0 +1,906 @@
+using System.Globalization;
+using Ignite.Data;
+using Ignite.Data.Dom;
+using Ignite.LayoutLab;
+using Ignite.Parser;
+using Ignite.Parser.Objects;
+using Ignite.UILab;
+
+namespace Ignite.Inspector;
+
+/// <summary>Props for <see cref="InspectorPanel"/>.</summary>
+public sealed class InspectorPanelProps
+{
+    public DevToolsState State { get; init; } = null!;
+
+    /// <summary>True when the panel owns its own native window.</summary>
+    public bool Standalone { get; init; }
+}
+
+/// <summary>
+/// The Chrome-style devtools panel. It is a normal Ignite component and reads
+/// the live mounted DOM through <see cref="DevToolsState.AppRoot"/>.
+/// </summary>
+public sealed class InspectorPanel : Component<InspectorPanelProps>
+{
+    private Action<int>? _setTick;
+    private int _tick;
+    private long _lastVersion = -1;
+
+    /// <summary>Called by the host frame loop to pull fresh data into the panel.</summary>
+    public void Tick()
+    {
+        if (!Mounted)
+        {
+            return;
+        }
+
+        var version = Props.State.Version;
+
+        if (version == _lastVersion)
+        {
+            return;
+        }
+
+        _lastVersion = version;
+        _setTick?.Invoke(++_tick);
+    }
+
+    public override Node Render()
+    {
+        var state = Props.State;
+        var (tick, setTick) = State(0);
+        _tick = tick;
+        _setTick = setTick;
+
+        if (_lastVersion < 0)
+        {
+            _lastVersion = state.Version;
+        }
+
+        if (state.AppRoot is not null && state.Expanded.Count == 0)
+        {
+            // Open the tree down to the first branching point, like DevTools
+            // does with <html> and <body>. Components are followed through
+            // their rendered output so their real HTML is visible immediately.
+            Node? node = state.AppRoot;
+
+            for (var depth = 0; depth < 8 && node is not null; depth++)
+            {
+                state.Expanded.Add(node);
+
+                var children = LogicalChildren(node);
+
+                // Fragments and providers are transparent in the tree, so look
+                // through a lone one instead of stopping the chain.
+                if (children.Length == 1 && children[0] is FragmentNode or ProviderNode)
+                {
+                    children = LogicalChildren(children[0]);
+                }
+
+                if (children.Length != 1)
+                {
+                    break;
+                }
+
+                node = children[0] is ElementNode or ComponentNode ? children[0] : null;
+            }
+        }
+
+        var hidden = !state.Visible || (state.Dock == DevToolsDock.Window && !Props.Standalone);
+        var className = "dt-root";
+
+        if (state.Dock == DevToolsDock.Right)
+        {
+            className += " dt-dock-right";
+        }
+        else
+        {
+            className += " dt-dock-bottom";
+        }
+
+        if (hidden)
+        {
+            className += " dt-hidden";
+        }
+
+        return _.H(
+            "div",
+            new Props { Id = "ignite-devtools", ClassName = className },
+            BuildToolbar(state),
+            _.H("div", new Props { ClassName = "dt-body" }, BuildBody(state)),
+            BuildStatusBar(state));
+    }
+
+    private void RequestUpdate()
+    {
+        Props.State.Refresh();
+        Tick();
+    }
+
+    // ---------------------------------------------------------------- toolbar
+
+    private Node BuildToolbar(DevToolsState state)
+    {
+        return _.H(
+            "div",
+            new Props { ClassName = "dt-toolbar" },
+            _.H(
+                "div",
+                new Props { ClassName = "dt-tabs" },
+                BuildTab(state, DevToolsTab.Elements, "Elements"),
+                BuildTab(state, DevToolsTab.Performance, "Performance")),
+            _.H("div", new Props { ClassName = "dt-spacer" }),
+            BuildDockButton(state, DevToolsDock.Bottom),
+            BuildDockButton(state, DevToolsDock.Right),
+            BuildDockButton(state, DevToolsDock.Window),
+            _.H(
+                "div",
+                new Props
+                {
+                    ClassName = "dt-icon-btn",
+                    OnClick = () =>
+                    {
+                        state.Visible = false;
+                        RequestUpdate();
+                    }
+                },
+                _.H("span", new Props { ClassName = "dt-close" }, _.Text("\u00D7"))));
+    }
+
+    private Node BuildTab(DevToolsState state, DevToolsTab tab, string label)
+    {
+        var active = state.Tab == tab;
+        var className = active ? "dt-tab dt-tab-active" : "dt-tab";
+
+        return _.H(
+            "div",
+            new Props
+            {
+                ClassName = className,
+                OnClick = () =>
+                {
+                    state.Tab = tab;
+                    RequestUpdate();
+                }
+            },
+            // A flex container only lays out element children, so the label
+            // needs its own span rather than being merged into the tab's text.
+            _.H("span", new Props { ClassName = "dt-tab-label" }, _.Text(label)));
+    }
+
+    private Node BuildDockButton(DevToolsState state, DevToolsDock dock)
+    {
+        Node glyph;
+
+        if (dock == DevToolsDock.Bottom)
+        {
+            glyph = _.H(
+                "div",
+                new Props { ClassName = "dt-glyph" },
+                _.H("div", new Props { ClassName = "dt-glyph-bar-bottom" }));
+        }
+        else if (dock == DevToolsDock.Right)
+        {
+            glyph = _.H(
+                "div",
+                new Props { ClassName = "dt-glyph" },
+                _.H("div", new Props { ClassName = "dt-glyph-bar-right" }));
+        }
+        else
+        {
+            glyph = _.H(
+                "div",
+                new Props { ClassName = "dt-glyph-window" },
+                _.H("div", new Props { ClassName = "dt-glyph-window-bar" }));
+        }
+
+        return _.H(
+            "div",
+            new Props
+            {
+                ClassName = "dt-icon-btn",
+                OnClick = () =>
+                {
+                    state.Dock = dock;
+                    state.Visible = true;
+                    RequestUpdate();
+                }
+            },
+            glyph);
+    }
+
+    // ------------------------------------------------------------------- body
+
+    private Node BuildBody(DevToolsState state)
+    {
+        if (state.Tab == DevToolsTab.Performance)
+        {
+            return BuildPerformance(state);
+        }
+
+        return _.H(
+            "div",
+            new Props { ClassName = "dt-elements" },
+            _.H("div", new Props { ClassName = "dt-dom-pane" }, BuildDomTree(state)),
+            _.H("div", new Props { ClassName = "dt-styles-pane" }, BuildStyles(state)));
+    }
+
+    // --------------------------------------------------------------- dom tree
+
+    private Node BuildDomTree(DevToolsState state)
+    {
+        if (state.AppRoot is null)
+        {
+            return _.H("div", new Props { ClassName = "dt-dim" }, _.Text("No mounted tree."));
+        }
+
+        var rows = new List<Node?>();
+        AddLogicalRows(state, [state.AppRoot], rows);
+        return _.F(rows.ToArray());
+    }
+
+    private void AddLogicalRows(DevToolsState state, IReadOnlyList<Node> nodes, List<Node?> output)
+    {
+        for (var i = 0; i < nodes.Count; i++)
+        {
+            var node = nodes[i];
+
+            switch (node)
+            {
+                case FragmentNode fragment:
+                    AddLogicalRows(state, fragment.VdomChildren, output);
+                    break;
+
+                case ProviderNode provider:
+                    AddLogicalRows(state, provider.ProviderChildren, output);
+                    break;
+
+                default:
+                    output.Add(BuildNodeRow(state, node));
+                    break;
+            }
+        }
+    }
+
+    private Node? BuildNodeRow(DevToolsState state, Node node)
+    {
+        switch (node)
+        {
+            case TextNode text:
+                return BuildTextRow(state, text);
+
+            case ComponentNode component:
+                return BuildComponentRow(state, component);
+
+            case ElementNode element:
+                return BuildElementRow(state, element);
+
+            case FragmentNode fragment:
+            {
+                var rows = new List<Node?>();
+                AddLogicalRows(state, fragment.VdomChildren, rows);
+                return _.F(rows.ToArray());
+            }
+
+            case ProviderNode provider:
+            {
+                var rows = new List<Node?>();
+                AddLogicalRows(state, provider.ProviderChildren, rows);
+                return _.F(rows.ToArray());
+            }
+
+            default:
+                return null;
+        }
+    }
+
+    private Node BuildTextRow(DevToolsState state, TextNode text)
+    {
+        var value = text.Text;
+
+        if (value.Length > 80)
+        {
+            value = value[..80] + "\u2026";
+        }
+
+        return BuildRow(
+            state,
+            text,
+            hasChildren: false,
+            expanded: false,
+            _.H("span", new Props { ClassName = "dt-text-node" }, _.Text("\"" + value + "\"")));
+    }
+
+    private Node BuildComponentRow(DevToolsState state, ComponentNode component)
+    {
+        var name = component.ComponentType.Name;
+        var children = new List<Node?>();
+
+        if (component.OutputVdom is { } output)
+        {
+            AddLogicalRows(state, [output], children);
+        }
+
+        var expanded = state.Expanded.Contains(component);
+
+        var label = _.F(
+            _.H("span", new Props { ClassName = "dt-component" }, _.Text("<" + name + ">")),
+            _.H("span", new Props { ClassName = "dt-component-badge" }, _.Text("component")));
+
+        var row = BuildRow(state, component, children.Count > 0, expanded, label);
+
+        if (!expanded || children.Count == 0)
+        {
+            return row;
+        }
+
+        var block = new List<Node?>
+        {
+            row,
+            _.H("div", new Props { ClassName = "dt-tree-children" }, _.F(children.ToArray()))
+        };
+
+        return _.F(block.ToArray());
+    }
+
+    private Node BuildElementRow(DevToolsState state, ElementNode element)
+    {
+        var children = new List<Node?>();
+        var logical = element.VdomChildren.Length > 0
+            ? element.VdomChildren
+            : element.Children.OfType<Node>().ToArray();
+
+        AddLogicalRows(state, logical, children);
+
+        var expanded = state.Expanded.Contains(element);
+        var tag = element.Tag;
+
+        var label = new List<Node?>
+        {
+            _.H("span", new Props { ClassName = "dt-dim" }, _.Text("<")),
+            _.H("span", new Props { ClassName = "dt-tag" }, _.Text(tag))
+        };
+
+        if (element.Id is { } id)
+        {
+            var value = id.StartsWith('#') ? id[1..] : id;
+            label.Add(_.H("span", new Props { ClassName = "dt-attr" }, _.Text(" id=")));
+            label.Add(_.H("span", new Props { ClassName = "dt-val" }, _.Text("\"" + value + "\"")));
+        }
+
+        var classes = element.ClassName;
+
+        if (classes.Length > 0)
+        {
+            label.Add(_.H("span", new Props { ClassName = "dt-attr" }, _.Text(" class=")));
+            label.Add(_.H("span", new Props { ClassName = "dt-val" }, _.Text("\"" + string.Join(' ', classes) + "\"")));
+        }
+
+        var attributeNames = element.InternedAttributeNames;
+        var shown = 0;
+
+        foreach (var nameId in attributeNames)
+        {
+            if (shown++ >= 8 || !element.TryGetAttribute(nameId, out var valueId))
+            {
+                continue;
+            }
+
+            var name = InternTable.GetString(nameId) ?? string.Empty;
+            var value = InternTable.GetString(valueId) ?? string.Empty;
+
+            label.Add(_.H("span", new Props { ClassName = "dt-attr" }, _.Text(" " + name)));
+            label.Add(_.H("span", new Props { ClassName = "dt-dim" }, _.Text("=")));
+            label.Add(_.H("span", new Props { ClassName = "dt-val" }, _.Text("\"" + value + "\"")));
+        }
+
+        label.Add(_.H("span", new Props { ClassName = "dt-dim" }, _.Text(">")));
+
+        var row = BuildRow(state, element, children.Count > 0, expanded, _.F(label.ToArray()));
+
+        if (!expanded || children.Count == 0)
+        {
+            return row;
+        }
+
+        var block = new List<Node?>
+        {
+            row,
+            _.H("div", new Props { ClassName = "dt-tree-children" }, _.F(children.ToArray())),
+            _.H(
+                "div",
+                new Props { ClassName = "dt-tree-row" },
+                _.H("span", new Props { ClassName = "dt-caret dt-caret-empty" }, _.Text(" ")),
+                _.H("span", new Props { ClassName = "dt-dim" }, _.Text("</")),
+                _.H("span", new Props { ClassName = "dt-tag" }, _.Text(tag)),
+                _.H("span", new Props { ClassName = "dt-dim" }, _.Text(">")))
+        };
+
+        return _.F(block.ToArray());
+    }
+
+    private Node BuildRow(DevToolsState state, Node node, bool hasChildren, bool expanded, Node content)
+    {
+        var selected = ReferenceEquals(state.Selected, node);
+        var className = selected ? "dt-tree-row dt-tree-selected" : "dt-tree-row";
+        var caret = hasChildren
+            ? (expanded ? "\u25BE" : "\u25B8")
+            : " ";
+
+        return _.H(
+            "div",
+            new Props
+            {
+                ClassName = className,
+                OnClick = () =>
+                {
+                    state.Selected = node;
+                    RequestUpdate();
+                }
+            },
+            _.H(
+                "span",
+                new Props
+                {
+                    ClassName = hasChildren ? "dt-caret" : "dt-caret dt-caret-empty",
+                    OnClick = hasChildren
+                        ? () =>
+                        {
+                            if (!state.Expanded.Add(node))
+                            {
+                                state.Expanded.Remove(node);
+                            }
+
+                            RequestUpdate();
+                        }
+                        : null
+                },
+                _.Text(caret)),
+            content);
+    }
+
+    // ----------------------------------------------------------------- styles
+
+    private Node BuildStyles(DevToolsState state)
+    {
+        var selected = state.Selected;
+
+        if (selected is null)
+        {
+            return _.H(
+                "div",
+                new Props { ClassName = "dt-dim" },
+                _.Text("Select an element to inspect its styles."));
+        }
+
+        if (selected is ComponentNode component)
+        {
+            var rows = new List<Node?>
+            {
+                _.H(
+                    "div",
+                    new Props { ClassName = "dt-selected-head" },
+                    _.Text("<" + component.ComponentType.Name + ">")),
+                _.H("div", new Props { ClassName = "dt-section-title" }, _.Text("COMPONENT")),
+                BuildComputedRow("type", component.ComponentType.FullName ?? component.ComponentType.Name),
+                BuildComputedRow("renders", component.OutputVdom?.GetType().Name ?? "(not rendered)")
+            };
+
+            return _.F(rows.ToArray());
+        }
+
+        if (selected is not ElementNode element)
+        {
+            return _.H("div", new Props { ClassName = "dt-dim" }, _.Text("This node has no styles."));
+        }
+
+        var output = new List<Node?>
+        {
+            _.H(
+                "div",
+                new Props { ClassName = "dt-selected-head" },
+                _.Text(ElementLabel(element))),
+            _.H("div", new Props { ClassName = "dt-section-title" }, _.Text("STYLES"))
+        };
+
+        var table = state.Table;
+
+        if (table is null)
+        {
+            output.Add(_.H("div", new Props { ClassName = "dt-dim" }, _.Text("No stylesheet.")));
+        }
+        else
+        {
+            var matches = table.MatchRules(element, state.Context);
+            var groups = new List<RuleGroup>();
+            var index = new Dictionary<(string Origin, int Selector), RuleGroup>();
+
+            for (var i = 0; i < matches.Length; i++)
+            {
+                var match = matches[i];
+                var origin = OriginFor(state, match.Order);
+
+                if (!index.TryGetValue((origin, match.SelectorId), out var group))
+                {
+                    group = new RuleGroup(origin, SelectorText(table, match.SelectorId));
+                    index[(origin, match.SelectorId)] = group;
+                    groups.Add(group);
+                }
+
+                group.Declarations.Add((
+                    InternTable.GetString(match.Rule.PropertyId) ?? "?",
+                    InternTable.GetString(match.Rule.ValueId) ?? "?"));
+            }
+
+            groups.Reverse();
+
+            if (groups.Count == 0)
+            {
+                output.Add(_.H("div", new Props { ClassName = "dt-dim" }, _.Text("No matching rules.")));
+            }
+
+            foreach (var group in groups)
+            {
+                var declarations = new List<Node?>();
+
+                foreach (var (property, value) in group.Declarations)
+                {
+                    declarations.Add(
+                        _.H(
+                            "div",
+                            new Props { ClassName = "dt-decl" },
+                            _.H("span", new Props { ClassName = "dt-prop" }, _.Text(property)),
+                            _.H("span", new Props { ClassName = "dt-colon" }, _.Text(": ")),
+                            _.H("span", new Props { ClassName = "dt-value" }, _.Text(value)),
+                            _.H("span", new Props { ClassName = "dt-dim" }, _.Text(";"))));
+                }
+
+                output.Add(
+                    _.H(
+                        "div",
+                        new Props { ClassName = "dt-rule" },
+                        _.H(
+                            "div",
+                            new Props { ClassName = "dt-rule-head" },
+                            _.H("span", new Props { ClassName = "dt-selector" }, _.Text(group.Selector)),
+                            _.H("span", new Props { ClassName = "dt-origin" }, _.Text(group.Origin))),
+                        _.F(declarations.ToArray())));
+            }
+        }
+
+        output.Add(_.H("div", new Props { ClassName = "dt-section-title" }, _.Text("COMPUTED")));
+
+        if (state.Layout is not null && state.Layout.TryGetBox(element, out var box))
+        {
+            var style = box.Style;
+
+            output.Add(BuildComputedRow("display", Kebab(style.Display.ToString())));
+            output.Add(BuildComputedRow("position", Kebab(style.Position.ToString())));
+            output.Add(BuildComputedRow("width", Px(box.BorderBox.Width)));
+            output.Add(BuildComputedRow("height", Px(box.BorderBox.Height)));
+            output.Add(BuildComputedRow("margin", ThicknessValue(box.Margin)));
+            output.Add(BuildComputedRow("padding", ThicknessValue(box.Padding)));
+            output.Add(BuildComputedRow("border", ThicknessValue(box.Border)));
+            output.Add(BuildComputedRow("color", FormatColor(style.Color)));
+            output.Add(BuildComputedRow("background-color", FormatColor(style.BackgroundColor)));
+            output.Add(BuildComputedRow("font-family", style.FontFamily));
+            output.Add(BuildComputedRow("font-size", style.FontSize.ToString()));
+            output.Add(BuildComputedRow("font-weight", style.FontWeight.ToString(CultureInfo.InvariantCulture)));
+            output.Add(BuildComputedRow("line-height", style.LineHeight.ToString()));
+            output.Add(BuildComputedRow("flex-direction", Kebab(style.FlexDirection.ToString())));
+            output.Add(BuildComputedRow("justify-content", Kebab(style.JustifyContent.ToString())));
+            output.Add(BuildComputedRow("align-items", Kebab(style.AlignItems.ToString())));
+            output.Add(BuildComputedRow("row-gap", style.RowGap.ToString()));
+            output.Add(BuildComputedRow("column-gap", style.ColumnGap.ToString()));
+            output.Add(BuildComputedRow("overflow-x", Kebab(style.OverflowX.ToString())));
+            output.Add(BuildComputedRow("overflow-y", Kebab(style.OverflowY.ToString())));
+            output.Add(BuildComputedRow("opacity", style.Opacity.ToString("0.##", CultureInfo.InvariantCulture)));
+            output.Add(BuildComputedRow("z-index", style.HasZIndex ? style.ZIndex.ToString(CultureInfo.InvariantCulture) : "auto"));
+            output.Add(BuildComputedRow("box", $"{Px(box.BorderBox.X)} {Px(box.BorderBox.Y)} {Px(box.BorderBox.Width)} {Px(box.BorderBox.Height)}"));
+        }
+        else
+        {
+            output.Add(_.H("div", new Props { ClassName = "dt-dim" }, _.Text("No layout box (display:none or not laid out).")));
+        }
+
+        return _.F(output.ToArray());
+    }
+
+    private static Node BuildComputedRow(string name, string value)
+    {
+        return _.H(
+            "div",
+            new Props { ClassName = "dt-computed-row" },
+            _.H("span", new Props { ClassName = "dt-computed-name" }, _.Text(name)),
+            _.H("span", new Props { ClassName = "dt-computed-value" }, _.Text(value)));
+    }
+
+    private static string ElementLabel(ElementNode element)
+    {
+        var label = "<" + element.Tag;
+
+        if (element.Id is { } id)
+        {
+            label += "#" + (id.StartsWith('#') ? id[1..] : id);
+        }
+
+        foreach (var className in element.ClassName)
+        {
+            label += "." + className;
+        }
+
+        return label + ">";
+    }
+
+    private static string OriginFor(DevToolsState state, int ruleIndex)
+    {
+        for (var i = 0; i < state.StyleSheets.Count; i++)
+        {
+            if (state.StyleSheets[i].Contains(ruleIndex))
+            {
+                return state.StyleSheets[i].Name;
+            }
+        }
+
+        return "unknown";
+    }
+
+    private static string SelectorText(DataTable table, int selectorId)
+    {
+        var tokens = table.GetSelectorSpan(selectorId);
+        var builder = new System.Text.StringBuilder();
+
+        for (var i = 0; i < tokens.Length; i++)
+        {
+            if (i > 0 && DataTable.HasGap(tokens, i))
+            {
+                builder.Append(' ');
+            }
+
+            builder.Append(InternTable.GetString(tokens[i].InternedId));
+        }
+
+        return builder.ToString();
+    }
+
+    private static string Px(float value) =>
+        value.ToString("0.##", CultureInfo.InvariantCulture) + "px";
+
+    private static string ThicknessValue(Thickness value)
+    {
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"{value.Top:0.##}px {value.Right:0.##}px {value.Bottom:0.##}px {value.Left:0.##}px");
+    }
+
+    private static string FormatColor(uint color)
+    {
+        if (color == ComputedStyle.CurrentColor)
+        {
+            return "currentColor";
+        }
+
+        var alpha = CssColor.Alpha(color);
+
+        if (alpha == 255)
+        {
+            return $"#{CssColor.Red(color):X2}{CssColor.Green(color):X2}{CssColor.Blue(color):X2}";
+        }
+
+        return $"rgba({CssColor.Red(color)}, {CssColor.Green(color)}, {CssColor.Blue(color)}, {alpha / 255f:0.##})";
+    }
+
+    private static string Kebab(string value)
+    {
+        var builder = new System.Text.StringBuilder(value.Length + 4);
+
+        for (var i = 0; i < value.Length; i++)
+        {
+            var c = value[i];
+
+            if (char.IsUpper(c))
+            {
+                if (i > 0)
+                {
+                    builder.Append('-');
+                }
+
+                builder.Append(char.ToLowerInvariant(c));
+            }
+            else
+            {
+                builder.Append(c);
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    private sealed class RuleGroup(string origin, string selector)
+    {
+        public string Origin { get; } = origin;
+        public string Selector { get; } = selector;
+        public List<(string Property, string Value)> Declarations { get; } = [];
+    }
+
+    // ------------------------------------------------------------ performance
+
+    private Node BuildPerformance(DevToolsState state)
+    {
+        var stats = state.Performance;
+        var output = new List<Node?>
+        {
+            _.H(
+                "div",
+                new Props { ClassName = "dt-cards" },
+                BuildCard("FPS", Fps(stats.FrameMilliseconds), $"frame {stats.FrameMilliseconds:0.##} ms"),
+                BuildCard("CPU", $"{stats.CpuPercent:0.#}%", $"{stats.ThreadCount} threads"),
+                BuildCard("Managed", Bytes(stats.ManagedMemory), $"working set {Bytes(stats.WorkingSet)}"),
+                BuildCard("GC", $"{stats.Gen0}/{stats.Gen1}/{stats.Gen2}", "gen0 / gen1 / gen2")),
+            _.H(
+                "div",
+                new Props { ClassName = "dt-cards" },
+                BuildCard("Layout", $"{stats.LayoutMilliseconds:0.##} ms", $"{stats.LayoutBoxCount} boxes"),
+                BuildCard("Render", $"{stats.RenderMilliseconds:0.##} ms", $"{stats.InstructionCount} ops"),
+                BuildCard("Update", $"{stats.UpdateMilliseconds:0.##} ms", $"{stats.NodeCount} nodes"),
+                BuildCard("Frames", stats.FrameCount.ToString(CultureInfo.InvariantCulture), $"avg {stats.AverageFrameMilliseconds:0.##} ms")),
+            BuildLegend(),
+            _.H("div", new Props { ClassName = "dt-section-title" }, _.Text("FRAME TIME (ms)")),
+            BuildGraph(stats.FrameHistory, "dt-bar", 33f),
+            _.H("div", new Props { ClassName = "dt-section-title" }, _.Text("LAYOUT TIME (ms)")),
+            BuildGraph(stats.LayoutHistory, "dt-bar dt-bar-layout", 16f),
+            _.H("div", new Props { ClassName = "dt-section-title" }, _.Text("RENDER TIME (ms)")),
+            BuildGraph(stats.RenderHistory, "dt-bar dt-bar-render", 16f)
+        };
+
+        return _.H("div", new Props { ClassName = "dt-perf" }, _.F(output.ToArray()));
+    }
+
+    private static Node BuildCard(string label, string value, string sub)
+    {
+        return _.H(
+            "div",
+            new Props { ClassName = "dt-card" },
+            _.H("span", new Props { ClassName = "dt-card-label" }, _.Text(label)),
+            _.H("span", new Props { ClassName = "dt-card-value" }, _.Text(value)),
+            _.H("span", new Props { ClassName = "dt-card-sub" }, _.Text(sub)));
+    }
+
+    private static Node BuildLegend()
+    {
+        return _.H(
+            "div",
+            new Props { ClassName = "dt-legend" },
+            BuildLegendItem("dt-dot-frame", "frame"),
+            BuildLegendItem("dt-dot-layout", "layout"),
+            BuildLegendItem("dt-dot-render", "render"));
+    }
+
+    private static Node BuildLegendItem(string colorClass, string label)
+    {
+        return _.H(
+            "div",
+            new Props { ClassName = "dt-legend-item" },
+            _.H("div", new Props { ClassName = "dt-legend-dot " + colorClass }),
+            _.H("span", new Props { ClassName = "dt-dim" }, _.Text(label)));
+    }
+
+    private static Node BuildGraph(ReadOnlySpan<float> values, string className, float max)
+    {
+        var bars = new List<Node?>();
+
+        for (var i = 0; i < values.Length; i++)
+        {
+            var height = Math.Clamp((int)MathF.Round(values[i] / MathF.Max(0.01f, max) * 120f), 0, 120);
+            bars.Add(_.H("div", new Props { ClassName = className + " dt-h" + height.ToString(CultureInfo.InvariantCulture) }));
+        }
+
+        if (bars.Count == 0)
+        {
+            bars.Add(_.H("div", new Props { ClassName = "dt-dim" }, _.Text("collecting...")));
+        }
+
+        return _.H("div", new Props { ClassName = "dt-graph" }, _.F(bars.ToArray()));
+    }
+
+    private static string Fps(double frameMs) =>
+        frameMs <= 0 ? "\u2014" : (1000.0 / frameMs).ToString("0", CultureInfo.InvariantCulture);
+
+    private static string Bytes(long bytes)
+    {
+        if (bytes < 1024)
+        {
+            return bytes + " B";
+        }
+
+        if (bytes < 1024 * 1024)
+        {
+            return (bytes / 1024.0).ToString("0.0", CultureInfo.InvariantCulture) + " KB";
+        }
+
+        if (bytes < 1024L * 1024 * 1024)
+        {
+            return (bytes / 1048576.0).ToString("0.0", CultureInfo.InvariantCulture) + " MB";
+        }
+
+        return (bytes / 1073741824.0).ToString("0.00", CultureInfo.InvariantCulture) + " GB";
+    }
+
+    private Node BuildStatusBar(DevToolsState state)
+    {
+        var count = CountNodes(state.AppRoot);
+        var tab = state.Tab == DevToolsTab.Elements ? "Elements" : "Performance";
+
+        return _.H(
+            "div",
+            new Props { ClassName = "dt-status" },
+            _.Text(tab),
+            _.H("span", new Props { ClassName = "dt-status-gap" }),
+            _.Text($"{count} nodes"),
+            _.Text("  \u00B7  Ctrl+Shift+I to toggle"));
+    }
+
+    private static Node[] LogicalChildren(Node node)
+    {
+        return node switch
+        {
+            ComponentNode component => component.OutputVdom is { } output ? [output] : [],
+            FragmentNode fragment => fragment.VdomChildren,
+            ProviderNode provider => provider.ProviderChildren,
+            ElementNode element => element.VdomChildren.Length > 0
+                ? element.VdomChildren
+                : element.Children.OfType<Node>().ToArray(),
+            _ => []
+        };
+    }
+
+    private static int CountNodes(Node? node)
+    {
+        if (node is null)
+        {
+            return 0;
+        }
+
+        var count = 1;
+
+        switch (node)
+        {
+            case ComponentNode component:
+                count += CountNodes(component.OutputVdom);
+                break;
+
+            case ProviderNode provider:
+                for (var i = 0; i < provider.ProviderChildren.Length; i++)
+                {
+                    count += CountNodes(provider.ProviderChildren[i]);
+                }
+
+                break;
+
+            case FragmentNode fragment:
+                for (var i = 0; i < fragment.VdomChildren.Length; i++)
+                {
+                    count += CountNodes(fragment.VdomChildren[i]);
+                }
+
+                break;
+
+            case ElementNode element:
+            {
+                var logical = element.VdomChildren.Length > 0
+                    ? element.VdomChildren
+                    : element.Children.OfType<Node>().ToArray();
+
+                for (var i = 0; i < logical.Length; i++)
+                {
+                    count += CountNodes(logical[i]);
+                }
+
+                break;
+            }
+        }
+
+        return count;
+    }
+}

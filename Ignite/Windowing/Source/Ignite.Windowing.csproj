@@ -25,6 +25,7 @@
       <ProjectReference Include="..\..\Parser\Source\Ignite.Parser.csproj" />
       <ProjectReference Include="..\..\LayoutLab\Source\LayoutLab.csproj" />
       <ProjectReference Include="..\..\UILab\Source\Ignite.UILab.csproj" />
+      <ProjectReference Include="..\..\Inspector\Source\Inspector.csproj" />
     </ItemGroup>
 
 </Project>

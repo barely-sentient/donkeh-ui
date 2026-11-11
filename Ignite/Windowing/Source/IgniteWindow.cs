@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Numerics;
 using Ignite.Data;
 using Ignite.Data.Dom;
+using Ignite.Inspector;
 using Ignite.LayoutLab;
 using Ignite.Parser;
 using Ignite.UILab;
@@ -38,7 +39,16 @@ public sealed class IgniteWindow : IDisposable
     private DataTable? _table;
     private LayoutResult? _layoutResult;
     private Node? _root;
+    private Node? _appRoot;
     private RendererContext _context = new();
+    private readonly DevToolsState _devTools = new();
+    private DevToolsWindowHost? _devToolsWindow;
+    private InspectorPanel? _devToolsPanel;
+    private Renderer? _devToolsUi;
+    private Node? _devToolsRoot;
+    private LayoutEngine? _devToolsLayoutEngine;
+    private LayoutResult? _devToolsLayout;
+    private double _lastDevToolsRefresh;
 
     private bool _needsLayout = true;
     private bool _disposed;
@@ -46,6 +56,8 @@ public sealed class IgniteWindow : IDisposable
     private int _lastUiVersion = -1;
     private int _lastWidth;
     private int _lastHeight;
+    private int _lastAppWidth;
+    private int _lastAppHeight;
     private float _lastDpi;
 
     private string? _screenshotPath;
@@ -71,6 +83,7 @@ public sealed class IgniteWindow : IDisposable
     {
         _settings = settings;
         _measurer = new TrueTypeTextMeasurer(_fonts);
+        _devTools.Dock = settings.DevToolsPosition;
         RebuildStyles();
     }
 
@@ -93,6 +106,12 @@ public sealed class IgniteWindow : IDisposable
 
     public Node? Root => _root;
 
+    /// <summary>The application root, without the inspector wrapper.</summary>
+    public Node? AppRoot => _appRoot;
+
+    /// <summary>Live inspector state. Read or change it to open, close or move devtools.</summary>
+    public DevToolsState DevTools => _devTools;
+
     public LayoutResult? FrameResult => _layoutResult;
 
     public int FrameCount { get; private set; }
@@ -103,7 +122,48 @@ public sealed class IgniteWindow : IDisposable
 
     public double LastRenderMilliseconds { get; private set; }
 
-    public int LastInstructionCount => _layoutResult?.Opcodes.Length ?? 0;
+    public int LastInstructionCount =>
+        (_layoutResult?.Opcodes.Length ?? 0) + (_devToolsLayout?.Opcodes.Length ?? 0);
+
+    /// <summary>Milliseconds spent flushing pending UI updates on the last frame.</summary>
+    public double LastUpdateMilliseconds { get; private set; }
+
+    /// <summary>Shows or hides the built-in inspector.</summary>
+    public void ToggleDevTools()
+    {
+        if (!_settings.EnableDevTools)
+        {
+            return;
+        }
+
+        _devTools.Visible = !_devTools.Visible;
+        _devTools.Refresh();
+        _devToolsPanel?.Tick();
+        _needsLayout = true;
+    }
+
+    /// <summary>Shows the built-in inspector.</summary>
+    public void ShowDevTools()
+    {
+        if (!_settings.EnableDevTools)
+        {
+            return;
+        }
+
+        _devTools.Visible = true;
+        _devTools.Refresh();
+        _devToolsPanel?.Tick();
+        _needsLayout = true;
+    }
+
+    /// <summary>Hides the built-in inspector.</summary>
+    public void HideDevTools()
+    {
+        _devTools.Visible = false;
+        _devTools.Refresh();
+        _devToolsPanel?.Tick();
+        _needsLayout = true;
+    }
 
     /// <summary>The mount point of the live tree. Call <see cref="Mount"/> first.</summary>
     public void Mount(Node root)
@@ -115,7 +175,26 @@ public sealed class IgniteWindow : IDisposable
             throw new InvalidOperationException("A tree is already mounted.");
         }
 
+        _appRoot = root;
+        _devTools.AppRoot = root;
+
+        // The application root is mounted exactly as it would be without
+        // devtools. The inspector lives in its own renderer and is composited
+        // as a fixed overlay, so it never changes the app's box tree.
         _root = _ui.Mount(root);
+
+        if (_settings.EnableDevTools)
+        {
+            var devToolsUi = new Renderer();
+            var panel = _.C<InspectorPanel, InspectorPanelProps>(
+                new InspectorPanelProps { State = _devTools });
+
+            _devToolsRoot = devToolsUi.Mount(
+                _.H("div", new Props { ClassName = "dt-host" }, panel));
+            _devToolsUi = devToolsUi;
+            _devToolsPanel = devToolsUi.FindComponent<InspectorPanel>();
+        }
+
         _needsLayout = true;
     }
 
@@ -239,7 +318,13 @@ public sealed class IgniteWindow : IDisposable
         }
 
         AdvanceScrollAnimations(delta);
+
+        var flushStart = Stopwatch.GetTimestamp();
         _ui.Flush();
+        _devToolsUi?.Flush();
+        LastUpdateMilliseconds = Stopwatch.GetElapsedTime(flushStart).TotalMilliseconds;
+
+        UpdateDevTools(delta);
 
         var size = _window.Size;
         var framebuffer = _window.FramebufferSize;
@@ -252,21 +337,47 @@ public sealed class IgniteWindow : IDisposable
             dpi = 1;
         }
 
+        // Docked devtools take space from the app viewport instead of covering
+        // it, so the page reflows exactly as it would in a smaller window.
+        var appWidth = width;
+        var appHeight = height;
+        var docked = _settings.EnableDevTools && _devTools.Visible && _devTools.Dock != DevToolsDock.Window;
+
+        if (docked && _devTools.Dock == DevToolsDock.Bottom)
+        {
+            appHeight = Math.Max(1, height - (int)InspectorStyles.DockBottomHeight);
+        }
+        else if (docked && _devTools.Dock == DevToolsDock.Right)
+        {
+            appWidth = Math.Max(1, width - (int)InspectorStyles.DockRightWidth);
+        }
+
         if (_needsLayout
             || _lastUiVersion != _ui.Version
             || _lastWidth != width
             || _lastHeight != height
+            || _lastAppWidth != appWidth
+            || _lastAppHeight != appHeight
             || MathF.Abs(_lastDpi - dpi) > 0.001f)
         {
             var start = Stopwatch.GetTimestamp();
-            var options = CreateLayoutOptions(width, height, dpi);
+            var options = CreateLayoutOptions(appWidth, appHeight, dpi);
             _layoutResult = _layoutEngine!.Layout(_root, options);
             LastLayoutMilliseconds = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
             _lastUiVersion = _ui.Version;
             _lastWidth = width;
             _lastHeight = height;
+            _lastAppWidth = appWidth;
+            _lastAppHeight = appHeight;
             _lastDpi = dpi;
             _needsLayout = false;
+        }
+
+        if (_settings.EnableDevTools && _devToolsRoot is not null && _devToolsLayoutEngine is not null)
+        {
+            _devToolsLayout = _devToolsLayoutEngine.Layout(
+                _devToolsRoot,
+                CreateLayoutOptions(width, height, dpi));
         }
 
         var renderStart = Stopwatch.GetTimestamp();
@@ -283,11 +394,11 @@ public sealed class IgniteWindow : IDisposable
         {
             if (BuildOverlays(out var overlay, out var overlayConstants))
             {
-                _renderer.Render(_layoutResult, overlay.Span, overlayConstants);
+                _renderer.Render(_layoutResult, overlay.Span, overlayConstants, _devToolsLayout);
             }
             else
             {
-                _renderer.Render(_layoutResult);
+                _renderer.Render(_layoutResult, _devToolsLayout);
             }
         }
 
@@ -295,12 +406,90 @@ public sealed class IgniteWindow : IDisposable
         FrameCount++;
         LastFrameMilliseconds = delta * 1000;
 
+        if (_settings.EnableDevTools)
+        {
+            _devTools.Layout = _layoutResult;
+            _devTools.Context = _context;
+            _devTools.Performance.Sample(
+                LastFrameMilliseconds,
+                LastLayoutMilliseconds,
+                LastRenderMilliseconds,
+                LastUpdateMilliseconds,
+                FrameCount,
+                LastInstructionCount,
+                CountLayoutBoxes(_layoutResult?.Root),
+                CountNodes(_appRoot));
+        }
+
         if (_screenshotPath is { } path)
         {
             _screenshotPath = null;
             SaveFramebuffer(path, framebuffer.X, framebuffer.Y);
             _window.Close();
         }
+    }
+
+    private void UpdateDevTools(double delta)
+    {
+        if (!_settings.EnableDevTools)
+        {
+            return;
+        }
+
+        _lastDevToolsRefresh += delta;
+
+        if (_lastDevToolsRefresh >= 0.1 || _devTools.Version == 0)
+        {
+            _lastDevToolsRefresh = 0;
+            _devTools.Refresh();
+        }
+
+        _devToolsPanel?.Tick();
+
+        if (_devTools.Visible && _devTools.Dock == DevToolsDock.Window)
+        {
+            _devToolsWindow ??= new DevToolsWindowHost();
+            _devToolsWindow.Open(_devTools);
+        }
+        else
+        {
+            _devToolsWindow?.Close();
+        }
+    }
+
+    private static int CountLayoutBoxes(LayoutBox? box)
+    {
+        if (box is null)
+        {
+            return 0;
+        }
+
+        var count = 1;
+
+        for (var i = 0; i < box.Children.Count; i++)
+        {
+            count += CountLayoutBoxes(box.Children[i]);
+        }
+
+        return count;
+    }
+
+    private static int CountNodes(IgniteSupportedDomNode? node)
+    {
+        if (node is null)
+        {
+            return 0;
+        }
+
+        var count = 1;
+        var children = node.Children;
+
+        for (var i = 0; i < children.Length; i++)
+        {
+            count += CountNodes(children[i]);
+        }
+
+        return count;
     }
 
     private unsafe void SaveFramebuffer(string path, int width, int height)
@@ -397,15 +586,31 @@ public sealed class IgniteWindow : IDisposable
     {
         var table = new DataTable();
         var engine = new Ignite.DataEngine.DataEngine(Ignite.DataEngine.MediaConditionCompiler.Instance);
-        engine.Build(Tokenizer.Parse(HtmlDefaults.Css), table);
+        var ranges = new List<StyleSheetRange>();
 
-        foreach (var sheet in _stylesheets)
+        var start = table.RuleCount;
+        engine.Build(Tokenizer.Parse(HtmlDefaults.Css), table);
+        ranges.Add(new StyleSheetRange("user-agent", start, table.RuleCount));
+
+        for (var i = 0; i < _stylesheets.Count; i++)
         {
-            engine.Build(Tokenizer.Parse(sheet), table);
+            start = table.RuleCount;
+            engine.Build(Tokenizer.Parse(_stylesheets[i]), table);
+            ranges.Add(new StyleSheetRange($"author #{i + 1}", start, table.RuleCount));
+        }
+
+        if (_settings.EnableDevTools)
+        {
+            start = table.RuleCount;
+            engine.Build(Tokenizer.Parse(InspectorStyles.Css + InspectorStyles.HeightClasses), table);
+            ranges.Add(new StyleSheetRange("devtools", start, table.RuleCount));
         }
 
         _table = table;
+        _devTools.Table = table;
+        _devTools.StyleSheets = ranges;
         _layoutEngine = new LayoutEngine(table);
+        _devToolsLayoutEngine = _settings.EnableDevTools ? new LayoutEngine(table) : null;
         _needsLayout = true;
     }
 
@@ -1275,7 +1480,7 @@ public sealed class IgniteWindow : IDisposable
 
         foreach (var keyboard in _input.Keyboards)
         {
-            keyboard.KeyDown += (_, key, _) => OnKeyDown(key);
+            keyboard.KeyDown += (_, key, _) => OnKeyDown(keyboard, key);
             keyboard.KeyChar += (_, character) => OnKeyChar(character);
         }
 
@@ -1815,8 +2020,20 @@ public sealed class IgniteWindow : IDisposable
         return null;
     }
 
-    private void OnKeyDown(Key key)
+    private void OnKeyDown(IKeyboard keyboard, Key key)
     {
+        if (_settings.EnableDevTools)
+        {
+            var control = keyboard.IsKeyPressed(Key.ControlLeft) || keyboard.IsKeyPressed(Key.ControlRight);
+            var shift = keyboard.IsKeyPressed(Key.ShiftLeft) || keyboard.IsKeyPressed(Key.ShiftRight);
+
+            if ((key == Key.I && control && shift) || key == Key.F12)
+            {
+                ToggleDevTools();
+                return;
+            }
+        }
+
         if (_focused is null)
         {
             return;
@@ -2217,6 +2434,21 @@ public sealed class IgniteWindow : IDisposable
 
     private LayoutBox? HitTestBox(float x, float y)
     {
+        // The inspector is composited above the app but lives in its own box
+        // tree, so it gets first refusal on pointer input.
+        if (_settings.EnableDevTools
+            && _devTools.Visible
+            && _devTools.Dock != DevToolsDock.Window
+            && _devToolsLayout?.Root is { } devRoot)
+        {
+            var devHit = HitTestBox(devRoot, x, y, 0, 0);
+
+            if (devHit is not null && !ReferenceEquals(devHit, devRoot))
+            {
+                return devHit;
+            }
+        }
+
         if (_layoutResult?.Root is not { } root)
         {
             return null;

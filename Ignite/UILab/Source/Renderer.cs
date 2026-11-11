@@ -21,6 +21,7 @@ namespace Ignite.UILab
 
         private readonly Queue<Component> _dirty = new();
         private readonly List<Component> _rendered = new();
+        private readonly List<Component> _mounted = new();
 
         private Node? _rootVdom;
         private Node? _rootLive;
@@ -36,6 +37,20 @@ namespace Ignite.UILab
 
         /// <summary>The live root node, or null before <see cref="Mount"/>.</summary>
         public Node? Root => _rootLive;
+
+        /// <summary>Finds the first mounted component of the requested type.</summary>
+        public T? FindComponent<T>() where T : Component
+        {
+            for (var i = 0; i < _mounted.Count; i++)
+            {
+                if (_mounted[i] is T match)
+                {
+                    return match;
+                }
+            }
+
+            return null;
+        }
 
         /// <summary>True while a flush is applying changes and running effects.</summary>
         public bool IsFlushing => _flushing;
@@ -321,6 +336,7 @@ namespace Ignite.UILab
 
             node.OutputVdom = logical;
             _rendered.Add(instance);
+            _mounted.Add(instance);
             instance.InvokeOnMount();
 
             return (live, node);
@@ -612,6 +628,7 @@ namespace Ignite.UILab
                 case ComponentNode component:
                     if (component.Instance is { } instance)
                     {
+                        _mounted.Remove(instance);
                         instance.InvokeOnUnmount();
                         RunEffectCleanups(instance);
                         instance.IsMounted = false;
