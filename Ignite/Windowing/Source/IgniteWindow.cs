@@ -87,6 +87,7 @@ public sealed partial class IgniteWindow : IDisposable
 
     private string? _screenshotPath;
 
+    private readonly List<LayoutBox> _hitFixedBoxes = [];
     private readonly List<ElementNode> _hoverChain = [];
     private readonly List<ElementNode> _activeChain = [];
     private ElementNode? _hovered;
@@ -3595,7 +3596,7 @@ public sealed partial class IgniteWindow : IDisposable
             && _devTools.Dock != DevToolsDock.Window
             && _devToolsLayout?.Root is { } devRoot)
         {
-            var devHit = HitTestBox(devRoot, x, y, 0, 0);
+            var devHit = HitTestRoot(devRoot, x, y);
 
             if (devHit is not null && !ReferenceEquals(devHit, devRoot))
             {
@@ -3608,12 +3609,63 @@ public sealed partial class IgniteWindow : IDisposable
             return null;
         }
 
-        return HitTestBox(root, x, y, 0, 0);
+        return HitTestRoot(root, x, y);
     }
 
-    private static LayoutBox? HitTestBox(LayoutBox box, float x, float y, float scrollX, float scrollY)
+    private LayoutBox? HitTestRoot(LayoutBox root, float x, float y)
+    {
+        _hitFixedBoxes.Clear();
+        CollectFixedBoxes(root, _hitFixedBoxes);
+
+        // Fixed boxes are painted after the normal tree, so they are tested
+        // first and in reverse order. Starting at the fixed box with zero
+        // scroll also keeps ancestor scroll offsets out of the hit test.
+        for (var i = _hitFixedBoxes.Count - 1; i >= 0; i--)
+        {
+            var hit = HitTestBox(_hitFixedBoxes[i], x, y, 0, 0, skipFixed: false);
+
+            if (hit is not null)
+            {
+                return hit;
+            }
+        }
+
+        return HitTestBox(root, x, y, 0, 0, skipFixed: true);
+    }
+
+    private static void CollectFixedBoxes(LayoutBox box, List<LayoutBox> boxes)
+    {
+        if (box.Style.Display == Display.None
+            || box.Style.Visibility is Visibility.Hidden or Visibility.Collapse)
+        {
+            return;
+        }
+
+        if (box.IsFixed)
+        {
+            boxes.Add(box);
+        }
+
+        for (var i = 0; i < box.Children.Count; i++)
+        {
+            CollectFixedBoxes(box.Children[i], boxes);
+        }
+    }
+
+    private static LayoutBox? HitTestBox(
+        LayoutBox box,
+        float x,
+        float y,
+        float scrollX,
+        float scrollY,
+        bool skipFixed)
     {
         if (box.Style.Display == Display.None || box.Style.Visibility is Visibility.Hidden or Visibility.Collapse)
+        {
+            return null;
+        }
+
+        if (skipFixed && box.IsFixed)
         {
             return null;
         }
@@ -3648,7 +3700,7 @@ public sealed partial class IgniteWindow : IDisposable
 
         for (var i = box.Children.Count - 1; i >= 0; i--)
         {
-            var hit = HitTestBox(box.Children[i], x, y, scrollX, scrollY);
+            var hit = HitTestBox(box.Children[i], x, y, scrollX, scrollY, skipFixed);
 
             if (hit is not null)
             {

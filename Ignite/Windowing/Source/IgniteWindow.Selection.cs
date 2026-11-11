@@ -215,7 +215,7 @@ public sealed partial class IgniteWindow
             return false;
         }
 
-        var hit = HitTestBox(root, x, y, 0, 0);
+        var hit = HitTestRoot(root, x, y);
 
         if (hit is null)
         {
