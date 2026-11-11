@@ -605,8 +605,16 @@ public sealed unsafe class GLRenderer : IDisposable
             if (glyph.Texture != 0 && glyph.Width > 0 && glyph.Height > 0)
             {
                 var run = EnsureTextRun(glyph.Texture, alphaTexture: true);
-                var x = pen + glyph.OffsetX;
-                var y = baseline + glyph.OffsetY;
+
+                // Glyph quads are sampled from a linearly filtered atlas. If a
+                // quad lands on a fractional pixel the sample point can fall on
+                // a texel boundary, blending the glyph with its transparent
+                // atlas padding. That washes out thin stems (white-on-blue
+                // small text in particular). Snapping the origin keeps the
+                // sample on texel centres while the fractional pen still
+                // carries kerning and advances.
+                var x = MathF.Round(pen + glyph.OffsetX);
+                var y = MathF.Round(baseline + glyph.OffsetY);
                 AddQuadVertices(
                     run,
                     x,
