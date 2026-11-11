@@ -57,6 +57,11 @@ public sealed partial class IgniteWindow : IDisposable
     private float _lastDevToolsDpi;
     private double _lastDevToolsRefresh;
     private double _performanceSampleTimer;
+    private readonly long _animationStartTicks = Stopwatch.GetTimestamp();
+    private double _animationTimeSeconds;
+    private double _lastAnimationLayoutTime;
+    private double _lastDevToolsAnimationLayoutTime;
+    private const double AnimationLayoutInterval = 1.0 / 60.0;
 
     private bool _needsLayout = true;
     private bool _needsPaint;
@@ -366,6 +371,7 @@ public sealed partial class IgniteWindow : IDisposable
         }
 
         AdvanceScrollAnimations(delta);
+        _animationTimeSeconds = Stopwatch.GetElapsedTime(_animationStartTicks).TotalSeconds;
 
         var flushStart = Stopwatch.GetTimestamp();
         _ui.Flush();
@@ -484,6 +490,37 @@ public sealed partial class IgniteWindow : IDisposable
                 _devToolsLayout,
                 CreateLayoutOptions(width, height, dpi, _devToolsContext, isApp: false));
             _needsDevToolsPaint = false;
+        }
+
+        // Animated styles change every frame, so keep the box tree and display
+        // list fresh while any CSS animation is running.
+        // CSS animations do not need a fresh box tree at the display refresh
+        // rate. Re-layout at 60 Hz and let the renderer reuse the display list
+        // in between, which keeps 144 Hz presentation while bounding CPU cost.
+        if (_layoutResult?.HasAnimations == true)
+        {
+            if (_animationTimeSeconds - _lastAnimationLayoutTime >= AnimationLayoutInterval)
+            {
+                _lastAnimationLayoutTime = _animationTimeSeconds;
+                _needsLayout = true;
+            }
+        }
+        else
+        {
+            _lastAnimationLayoutTime = _animationTimeSeconds;
+        }
+
+        if (_devToolsLayout?.HasAnimations == true)
+        {
+            if (_animationTimeSeconds - _lastDevToolsAnimationLayoutTime >= AnimationLayoutInterval)
+            {
+                _lastDevToolsAnimationLayoutTime = _animationTimeSeconds;
+                _lastDevToolsVersion = -1;
+            }
+        }
+        else
+        {
+            _lastDevToolsAnimationLayoutTime = _animationTimeSeconds;
         }
 
         var sharedDevTools = SharedDevToolsState;
@@ -839,7 +876,9 @@ public sealed partial class IgniteWindow : IDisposable
             CullOffscreen = true,
             MergeDraws = true,
             CompactConstants = false,
-            EnableCaching = true
+            EnableCaching = true,
+            AnimationsEnabled = true,
+            AnimationTimeSeconds = _animationTimeSeconds
         };
 
         // The app and the inspector must not share a RendererContext: each
@@ -1845,6 +1884,12 @@ public sealed partial class IgniteWindow : IDisposable
             return;
         }
 
+        if (element.HasClass("spinner-border"))
+        {
+            PaintSpinner(box, instructions);
+            return;
+        }
+
         // Bootstrap draws its hamburger from an SVG data URI, which the engine
         // does not decode. Draw the three bars directly so the toggler does not
         // appear as an empty pill.
@@ -1876,6 +1921,53 @@ public sealed partial class IgniteWindow : IDisposable
             case "meter":
                 PaintProgress(box, instructions, constants, element);
                 break;
+        }
+    }
+
+    private void PaintSpinner(LayoutBox box, InstructionBuffer instructions)
+    {
+        var rect = PaintedBorderBox(box);
+
+        if (rect.Width <= 0 || rect.Height <= 0)
+        {
+            return;
+        }
+
+        var size = MathF.Min(rect.Width, rect.Height);
+        var thickness = MathF.Max(2f, size * 0.125f);
+        var radius = size / 2f - thickness / 2f;
+        var centerX = rect.X + rect.Width / 2f;
+        var centerY = rect.Y + rect.Height / 2f;
+        var color = box.Style.Color == ComputedStyle.CurrentColor
+            ? 0xFF212529u
+            : box.Style.Color;
+        var duration = 0.75f;
+
+        if (box.Style.Animations is { Count: > 0 } animations)
+        {
+            for (var i = 0; i < animations.Count; i++)
+            {
+                if (animations[i].Name.Contains("spinner", StringComparison.OrdinalIgnoreCase)
+                    && animations[i].Duration > 0)
+                {
+                    duration = animations[i].Duration;
+                    break;
+                }
+            }
+        }
+
+        var spin = (float)(_animationTimeSeconds % duration) / duration * MathF.PI * 2f;
+        const int segments = 40;
+        var sweep = MathF.PI * 1.5f;
+
+        for (var i = 0; i <= segments; i++)
+        {
+            var angle = spin + sweep * i / segments;
+            var x = centerX + MathF.Cos(angle) * radius;
+            var y = centerY + MathF.Sin(angle) * radius;
+            instructions.AddDrawRect(
+                new Rect(x - thickness / 2f, y - thickness / 2f, thickness, thickness),
+                color);
         }
     }
 

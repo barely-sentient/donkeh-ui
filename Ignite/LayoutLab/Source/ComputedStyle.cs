@@ -145,6 +145,12 @@ public sealed class ComputedStyle
     public Dictionary<string, string>? CustomProperties { get; set; }
     public List<int>? UnsupportedProperties { get; set; }
 
+    /// <summary>Animation entries resolved from the <c>animation</c> properties.</summary>
+    public List<AnimationSpec>? Animations { get; set; }
+
+    /// <summary>True when this style is the result of applying an animation at the current frame.</summary>
+    public bool IsAnimated { get; set; }
+
     public bool IsAbsolutelyPositioned => Position is Position.Absolute or Position.Fixed;
 
     public bool IsFlexContainer => Display is Display.Flex or Display.InlineFlex;
@@ -230,6 +236,16 @@ public sealed class ComputedStyle
         if (CustomProperties is not null)
         {
             copy.CustomProperties = new Dictionary<string, string>(CustomProperties, StringComparer.Ordinal);
+        }
+
+        if (Animations is not null)
+        {
+            copy.Animations = new List<AnimationSpec>(Animations.Count);
+
+            for (var i = 0; i < Animations.Count; i++)
+            {
+                copy.Animations.Add(Animations[i].Clone());
+            }
         }
 
         return copy;
@@ -349,6 +365,8 @@ public sealed class ComputedStyle
         ColumnGapFallback = source.ColumnGapFallback;
         CustomProperties = source.CustomProperties;
         UnsupportedProperties = source.UnsupportedProperties;
+        Animations = source.Animations;
+        IsAnimated = source.IsAnimated;
     }
 }
 

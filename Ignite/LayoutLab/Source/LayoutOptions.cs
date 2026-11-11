@@ -26,6 +26,12 @@ public sealed class LayoutOptions
     public bool ApplyScrollOffsets { get; set; } = true;
     public int MaxLayoutDepth { get; set; } = 512;
 
+    /// <summary>Enables evaluation of CSS animations during layout.</summary>
+    public bool AnimationsEnabled { get; set; } = true;
+
+    /// <summary>Monotonic animation clock in seconds.</summary>
+    public double AnimationTimeSeconds { get; set; }
+
     /// <summary>Optional per-node scroll overrides; the node fields are used otherwise.</summary>
     public Dictionary<IgniteSupportedDomNode, Point>? ScrollOffsets { get; set; }
 

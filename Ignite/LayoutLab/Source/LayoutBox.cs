@@ -100,6 +100,9 @@ public sealed class LayoutBox
 
     public bool IsPainted => !IsContents && Style.Display != Display.None;
 
+    /// <summary>True when the box has a CSS animation applied on this frame.</summary>
+    public bool IsAnimated => Style.IsAnimated;
+
     internal float IntrinsicWidth
     {
         get => _intrinsicWidth;
@@ -179,13 +182,15 @@ public sealed class LayoutResult
         InstructionBuffer instructions,
         ConstantPool constants,
         Dictionary<IgniteSupportedDomNode, LayoutBox> byNode,
-        OptimisationStats stats)
+        OptimisationStats stats,
+        bool hasAnimations = false)
     {
         Root = root;
         Instructions = Snapshot(instructions);
         Constants = constants;
         _byNode = new Dictionary<IgniteSupportedDomNode, LayoutBox>(byNode);
         Stats = stats;
+        HasAnimations = hasAnimations;
     }
 
     private static InstructionBuffer Snapshot(InstructionBuffer source)
@@ -202,6 +207,9 @@ public sealed class LayoutResult
     public ConstantPool Constants { get; }
 
     public OptimisationStats Stats { get; }
+
+    /// <summary>True when at least one box had a running CSS animation on this frame.</summary>
+    public bool HasAnimations { get; }
 
     /// <summary>The node-to-box map, shared with the engine that built it.</summary>
     internal IReadOnlyDictionary<IgniteSupportedDomNode, LayoutBox> Boxes => _byNode;

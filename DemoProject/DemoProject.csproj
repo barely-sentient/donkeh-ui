@@ -17,6 +17,7 @@
     <ItemGroup>
         <EmbeddedResource Include="bootstrap.min.css" />
         <EmbeddedResource Include="Demo.css" />
+        <EmbeddedResource Include="Components\**\*.css" />
     </ItemGroup>
 
 </Project>

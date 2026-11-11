@@ -1,4 +1,4 @@
-using Ignite.Data.Dom;
+﻿using Ignite.Data.Dom;
 using Ignite.Inspector;
 using Ignite.UILab;
 using Ignite.Windowing;
@@ -164,7 +164,7 @@ window.Run(
         new Props { Attributes = new Dictionary<string, string> { ["lang"] = "en" } },
         H("head", H("title", Text("Bootstrap + Ignite"))),
         H("body", new Props { ClassName = "bg-body-tertiary" },
-            C<BootstrapDemo>())));
+            C<Showcase>())));
 
 static (Node Node, List<Node> Path)? FindByClass(Node? node, string className, List<Node> path)
 {
@@ -524,5 +524,73 @@ internal sealed class BootstrapDemo : Component
     {
         return H("li", new Props { ClassName = active ? "page-item active" : "page-item" },
             H("a", new Props { ClassName = "page-link", Href = "#" }, Text(label)));
+    }
+}
+
+internal sealed class Showcase : Component
+{
+    public override Node Render()
+    {
+        return H("div", new Props { ClassName = "d-flex flex-column h-100" },
+            H("main", new Props { ClassName = "app-main" },
+                H("div", new Props { ClassName = "container py-4" },
+                    H("h1", new Props { ClassName = "mb-2" }, Text("Component Showcase")),
+                    H("p", new Props { ClassName = "lead text-body-secondary mb-4" },
+                        Text("Every component in the library, rendered by the Ignite engine.")),
+                    H("div", new Props { ClassName = "row g-3" },
+                        Card("Accordion", C<DemoProject.Components.Accordion.Accordion>()),
+                        Card("Alert", C<DemoProject.Components.Alert.Alert>()),
+                        Card("Badge", C<DemoProject.Components.Badge.Badge>()),
+                        Card("Breadcrumb", C<DemoProject.Components.Breadcrumb.Breadcrumb>()),
+                        Card("Button", C<DemoProject.Components.Button.Button>()),
+                        Card("ButtonGroup", C<DemoProject.Components.ButtonGroup.ButtonGroup>()),
+                        Card("ButtonToolbar", C<DemoProject.Components.ButtonToolbar.ButtonToolbar>()),
+                        Card("Card", C<DemoProject.Components.Card.Card>()),
+                        Card("Carousel", C<DemoProject.Components.Carousel.Carousel>()),
+                        Card("CloseButton", C<DemoProject.Components.CloseButton.CloseButton>()),
+                        Card("Col", C<DemoProject.Components.Col.Col>()),
+                        Card("Collapse", C<DemoProject.Components.Collapse.Collapse>()),
+                        Card("Container", C<DemoProject.Components.Container.Container>()),
+                        Card("Dropdown", C<DemoProject.Components.Dropdown.Dropdown>()),
+                        Card("DropdownButton", C<DemoProject.Components.DropdownButton.DropdownButton>()),
+                        Card("Fade", C<DemoProject.Components.Fade.Fade>()),
+                        Card("Figure", C<DemoProject.Components.Figure.Figure>()),
+                        Card("FloatingLabel", C<DemoProject.Components.FloatingLabel.FloatingLabel>()),
+                        Card("Form", C<DemoProject.Components.Form.Form>()),
+                        Card("Image", C<DemoProject.Components.Image.Image>()),
+                        Card("InputGroup", C<DemoProject.Components.InputGroup.InputGroup>()),
+                        Card("ListGroup", C<DemoProject.Components.ListGroup.ListGroup>()),
+                        Card("Modal", C<DemoProject.Components.Modal.Modal>()),
+                        Card("Nav", C<DemoProject.Components.Nav.Nav>()),
+                        Card("Navbar", C<DemoProject.Components.Navbar.Navbar>()),
+                        Card("Offcanvas", C<DemoProject.Components.Offcanvas.Offcanvas>()),
+                        Card("Overlay", C<DemoProject.Components.Overlay.Overlay>()),
+                        Card("OverlayTrigger", C<DemoProject.Components.OverlayTrigger.OverlayTrigger>()),
+                        Card("Pagination", C<DemoProject.Components.Pagination.Pagination>()),
+                        Card("Placeholder", C<DemoProject.Components.Placeholder.Placeholder>()),
+                        Card("Popover", C<DemoProject.Components.Popover.Popover>()),
+                        Card("ProgressBar", C<DemoProject.Components.ProgressBar.ProgressBar>()),
+                        Card("Ratio", C<DemoProject.Components.Ratio.Ratio>()),
+                        Card("Row", C<DemoProject.Components.Row.Row>()),
+                        Card("Spinner", C<DemoProject.Components.Spinner.Spinner>()),
+                        Card("SplitButton", C<DemoProject.Components.SplitButton.SplitButton>()),
+                        Card("Stack", C<DemoProject.Components.Stack.Stack>()),
+                        Card("Table", C<DemoProject.Components.Table.Table>()),
+                        Card("Tab", C<DemoProject.Components.Tab.Tab>()),
+                        Card("Tabs", C<DemoProject.Components.Tabs.Tabs>()),
+                        Card("Toast", C<DemoProject.Components.Toast.Toast>()),
+                        Card("ToastContainer", C<DemoProject.Components.ToastContainer.ToastContainer>()),
+                        Card("ToggleButton", C<DemoProject.Components.ToggleButton.ToggleButton>()),
+                        Card("ToggleButtonGroup", C<DemoProject.Components.ToggleButtonGroup.ToggleButtonGroup>()),
+                        Card("Tooltip", C<DemoProject.Components.Tooltip.Tooltip>())
+                    ))));
+    }
+
+    private static Node Card(string title, Node content)
+    {
+        return H("div", new Props { ClassName = "col-md-6 col-xl-4" },
+            H("div", new Props { ClassName = "card h-100 shadow-sm" },
+                H("div", new Props { ClassName = "card-header fw-semibold" }, Text(title)),
+                H("div", new Props { ClassName = "card-body d-flex flex-column" }, content)));
     }
 }

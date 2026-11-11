@@ -42,6 +42,7 @@ public sealed partial class LayoutEngine
 
     private InstructionBuffer _instructions = new();
     private ConstantPool _constants = new();
+    private readonly AnimationRuntime _animations;
     private LayoutBox? _root;
     private int _maxDepth = 512;
 
@@ -49,6 +50,7 @@ public sealed partial class LayoutEngine
     {
         _table = table ?? throw new ArgumentNullException(nameof(table));
         _valueCache = valueCache ?? new StyleValueCache();
+        _animations = new AnimationRuntime(table);
     }
 
     public StyleValueCache ValueCache => _valueCache;
@@ -77,6 +79,7 @@ public sealed partial class LayoutEngine
         _byNode.Clear();
         _absolutes.Clear();
         _absoluteLaidOut.Clear();
+        _animations.BeginFrame();
 
         _root = BuildBox(root, null, null, null, 0);
 
@@ -93,7 +96,13 @@ public sealed partial class LayoutEngine
             ? Optimiser.Run(_instructions, _constants, viewport, _options)
             : new OptimisationResult(_instructions, _constants, OptimisationStats.Empty);
 
-        return new LayoutResult(_root, frame.Instructions, frame.Constants, _byNode, frame.Stats);
+        return new LayoutResult(
+            _root,
+            frame.Instructions,
+            frame.Constants,
+            _byNode,
+            frame.Stats,
+            _animations.HasRunningAnimations);
     }
 
     /// <summary>
@@ -117,6 +126,7 @@ public sealed partial class LayoutEngine
         _instructions.Clear();
         _constants.Clear();
         _byNode.Clear();
+        _animations.BeginFrame();
 
         foreach (var pair in previous.Boxes)
         {
@@ -137,7 +147,13 @@ public sealed partial class LayoutEngine
             ? Optimiser.Run(_instructions, _constants, viewport, _options)
             : new OptimisationResult(_instructions, _constants, OptimisationStats.Empty);
 
-        return new LayoutResult(_root, frame.Instructions, frame.Constants, _byNode, frame.Stats);
+        return new LayoutResult(
+            _root,
+            frame.Instructions,
+            frame.Constants,
+            _byNode,
+            frame.Stats,
+            previous.HasAnimations);
     }
 
     /// <summary>Re-clamps scroll offsets without touching box geometry.</summary>
@@ -231,6 +247,11 @@ public sealed partial class LayoutEngine
         int depth)
     {
         var style = ResolveStyle(node, parentStyle);
+
+        if (_options.AnimationsEnabled)
+        {
+            style = _animations.Apply(node, style, parentStyle, _options.AnimationTimeSeconds);
+        }
 
         if (style.Display == Display.None)
         {

@@ -1264,7 +1264,7 @@ public sealed partial class StyleResolver
         return parsed;
     }
 
-    private static TransformSpec? ParseTransform(string value)
+    internal static TransformSpec? ParseTransform(string value)
     {
         if (value.Equals("none", StringComparison.OrdinalIgnoreCase))
         {

@@ -913,6 +913,42 @@ public sealed partial class StyleResolver
                 // inputs rather than accidental omissions.
                 break;
 
+            case CssProperty.Animation:
+                style.Animations = ParseAnimationShorthand(value);
+                break;
+
+            case CssProperty.AnimationName:
+                ApplyAnimationName(style, value);
+                break;
+
+            case CssProperty.AnimationDuration:
+                ApplyAnimationTime(style, value, static (spec, seconds) => spec.Duration = seconds);
+                break;
+
+            case CssProperty.AnimationDelay:
+                ApplyAnimationTime(style, value, static (spec, seconds) => spec.Delay = seconds);
+                break;
+
+            case CssProperty.AnimationIterationCount:
+                ApplyAnimationIterationCount(style, value);
+                break;
+
+            case CssProperty.AnimationDirection:
+                ApplyAnimationDirection(style, value);
+                break;
+
+            case CssProperty.AnimationFillMode:
+                ApplyAnimationFillMode(style, value);
+                break;
+
+            case CssProperty.AnimationPlayState:
+                ApplyAnimationPlayState(style, value);
+                break;
+
+            case CssProperty.AnimationTimingFunction:
+                ApplyAnimationTimingFunction(style, value);
+                break;
+
             default:
                 style.UnsupportedProperties ??= [];
                 style.UnsupportedProperties.Add(rulePropertyId(property));

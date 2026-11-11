@@ -156,7 +156,16 @@ public enum CssProperty : ushort
     UserSelect,
     WillChange,
     Contain,
-    VisibilityCollapse
+    VisibilityCollapse,
+    Animation,
+    AnimationName,
+    AnimationDuration,
+    AnimationTimingFunction,
+    AnimationDelay,
+    AnimationIterationCount,
+    AnimationDirection,
+    AnimationFillMode,
+    AnimationPlayState
 }
 
 public static class CssPropertyIds
@@ -317,7 +326,16 @@ public static class CssPropertyIds
             ("cursor", CssProperty.Cursor),
             ("user-select", CssProperty.UserSelect),
             ("will-change", CssProperty.WillChange),
-            ("contain", CssProperty.Contain)
+            ("contain", CssProperty.Contain),
+            ("animation", CssProperty.Animation),
+            ("animation-name", CssProperty.AnimationName),
+            ("animation-duration", CssProperty.AnimationDuration),
+            ("animation-timing-function", CssProperty.AnimationTimingFunction),
+            ("animation-delay", CssProperty.AnimationDelay),
+            ("animation-iteration-count", CssProperty.AnimationIterationCount),
+            ("animation-direction", CssProperty.AnimationDirection),
+            ("animation-fill-mode", CssProperty.AnimationFillMode),
+            ("animation-play-state", CssProperty.AnimationPlayState)
         };
 
         Values = new CssProperty[entries.Length];
