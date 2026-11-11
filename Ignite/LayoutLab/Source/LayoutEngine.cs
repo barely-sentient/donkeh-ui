@@ -462,7 +462,8 @@ public sealed partial class LayoutEngine
     /// Each box style is rebuilt from the cached base style plus the animation
     /// values for the supplied clock, using the animated parent style for
     /// inheritance. No style resolution, box construction or geometry pass runs.
-    /// If an animation can change geometry, use <see cref="Layout"/> instead;
+    /// If an animation can change geometry, use
+    /// <see cref="Layout(IgniteSupportedDomNode, LayoutOptions)"/> instead;
     /// <see cref="LayoutResult.HasLayoutAnimations"/> reports that condition.
     /// </remarks>
     public LayoutResult RepaintAnimated(LayoutResult previous, LayoutOptions? options)

@@ -37,9 +37,10 @@ window.Run(
     """);
 ```
 
-`Ignite.Windowing.Demo` is a complete example with a top bar, sidebar, cards,
-a CSS grid, an HTML table, form controls, hover/active/focus classes and
-scrolling.
+For a complete application, add a small host project that references
+`Ignite.Windowing` and pass a UILab tree plus a stylesheet to `Run`; see the
+root `README.md` for an end-to-end example. The engine itself ships no demo
+project, so hosts are free to choose their own entry point and window chrome.
 
 ## What is supported
 

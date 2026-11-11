@@ -90,8 +90,9 @@ public sealed partial class LayoutEngine
     /// <para>
     /// Fixed boxes are deferred to <see cref="BuildDisplayList"/>'s second pass.
     /// During that pass their <paramref name="tx"/> and <paramref name="ty"/> are
-    /// reset to zero, so they ignore ancestor scroll and clips while keeping the
-    /// position computed by layout.
+    /// reset to zero and no ancestor scope is active, so they ignore ancestor
+    /// scroll, clips, opacity, transforms and filters while keeping the position
+    /// computed by layout.
     /// </para>
     /// <para>
     /// Paint order: outer shadows, background, border, inset shadows, outline,

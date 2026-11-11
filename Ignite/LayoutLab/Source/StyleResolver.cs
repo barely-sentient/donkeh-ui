@@ -10,7 +10,8 @@ namespace Ignite.LayoutLab;
 /// </summary>
 /// <remarks>
 /// Declarations are applied weakest-first, exactly as
-/// <see cref="DataTable.MatchRules"/> returns them. Important declarations get a
+/// <see cref="DataTable.MatchRules(IgniteSupportedDomNode, RendererContext)"/>
+/// returns them. Important declarations get a
 /// second pass so they beat every normal declaration without allocating a
 /// per-property cascade map. Values that need a containing block stay as
 /// <see cref="CssLength"/> and are resolved by the layout pass.
@@ -108,7 +109,8 @@ public sealed partial class StyleResolver
     /// </param>
     /// <param name="matches">
     /// The rules that matched the node, ordered weakest first exactly as
-    /// <see cref="DataTable.MatchRules"/> returns them.
+    /// <see cref="DataTable.MatchRules(IgniteSupportedDomNode, RendererContext)"/>
+    /// returns them.
     /// </param>
     /// <returns>A fully populated style owned by the caller.</returns>
     /// <exception cref="ArgumentNullException">

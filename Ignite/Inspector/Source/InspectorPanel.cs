@@ -706,8 +706,8 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
     /// to keep rows readable.
     /// </para>
     /// <para>
-    /// Children are taken from <see cref="ElementNode.VdomChildren"/> when
-    /// present, falling back to the rendered child nodes.
+    /// Children are taken from the element's <c>VdomChildren</c> when present,
+    /// falling back to the rendered child nodes.
     /// </para>
     /// </remarks>
     private Node BuildElementRow(DevToolsState state, ElementNode element)

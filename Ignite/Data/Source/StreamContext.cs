@@ -225,11 +225,22 @@ namespace Ignite.Data
         /// </summary>
         private struct StreamFrame
         {
+            /// <summary>The kind of block this frame represents.</summary>
             public StreamFrameKind Kind;
+
+            /// <summary>The condition id that was active before the block opened.</summary>
             public int PreviousConditionId;
+
+            /// <summary>The selector-stack start offset that was active before the block opened.</summary>
             public int PreviousSelectorStart;
+
+            /// <summary>The selector-stack count that was active before the block opened.</summary>
             public int PreviousSelectorCount;
+
+            /// <summary>The selector-stack offset at which this block's selectors begin.</summary>
             public int SelectorStart;
+
+            /// <summary>The number of selectors pushed by this block.</summary>
             public int SelectorCount;
         }
     }

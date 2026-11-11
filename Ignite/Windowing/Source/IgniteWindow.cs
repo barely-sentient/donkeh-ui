@@ -18,109 +18,420 @@ namespace Ignite.Windowing;
 /// display-list renderer. A UI tree is mounted once and patched by UILab; frames
 /// only relayout when the tree, stylesheet, viewport or scroll state changed.
 /// </summary>
+/// <remarks>
+/// <para>
+/// An instance moves through three phases: construction (settings, text
+/// measurer and an initial stylesheet build), <see cref="Mount"/> (the UILab
+/// tree plus the optional inspector tree), and <see cref="Run(Ignite.UILab.Node, string)"/> (native window,
+/// OpenGL context and the frame loop). Everything before <see cref="Run(Ignite.UILab.Node, string)"/> runs
+/// on the caller's thread; <see cref="Run(Ignite.UILab.Node, string)"/> blocks until the window closes and
+/// disposes the window before returning.
+/// </para>
+/// <para>
+/// Frames are demand driven. A layout rebuild is requested through
+/// <see cref="Invalidate"/> or the internal <c>_needsLayout</c> flag, a display
+/// list rebuild through <c>_needsPaint</c> (scroll offsets never move boxes),
+/// and paint-only animation styles through <c>_needsAnimatedPaint</c>. The UILab
+/// version counter plus the last viewport, dock and DPI values are compared each
+/// frame, so an idle window does no work beyond presenting the previous frame.
+/// </para>
+/// <para>
+/// The inspector is a second, independent renderer composited over the app (or
+/// docked beside it); it never participates in the app's box tree. Docking
+/// shrinks the app viewport instead of overlapping it, so the page reflows
+/// exactly as it would in a smaller window.
+/// </para>
+/// <para>
+/// All mutable interaction state (hover, press, pointer capture, focus, caret,
+/// open select and text selection) is owned by this object and is pruned when
+/// the referenced node leaves the tree; see <see cref="PruneInteractionNodes"/>.
+/// </para>
+/// </remarks>
+/// <seealso cref="WindowSettings"/>
+/// <seealso cref="Ignite.LayoutLab.LayoutEngine"/>
+/// <seealso cref="GLRenderer"/>
 public sealed partial class IgniteWindow : IDisposable
 {
+    // Attribute names are probed for almost every control operation, so they
+    // are interned once instead of being allocated per lookup.
+    /// <summary>Interned id of the <c>value</c> attribute written by text edits.</summary>
     private static readonly int ValueAttribute = InternTable.Intern("value");
+    /// <summary>Interned id of the boolean <c>checked</c> attribute.</summary>
     private static readonly int CheckedAttribute = InternTable.Intern("checked");
+    /// <summary>Interned id of the boolean <c>selected</c> option attribute.</summary>
     private static readonly int SelectedAttribute = InternTable.Intern("selected");
 
+    /// <summary>The creation options this instance was built with, copied by value.</summary>
     private readonly WindowSettings _settings;
+
+    /// <summary>Author stylesheets in cascade order; the last one wins on ties.</summary>
     private readonly List<string> _stylesheets = [];
+
+    /// <summary>
+    /// Process-wide font cache; initialized with the OpenGL context in
+    /// <see cref="OnLoad"/>.
+    /// </summary>
     private readonly FontManager _fonts = new();
+
+    /// <summary>Decoded image cache backing <c>img</c> replaced content.</summary>
     private readonly ImageCache _images = new();
+
+    /// <summary>UILab renderer for the application tree. Flushed once per frame.</summary>
     private readonly Renderer _ui = new();
+
+    /// <summary>Measures text runs for layout, caret placement and hit testing.</summary>
     private readonly TrueTypeTextMeasurer _measurer;
 
+    /// <summary>
+    /// The Silk.NET window; <see langword="null"/> until <see cref="Run(Ignite.UILab.Node, string)"/> creates
+    /// it.
+    /// </summary>
     private IWindow? _window;
+
+    /// <summary>
+    /// The Silk.NET input context; created in <see cref="OnLoad"/> and released in
+    /// <see cref="OnClosing"/>.
+    /// </summary>
     private IInputContext? _input;
+
+    /// <summary>The OpenGL context, valid only while the frame loop is running.</summary>
     private GL? _gl;
+
+    /// <summary>The display-list renderer; disposed with the GPU resources.</summary>
     private GLRenderer? _renderer;
+
+    /// <summary>
+    /// Reusable layout engine for the app tree. Replaced by
+    /// <see cref="RebuildStyles"/>.
+    /// </summary>
     private LayoutEngine? _layoutEngine;
+
+    /// <summary>The compiled HTML defaults plus author and inspector sheets.</summary>
     private DataTable? _table;
+
+    /// <summary>The app's most recent layout result; drives hit testing and painting.</summary>
     private LayoutResult? _layoutResult;
+
+    /// <summary>The live app root as returned by <see cref="Renderer.Mount"/>.</summary>
     private Node? _root;
+
+    /// <summary>The caller's root node, i.e. the tree without any inspector wrapper.</summary>
     private Node? _appRoot;
+
+    /// <summary>Root length context for the app tree (font-relative and viewport units).</summary>
     private readonly RendererContext _context = new();
+
+    /// <summary>Root length context for the inspector tree, kept separate from the app's.</summary>
     private readonly RendererContext _devToolsContext = new();
+
+    /// <summary>Live inspector model shared with <see cref="InspectorPanel"/>.</summary>
     private readonly DevToolsState _devTools = new();
+
+    /// <summary>
+    /// The standalone inspector window host, created on demand for
+    /// <see cref="DevToolsDock.Window"/>.
+    /// </summary>
     private DevToolsWindowHost? _devToolsWindow;
+
+    /// <summary>The mounted inspector panel component, if devtools are enabled.</summary>
     private InspectorPanel? _devToolsPanel;
+
+    /// <summary>
+    /// UILab renderer for the inspector tree; <see langword="null"/> when devtools
+    /// are disabled.
+    /// </summary>
     private Renderer? _devToolsUi;
+
+    /// <summary>The inspector tree's live root, separate from the app root.</summary>
     private Node? _devToolsRoot;
+
+    /// <summary>
+    /// Layout engine for the inspector tree; <see langword="null"/> when devtools
+    /// are disabled.
+    /// </summary>
     private LayoutEngine? _devToolsLayoutEngine;
+
+    /// <summary>The inspector's most recent layout result.</summary>
     private LayoutResult? _devToolsLayout;
+
+    /// <summary>
+    /// UILab version the inspector was last laid out against; <c>-1</c> forces a
+    /// rebuild.
+    /// </summary>
     private int _lastDevToolsVersion = -1;
+
+    /// <summary>
+    /// Window width the inspector was last laid out at; <c>-1</c> forces a rebuild.
+    /// </summary>
     private int _lastDevToolsWidth = -1;
+
+    /// <summary>
+    /// Window height the inspector was last laid out at; <c>-1</c> forces a rebuild.
+    /// </summary>
     private int _lastDevToolsHeight = -1;
+
+    /// <summary>
+    /// Dock position the inspector was last laid out for; <c>-1</c> forces a rebuild.
+    /// </summary>
     private int _lastDevToolsDock = -1;
+
+    /// <summary>
+    /// Whether the inspector was visible at the last layout; drives the show/hide
+    /// relayout.
+    /// </summary>
     private bool _lastDevToolsVisible;
+
+    /// <summary>
+    /// DPI scale the inspector was last laid out at; compared with a small epsilon.
+    /// </summary>
     private float _lastDevToolsDpi;
+
+    /// <summary>Seconds accumulated since the inspector's last model refresh.</summary>
     private double _lastDevToolsRefresh;
+
+    /// <summary>
+    /// Seconds accumulated since the performance tab last sampled counters
+    /// (0.25 s cadence).
+    /// </summary>
     private double _performanceSampleTimer;
+
+    /// <summary>Timestamp the window was constructed at; the base for all animation time.</summary>
     private readonly long _animationStartTicks = Stopwatch.GetTimestamp();
+
+    /// <summary>Monotonic animation clock in seconds, sampled once per frame.</summary>
     private double _animationTimeSeconds;
+
+    /// <summary>Animation clock value at the last app layout driven by an animation.</summary>
     private double _lastAnimationLayoutTime;
+
+    /// <summary>
+    /// Animation clock value at the last inspector layout driven by an animation.
+    /// </summary>
     private double _lastDevToolsAnimationLayoutTime;
+
+    /// <summary>
+    /// Minimum spacing between animation-driven layouts. Animations still
+    /// present at the display refresh rate, but the box tree is only rebuilt at
+    /// 60 Hz, which bounds CPU cost on high-refresh displays.
+    /// </summary>
     private const double AnimationLayoutInterval = 1.0 / 60.0;
 
+    /// <summary>
+    /// Set when the box tree must be rebuilt. Cleared by a full
+    /// <see cref="Ignite.LayoutLab.LayoutEngine.Layout(IgniteSupportedDomNode, LayoutOptions)"/>
+    /// pass, which also clears
+    /// the two lighter paint flags.
+    /// </summary>
     private bool _needsLayout = true;
+
+    /// <summary>
+    /// Set when only the display list must be rebuilt (scroll offset change).
+    /// Cleared by <see cref="Ignite.LayoutLab.LayoutEngine.Repaint"/> and by any
+    /// full layout.
+    /// </summary>
     private bool _needsPaint;
+
+    /// <summary>
+    /// Set when transform/opacity animations need new computed styles but the
+    /// geometry is unchanged. Cleared by
+    /// <see cref="Ignite.LayoutLab.LayoutEngine.RepaintAnimated"/>.
+    /// </summary>
     private bool _needsAnimatedPaint;
+
+    /// <summary>
+    /// Set when the inspector's display list must be rebuilt; cleared by its
+    /// repaint.
+    /// </summary>
     private bool _needsDevToolsPaint;
+
+    /// <summary>Scratch display list for inspector overlays (caret); rebuilt every frame.</summary>
     private readonly InstructionBuffer _devToolsOverlay = new(16);
+
+    /// <summary>Constants referenced by <see cref="_devToolsOverlay"/>.</summary>
     private readonly ConstantPool _devToolsOverlayConstants = new();
+
+    /// <summary>Reusable display list for app overlays (select menu, caret, hover box).</summary>
     private readonly InstructionBuffer _overlay = new(64);
+
+    /// <summary>Constants referenced by <see cref="_overlay"/>.</summary>
     private readonly ConstantPool _overlayConstants = new();
+
+    /// <summary>Layout options reused by the app tree; mutated in place each layout.</summary>
     private readonly LayoutOptions _appOptions = new();
+
+    /// <summary>Layout options reused by the inspector tree; never shared with the app.</summary>
     private readonly LayoutOptions _devToolsOptions = new();
+
+    /// <summary>Supplies display text for form controls and replaced elements.</summary>
     private readonly Func<IgniteSupportedDomNode, string?> _textProvider;
+
+    /// <summary>Overrides the text colour for placeholder runs.</summary>
     private readonly Func<IgniteSupportedDomNode, string, uint?> _textColorProvider;
+
+    /// <summary>Supplies intrinsic sizes for images and embedded content.</summary>
     private readonly Func<IgniteSupportedDomNode, Size?> _intrinsicSizeProvider;
+
+    /// <summary>Supplies the image to draw for a resolved box.</summary>
     private readonly Func<LayoutBox, ImageSpec?> _imageProvider;
+
+    /// <summary>
+    /// Custom painter that draws app controls after the box background and border.
+    /// </summary>
     private readonly Action<LayoutBox, InstructionBuffer, ConstantPool> _appPainter;
+
+    /// <summary>Custom painter for inspector chrome (colour wheel, swatches).</summary>
     private readonly Action<LayoutBox, InstructionBuffer, ConstantPool> _devToolsPainter;
+
+    /// <summary>True once <see cref="Dispose"/> has run; makes disposal idempotent.</summary>
     private bool _disposed;
+
+    /// <summary>True once GL objects were released; guards against double GPU teardown.</summary>
     private bool _gpuDisposed;
+
+    /// <summary>
+    /// UILab version the app was last laid out against; <c>-1</c> forces a rebuild.
+    /// </summary>
     private int _lastUiVersion = -1;
+
+    /// <summary>UILab version the inspector model was last refreshed against.</summary>
     private int _lastInspectorAppVersion = -1;
+
+    /// <summary>Window width of the last layout, in CSS pixels.</summary>
     private int _lastWidth;
+
+    /// <summary>Window height of the last layout, in CSS pixels.</summary>
     private int _lastHeight;
+
+    /// <summary>
+    /// App viewport width of the last layout, after docked inspector space is
+    /// removed.
+    /// </summary>
     private int _lastAppWidth;
+
+    /// <summary>
+    /// App viewport height of the last layout, after docked inspector space is
+    /// removed.
+    /// </summary>
     private int _lastAppHeight;
+
+    /// <summary>DPI scale of the last layout; changes above 0.001 force a relayout.</summary>
     private float _lastDpi;
+
+    /// <summary>Box count of the last layout, reported to the performance tab.</summary>
     private int _cachedLayoutBoxCount;
+
+    /// <summary>DOM node count of the last layout, reported to the performance tab.</summary>
     private int _cachedNodeCount;
 
     /// <summary>
     /// The shared inspector state when this window hosts a standalone panel.
     /// </summary>
+    /// <value>
+    /// A state object owned by another window's inspector; <see langword="null"/>
+    /// when the inspector is docked or disabled.
+    /// </value>
+    /// <remarks>
+    /// The frame loop honours <see cref="DevToolsState.ScrollSelectedIntoView"/>
+    /// from this state as well as its own, which lets the app window scroll a
+    /// selection made in a separate inspector window.
+    /// </remarks>
     public DevToolsState? SharedDevToolsState { get; set; }
 
+    /// <summary>
+    /// Target path for the next completed frame. When set, the frame is saved and
+    /// the window closes; see <see cref="RequestScreenshot"/>.
+    /// </summary>
     private string? _screenshotPath;
 
+    /// <summary>Scratch list of <c>position: fixed</c> boxes, rebuilt per hit test.</summary>
     private readonly List<LayoutBox> _hitFixedBoxes = [];
+
+    /// <summary>
+    /// The hovered element and all of its ancestors, used to clear <c>:hover</c>.
+    /// </summary>
     private readonly List<ElementNode> _hoverChain = [];
+
+    /// <summary>
+    /// The pressed element and all of its ancestors, used to clear <c>:active</c>.
+    /// </summary>
     private readonly List<ElementNode> _activeChain = [];
+
+    /// <summary>The element under the pointer, or <see langword="null"/>.</summary>
     private ElementNode? _hovered;
+
+    /// <summary>The element the last press landed on; drives the click on release.</summary>
     private ElementNode? _pressed;
+
+    /// <summary>
+    /// The element that captured the pointer (a <c>pointerdown</c> handler target).
+    /// </summary>
     private ElementNode? _pointerTarget;
+
+    /// <summary>True while an inspect-mode press is pending, awaiting its release.</summary>
     private bool _inspectPressed;
+
+    /// <summary>The last cursor requested, cached to avoid redundant native cursor sets.</summary>
     private StandardCursor _cursorKind = StandardCursor.Arrow;
+
+    /// <summary>The focused element; text input, caret and key handling target it.</summary>
     private ElementNode? _focused;
+
+    /// <summary>Working copy of the focused control's text, committed back on blur.</summary>
     private string? _editText;
+
+    /// <summary>Caret offset into <see cref="_editText"/>, in UTF-16 code units.</summary>
     private int _caretIndex;
+
+    /// <summary>Timestamp the caret blink cycle was last restarted.</summary>
     private long _caretBlinkStart;
+
+    /// <summary>Committed option index per <c>select</c> element, overriding markup.</summary>
     private readonly Dictionary<ElementNode, int> _selectIndices = [];
+
+    /// <summary>Scratch list of select entries whose element left the tree.</summary>
     private readonly List<ElementNode> _staleSelects = [];
+
+    /// <summary>The <c>select</c> whose dropdown is open, or <see langword="null"/>.</summary>
     private ElementNode? _openSelect;
+
+    /// <summary>Highlighted row in the open dropdown; <c>-1</c> when no row is hovered.</summary>
     private int _openSelectHover = -1;
+
+    /// <summary>
+    /// Root length context of the most recent app layout, used to resolve lengths.
+    /// </summary>
     private LengthContext _lengthContext;
+
+    /// <summary>Last known pointer X in window CSS pixels.</summary>
     private float _mouseX;
+
+    /// <summary>Last known pointer Y in window CSS pixels.</summary>
     private float _mouseY;
+
+    /// <summary>Smooth-scroll animations keyed by the scrolling node.</summary>
     private readonly Dictionary<IgniteSupportedDomNode, ScrollAnimation> _scrollAnimations = [];
+
+    /// <summary>Scratch list of scroll animations whose node left the tree.</summary>
     private readonly List<IgniteSupportedDomNode> _staleScrollAnimations = [];
+
+    /// <summary>Active thumb drag on a native scrollbar, if any.</summary>
     private ScrollbarDrag? _scrollDrag;
 
+    /// <summary>
+    /// Creates the window controller, its text measurer and the initial CSS
+    /// table. The native window is not created until <see cref="Run(Ignite.UILab.Node, string)"/> is called.
+    /// </summary>
+    /// <param name="settings">
+    /// Creation options. The value is copied, so later changes to the caller's
+    /// copy have no effect.
+    /// </param>
+    /// <remarks>
+    /// The constructor compiles the built-in HTML stylesheet, the inspector
+    /// stylesheet when <see cref="WindowSettings.EnableDevTools"/> is set, and
+    /// wires the inspector's <c>StylesChanged</c> notifications. It allocates no
+    /// GPU resources, so it is safe to call before a graphics context exists.
+    /// </remarks>
+    /// <seealso cref="WindowSettings"/>
     public IgniteWindow(WindowSettings settings)
     {
         _settings = settings;
@@ -137,47 +448,155 @@ public sealed partial class IgniteWindow : IDisposable
     }
 
     /// <summary>Raised after the OpenGL context and input devices are ready.</summary>
+    /// <remarks>
+    /// Fires from the frame thread inside the Silk.NET load callback, before the
+    /// first frame. <see cref="Gl"/>, <see cref="SilkWindow"/> and
+    /// <see cref="Input"/> are already non-null here, so handlers may upload
+    /// textures or register extra input callbacks. The handler receives the
+    /// window that finished initializing.
+    /// </remarks>
     public event Action<IgniteWindow>? Loaded;
 
     /// <summary>Raised once per frame before pending UI work is flushed.</summary>
+    /// <remarks>
+    /// This is the earliest hook in the frame and the only one guaranteed to run
+    /// before UILab flushes queued state updates. The handler receives the window
+    /// about to render and the seconds elapsed since the previous frame. Handlers
+    /// run on the frame thread; blocking here stalls the window.
+    /// </remarks>
     public event Action<IgniteWindow, double>? BeforeFrame;
 
     /// <summary>Raised when the native window closes.</summary>
+    /// <remarks>
+    /// Fires from <see cref="OnClosing"/> while the GL context is still alive but
+    /// after input devices and GPU resources have been released. The handler
+    /// receives the window being closed. Use it for non-GPU cleanup; do not issue
+    /// draw calls.
+    /// </remarks>
     public event Action<IgniteWindow>? Closed;
 
+    /// <summary>Gets the underlying Silk.NET window.</summary>
+    /// <value>
+    /// The native window after <see cref="Run(Ignite.UILab.Node, string)"/> has created it, otherwise
+    /// <see langword="null"/>.
+    /// </value>
     public IWindow? SilkWindow => _window;
 
+    /// <summary>Gets the OpenGL API surface bound to the window.</summary>
+    /// <value>
+    /// The GL context while the frame loop is running, otherwise
+    /// <see langword="null"/>.
+    /// </value>
+    /// <remarks>
+    /// Usable from <see cref="Loaded"/> onwards; <see cref="DisposeGpu"/> releases it.
+    /// </remarks>
     public GL? Gl => _gl;
 
+    /// <summary>Gets the Silk.NET input context that feeds pointer and keyboard events.</summary>
+    /// <value>
+    /// The input context between <see cref="Loaded"/> and window close, otherwise
+    /// <see langword="null"/>.
+    /// </value>
     public IInputContext? Input => _input;
 
+    /// <summary>Gets the UILab renderer that owns the application tree.</summary>
+    /// <value>A renderer that is mounted at most once, by <see cref="Mount"/>.</value>
+    /// <remarks>
+    /// Its <see cref="Renderer.Version"/> is the change signal the frame loop uses
+    /// to decide whether the box tree must be rebuilt.
+    /// </remarks>
     public Renderer UI => _ui;
 
+    /// <summary>Gets the live application root node returned by UILab.</summary>
+    /// <value>
+    /// The mounted root, including any wrapper nodes UILab introduced, or
+    /// <see langword="null"/> before <see cref="Mount"/>.
+    /// </value>
     public Node? Root => _root;
 
     /// <summary>The application root, without the inspector wrapper.</summary>
+    /// <value>
+    /// The node passed to <see cref="Mount"/>, or <see langword="null"/> before
+    /// the first mount.
+    /// </value>
+    /// <remarks>
+    /// The inspector tree is never reachable through this node; it lives in a
+    /// separate UILab renderer and is composited over the app.
+    /// </remarks>
     public Node? AppRoot => _appRoot;
 
     /// <summary>Live inspector state. Read or change it to open, close or move devtools.</summary>
+    /// <remarks>
+    /// Changes that affect layout, such as <see cref="DevToolsState.Visible"/> or
+    /// <see cref="DevToolsState.Dock"/>, are picked up on the next frame; the
+    /// convenience methods <see cref="ShowDevTools"/>, <see cref="HideDevTools"/>
+    /// and <see cref="ToggleDevTools"/> additionally force the relayout.
+    /// </remarks>
     public DevToolsState DevTools => _devTools;
 
+    /// <summary>Gets the layout result painted by the most recent frame.</summary>
+    /// <value>
+    /// The app's box tree, display list and per-node box map, or
+    /// <see langword="null"/> before the first layout.
+    /// </value>
+    /// <remarks>
+    /// Unless the inspector runs in its own window, the boxes in this result are
+    /// reused and mutated by the next layout; read it only between frames.
+    /// </remarks>
     public LayoutResult? FrameResult => _layoutResult;
 
+    /// <summary>Gets the number of frames presented since the window opened.</summary>
     public int FrameCount { get; private set; }
 
+    /// <summary>
+    /// Gets the duration of the last frame, in milliseconds, as reported by the
+    /// window loop.
+    /// </summary>
+    /// <remarks>This is the loop delta, not the CPU time spent producing the frame.</remarks>
     public double LastFrameMilliseconds { get; private set; }
 
+    /// <summary>
+    /// Gets the time spent in the last layout, repaint or animated repaint, in
+    /// milliseconds.
+    /// </summary>
+    /// <remarks>Zero on frames that reused the previous geometry entirely.</remarks>
     public double LastLayoutMilliseconds { get; private set; }
 
+    /// <summary>
+    /// Gets the time spent submitting the last frame to the renderer, in
+    /// milliseconds.
+    /// </summary>
     public double LastRenderMilliseconds { get; private set; }
 
+    /// <summary>
+    /// Gets the number of display-list instructions produced by the last layout.
+    /// </summary>
+    /// <value>
+    /// The app instructions plus the inspector instructions, measured in
+    /// <c>Instruction</c> entries.
+    /// </value>
     public int LastInstructionCount =>
         (_layoutResult?.Opcodes.Length ?? 0) + (_devToolsLayout?.Opcodes.Length ?? 0);
 
     /// <summary>Milliseconds spent flushing pending UI updates on the last frame.</summary>
+    /// <remarks>Measures <see cref="Renderer.Flush"/> for both the app and the inspector.</remarks>
     public double LastUpdateMilliseconds { get; private set; }
 
     /// <summary>Shows or hides the built-in inspector.</summary>
+    /// <remarks>
+    /// <para>
+    /// Does nothing when <see cref="WindowSettings.EnableDevTools"/> is
+    /// <see langword="false"/>. Hiding also leaves inspect mode, clears the
+    /// inspected hover target and resets the pointer to an arrow so a hidden
+    /// inspector cannot keep intercepting picks.
+    /// </para>
+    /// <para>
+    /// The inspector model is refreshed immediately and the tree is marked for
+    /// layout, so the first frame after the call is already consistent.
+    /// </para>
+    /// </remarks>
+    /// <seealso cref="ShowDevTools"/>
+    /// <seealso cref="HideDevTools"/>
     public void ToggleDevTools()
     {
         if (!_settings.EnableDevTools)
@@ -201,6 +620,11 @@ public sealed partial class IgniteWindow : IDisposable
     }
 
     /// <summary>Shows the built-in inspector.</summary>
+    /// <remarks>
+    /// No-op when devtools are disabled by <see cref="WindowSettings.EnableDevTools"/>.
+    /// Showing is idempotent; it refreshes the inspector model and schedules a
+    /// layout so docked panels take their space immediately.
+    /// </remarks>
     public void ShowDevTools()
     {
         if (!_settings.EnableDevTools)
@@ -215,6 +639,11 @@ public sealed partial class IgniteWindow : IDisposable
     }
 
     /// <summary>Hides the built-in inspector.</summary>
+    /// <remarks>
+    /// Always safe to call, even when devtools are disabled. Hiding clears
+    /// inspect mode, the hovered element, the colour-picker target and the
+    /// pointer cursor, and restores the full app viewport.
+    /// </remarks>
     public void HideDevTools()
     {
         _devTools.Visible = false;
@@ -228,6 +657,26 @@ public sealed partial class IgniteWindow : IDisposable
     }
 
     /// <summary>The mount point of the live tree. Call <see cref="Mount"/> first.</summary>
+    /// <param name="root">The UILab tree to mount; must not be <see langword="null"/>.</param>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="root"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// A tree is already mounted. A window owns exactly one tree; create another
+    /// instance for a second document.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// Mounts the app tree into <see cref="UI"/> and, when devtools are enabled,
+    /// builds the inspector tree in a second renderer. The inspector is
+    /// composited separately and never wraps or alters the app's nodes.
+    /// </para>
+    /// <para>
+    /// The method only records and mounts; no layout runs until the next frame.
+    /// It must be called on the thread that owns the window.
+    /// </para>
+    /// </remarks>
+    /// <seealso cref="Run(Node, string)"/>
     public void Mount(Node root)
     {
         ArgumentNullException.ThrowIfNull(root);
@@ -261,6 +710,23 @@ public sealed partial class IgniteWindow : IDisposable
     }
 
     /// <summary>Replaces all author stylesheets. The built-in HTML sheet always applies first.</summary>
+    /// <param name="css">
+    /// A single CSS document, or <see langword="null"/> or whitespace to keep only
+    /// the user-agent sheet.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// The previous author sheets are dropped and the whole
+    /// <see cref="DataTable"/> is rebuilt: user-agent rules first, then this
+    /// sheet, then the inspector sheet when devtools are enabled. Existing style
+    /// caches and layout engines are discarded, so the next frame performs a
+    /// full restyle and relayout.
+    /// </para>
+    /// <para>
+    /// Call this before or after <see cref="Mount"/>; a mounted tree is
+    /// re-matched against the new table without being remounted.
+    /// </para>
+    /// </remarks>
     public void SetStylesheet(string? css)
     {
         _stylesheets.Clear();
@@ -274,6 +740,15 @@ public sealed partial class IgniteWindow : IDisposable
     }
 
     /// <summary>Appends an author stylesheet after the existing sheets.</summary>
+    /// <param name="css">The CSS document to append; must not be <see langword="null"/>.</param>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="css"/> is <see langword="null"/>.
+    /// </exception>
+    /// <remarks>
+    /// Appended sheets cascade after earlier author sheets and therefore win on
+    /// equal specificity. The table is rebuilt and the tree relaid out on the
+    /// next frame, exactly like <see cref="SetStylesheet"/>.
+    /// </remarks>
     public void AddStylesheet(string css)
     {
         ArgumentNullException.ThrowIfNull(css);
@@ -282,12 +757,34 @@ public sealed partial class IgniteWindow : IDisposable
     }
 
     /// <summary>Marks the current tree as needing a new layout pass.</summary>
+    /// <remarks>
+    /// Use after mutating DOM state or CSS variables outside a UILab render, where
+    /// no <see cref="Renderer.Version"/> bump signal exists. This is a full box
+    /// rebuild, not just a repaint: prefer scroll offsets or animation state when
+    /// geometry is unchanged. Call on the frame thread.
+    /// </remarks>
     public void Invalidate() => _needsLayout = true;
 
     /// <summary>
     /// Saves the next finished frame to a 24-bit BMP and closes the window. This
     /// is useful for headless smoke tests and visual regression fixtures.
     /// </summary>
+    /// <param name="path">Destination file path; missing directories are created.</param>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="path"/> is <see langword="null"/>, empty or whitespace.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// Capture happens after the frame has been rendered and before the next one
+    /// starts: the framebuffer is read back bottom-up, converted from RGB to BGR
+    /// and written with 4-byte aligned rows. The window then closes, so
+    /// <see cref="Run(Ignite.UILab.Node, string)"/> returns and the instance is disposed.
+    /// </para>
+    /// <para>
+    /// The file is 24-bit uncompressed BMP; alpha and multisample resolve are
+    /// whatever OpenGL produced for the default framebuffer.
+    /// </para>
+    /// </remarks>
     public void RequestScreenshot(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -295,9 +792,44 @@ public sealed partial class IgniteWindow : IDisposable
     }
 
     /// <summary>Creates the native window and enters the frame loop.</summary>
+    /// <exception cref="InvalidOperationException">
+    /// No tree has been mounted through <see cref="Mount"/>.
+    /// </exception>
+    /// <remarks>
+    /// Equivalent to <see cref="Run(Node, string)"/> with no tree and no
+    /// stylesheet, for hosts that mount and configure the window themselves.
+    /// </remarks>
     public void Run() => Run(null, null);
 
     /// <summary>Mounts a tree, optionally sets a stylesheet and enters the frame loop.</summary>
+    /// <param name="root">
+    /// The tree to mount when <see cref="Mount"/> has not been called yet;
+    /// <see langword="null"/> keeps the existing tree.
+    /// </param>
+    /// <param name="stylesheet">
+    /// An author stylesheet to install. When <see langword="null"/>, the sheets
+    /// declared through <c>[Stylesheet(...)]</c> are loaded and merged instead.
+    /// </param>
+    /// <exception cref="InvalidOperationException">
+    /// No tree is mounted after the optional <paramref name="root"/> has been
+    /// applied.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// Window options are derived from <see cref="WindowSettings"/>: logical size,
+    /// title, vsync and frame cap, MSAA samples, border and fullscreen state, an
+    /// OpenGL 3.3 forward-compatible core context, no depth buffer and an 8-bit
+    /// stencil buffer.
+    /// </para>
+    /// <para>
+    /// The call blocks on the Silk.NET loop. When the loop exits, the native
+    /// window cannot be torn down from inside its closing callback without
+    /// resetting the active GL context, so resources are released in
+    /// <see cref="OnClosing"/> and the window itself is disposed here before the
+    /// method returns.
+    /// </para>
+    /// </remarks>
+    /// <seealso cref="RequestScreenshot"/>
     public void Run(Node? root, string? stylesheet = null)
     {
         // When no stylesheet is supplied explicitly, pick up every stylesheet
@@ -359,6 +891,15 @@ public sealed partial class IgniteWindow : IDisposable
         Dispose();
     }
 
+    /// <summary>
+    /// Creates the GL API, font atlas, image cache, renderer and input context,
+    /// then raises <see cref="Loaded"/>.
+    /// </summary>
+    /// <remarks>
+    /// Runs once from the Silk.NET load callback, on the frame thread, with the
+    /// OpenGL context current. The forced relayout makes the first frame paint a
+    /// full tree rather than a cleared window.
+    /// </remarks>
     private void OnLoad()
     {
         _gl = GL.GetApi(_window);
@@ -371,11 +912,67 @@ public sealed partial class IgniteWindow : IDisposable
         _needsLayout = true;
     }
 
+    /// <summary>
+    /// Handles a native resize by forcing a full relayout on the next frame.
+    /// </summary>
+    /// <param name="size">
+    /// The new logical client size in CSS pixels; it is not read here because the
+    /// frame loop samples the native window <c>Size</c> and the framebuffer size
+    /// itself, which also covers DPI changes and multi-monitor moves.
+    /// </param>
+    /// <remarks>
+    /// The event is not debounced: a live resize marks the tree once per resize
+    /// event, but the flags collapse into a single layout per rendered frame.
+    /// </remarks>
     private void OnResize(Vector2D<int> size)
     {
         _needsLayout = true;
     }
 
+    /// <summary>
+    /// Produces one frame: refreshes UI state and scroll animations, runs only the
+    /// layout work that the dirty flags and version counters call for, builds the
+    /// overlays, submits the display lists and records frame timings.
+    /// </summary>
+    /// <param name="delta">Seconds elapsed since the previous frame.</param>
+    /// <remarks>
+    /// <para>The order is deliberate:</para>
+    /// <list type="number">
+    /// <item><description>
+    /// <see cref="BeforeFrame"/> runs first, before any queued UILab update is
+    /// flushed, so a handler can still change state for this frame.
+    /// </description></item>
+    /// <item><description>
+    /// Scroll animations advance and the animation clock is sampled.
+    /// </description></item>
+    /// <item><description>
+    /// Both UILab renderers flush, and the elapsed time is published as
+    /// <see cref="LastUpdateMilliseconds"/>.
+    /// </description></item>
+    /// <item><description>
+    /// Queued inspector edits are applied on this thread, and devtools
+    /// visibility/window hosting is synchronized.
+    /// </description></item>
+    /// <item><description>
+    /// Geometry is rebuilt only when a dirty flag, a UILab version change, a
+    /// viewport or app-viewport change, or a DPI change is detected; a repaint or
+    /// animated repaint is used instead when possible.
+    /// </description></item>
+    /// <item><description>
+    /// Dead interaction references are pruned, animation work is re-requested at
+    /// the 60 Hz layout cadence, overlays are rebuilt and the frame is submitted.
+    /// </description></item>
+    /// </list>
+    /// <para>
+    /// The framebuffer size is read separately from the logical size: their ratio
+    /// is the DPI scale used for layout and rasterization. Docked inspectors
+    /// reduce the app viewport before layout, never after.
+    /// </para>
+    /// <para>
+    /// A pending screenshot is written after presentation and then closes the
+    /// window, which ends the loop.
+    /// </para>
+    /// </remarks>
     private void OnRender(double delta)
     {
         if (_renderer is null || _gl is null || _window is null || _root is null)
@@ -682,6 +1279,22 @@ public sealed partial class IgniteWindow : IDisposable
         }
     }
 
+    /// <summary>
+    /// Applies queued inspector edits on the frame thread, keeps the standalone
+    /// inspector window in sync and refreshes the inspector model when it is due.
+    /// </summary>
+    /// <param name="delta">Seconds elapsed since the previous frame.</param>
+    /// <remarks>
+    /// <para>
+    /// The inspector may live in its own window on another thread, so edits are
+    /// queued and drained here, before layout, rather than applied directly.
+    /// </para>
+    /// <para>
+    /// Refreshes are throttled: the Performance tab rebuilds once per second, the
+    /// Elements tab only when the app's UILab version changed. Selection changes
+    /// refresh the model at their source instead of through this timer.
+    /// </para>
+    /// </remarks>
     private void UpdateDevTools(double delta)
     {
         if (!_settings.EnableDevTools)
@@ -746,6 +1359,15 @@ public sealed partial class IgniteWindow : IDisposable
     /// Focuses an inspector control requested by the panel (for example the
     /// property field of a newly opened "Add property" row).
     /// </summary>
+    /// <returns>
+    /// <see langword="true"/> when a pending class was present and a matching
+    /// element was found and focused; <see langword="false"/> otherwise.
+    /// </returns>
+    /// <remarks>
+    /// The pending class is consumed even when no element matches, so a stale
+    /// request cannot fire on a later frame. Called automatically while a docked
+    /// inspector is visible.
+    /// </remarks>
     public bool FocusPendingDevToolsInput()
     {
         if (_devTools.PendingFocusClass is not { } className || _devToolsRoot is null)
@@ -765,6 +1387,15 @@ public sealed partial class IgniteWindow : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Finds the first element carrying <paramref name="className"/> in a subtree.
+    /// </summary>
+    /// <param name="node">Subtree root; may be <see langword="null"/>.</param>
+    /// <param name="className">The exact class token to match.</param>
+    /// <returns>The first matching element in document order, or <see langword="null"/>.</returns>
+    /// <remarks>
+    /// Depth-first and recursive; intended for one-off lookups in the inspector tree.
+    /// </remarks>
     private static ElementNode? FindByClass(IgniteSupportedDomNode? node, string className)
     {
         if (node is ElementNode element && element.HasClass(className))
@@ -790,6 +1421,15 @@ public sealed partial class IgniteWindow : IDisposable
         return null;
     }
 
+    /// <summary>
+    /// Invalidates every cached style after a CSS declaration was edited in the
+    /// inspector, then forces both trees to restyle and the panel to rebuild.
+    /// </summary>
+    /// <remarks>
+    /// Both engines share one <see cref="DataTable"/>, so both caches must be
+    /// dropped; clearing only the app's would leave the inspector showing stale
+    /// computed values.
+    /// </remarks>
     private void OnDevToolsStylesChanged()
     {
         // A declaration was edited. Drop every cached style so the next layout
@@ -801,6 +1441,9 @@ public sealed partial class IgniteWindow : IDisposable
         _lastDevToolsVersion = -1;
     }
 
+    /// <summary>Counts boxes in a laid-out subtree, including the root box itself.</summary>
+    /// <param name="box">Subtree root; <see langword="null"/> counts as zero.</param>
+    /// <returns>The total number of boxes in the subtree.</returns>
     private static int CountLayoutBoxes(LayoutBox? box)
     {
         if (box is null)
@@ -818,6 +1461,9 @@ public sealed partial class IgniteWindow : IDisposable
         return count;
     }
 
+    /// <summary>Counts DOM nodes in a subtree, including <paramref name="node"/> itself.</summary>
+    /// <param name="node">Subtree root; <see langword="null"/> counts as zero.</param>
+    /// <returns>The total number of nodes in the subtree.</returns>
     private static int CountNodes(IgniteSupportedDomNode? node)
     {
         if (node is null)
@@ -836,6 +1482,24 @@ public sealed partial class IgniteWindow : IDisposable
         return count;
     }
 
+    /// <summary>
+    /// Reads the default framebuffer back and writes it as an uncompressed
+    /// 24-bit BMP.
+    /// </summary>
+    /// <param name="path">Destination file; missing parent directories are created.</param>
+    /// <param name="width">Framebuffer width in physical pixels.</param>
+    /// <param name="height">Framebuffer height in physical pixels.</param>
+    /// <remarks>
+    /// <para>
+    /// The read uses <c>PackAlignment = 1</c> so rows are tightly packed, and the
+    /// data is written bottom-up as BMP expects. Each row is padded to a 4-byte
+    /// boundary and RGB is swapped to BGR.
+    /// </para>
+    /// <para>
+    /// Must run while the GL context is current. Silent no-op for a null context
+    /// or non-positive dimensions; file or GL failures propagate to the caller.
+    /// </para>
+    /// </remarks>
     private unsafe void SaveFramebuffer(string path, int width, int height)
     {
         if (_gl is null || width <= 0 || height <= 0)
@@ -898,6 +1562,42 @@ public sealed partial class IgniteWindow : IDisposable
         }
     }
 
+    /// <summary>
+    /// Populates the cached layout options for one tree and returns them for the
+    /// engine.
+    /// </summary>
+    /// <param name="width">Viewport width in CSS pixels.</param>
+    /// <param name="height">Viewport height in CSS pixels.</param>
+    /// <param name="dpi">Device pixel ratio applied to the viewport context.</param>
+    /// <param name="context">
+    /// Root length context to publish the viewport into. The app and inspector
+    /// each keep their own so a viewport change in one cannot invalidate the
+    /// other's style cache.
+    /// </param>
+    /// <param name="isApp">
+    /// <see langword="true"/> for the application tree, <see langword="false"/>
+    /// for the inspector.
+    /// </param>
+    /// <returns>
+    /// The shared options instance for that tree, mutated in place. Do not store
+    /// it beyond the layout call.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// Box reuse is disabled for the app while the inspector runs in its own
+    /// window: that inspector can read the app's <see cref="LayoutResult"/> from
+    /// another thread, and in-place box reuse would mutate the tree while it is
+    /// being read. In that mode results are snapshotted instead.
+    /// </para>
+    /// <para>
+    /// Text layout caching is enabled for the app only; the inspector renders
+    /// live numbers whose strings would otherwise accumulate in the cache.
+    /// </para>
+    /// <para>
+    /// Only the app call assigns <c>_lengthContext</c>, which the painters use to
+    /// resolve font and line-height lengths against the current viewport.
+    /// </para>
+    /// </remarks>
     private LayoutOptions CreateLayoutOptions(
         int width,
         int height,
@@ -952,6 +1652,22 @@ public sealed partial class IgniteWindow : IDisposable
         return options;
     }
 
+    /// <summary>
+    /// Recompiles the cascade from user-agent rules, author sheets and the
+    /// inspector sheet, then recreates both layout engines.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Called by the constructor and by every stylesheet change. Rule ranges are
+    /// recorded per sheet so the inspector can attribute a matched declaration to
+    /// its source.
+    /// </para>
+    /// <para>
+    /// Both engines are replaced rather than reused: their style caches, value
+    /// caches and box maps are all keyed to the previous table and must not
+    /// survive it. The mounted tree is unaffected; the next layout re-matches it.
+    /// </para>
+    /// </remarks>
     private void RebuildStyles()
     {
         var table = new DataTable();
@@ -986,6 +1702,27 @@ public sealed partial class IgniteWindow : IDisposable
 
     // ------------------------------------------------------------------ text
 
+    /// <summary>
+    /// Resolves the text a node contributes to layout, accounting for form
+    /// control values, placeholders and replaced elements.
+    /// </summary>
+    /// <param name="node">The node being laid out.</param>
+    /// <returns>
+    /// The text to lay out, or <see langword="null"/> when the node contributes
+    /// no text (image with a source, progress/meter/br, non-text inputs).
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// A focused text control reports its live <c>_editText</c> instead of the
+    /// stored value, so typing reflows without committing to the DOM. A focused
+    /// but empty control keeps showing its placeholder: browsers do the same, and
+    /// it keeps the line box from collapsing on focus.
+    /// </para>
+    /// <para>
+    /// A <c>select</c> reports the label of its currently selected option, using
+    /// the committed index when the user has picked one and the markup otherwise.
+    /// </para>
+    /// </remarks>
     private string? GetDisplayText(IgniteSupportedDomNode node)
     {
         if (node is not ElementNode element || HtmlDefaults.IsHidden(element.Tag))
@@ -1058,8 +1795,22 @@ public sealed partial class IgniteWindow : IDisposable
         }
     }
 
+    /// <summary>
+    /// Placeholder text colour, in the engine's packed 0xAARRGGBB form, chosen to
+    /// match the default HTML sheet's muted foreground.
+    /// </summary>
     private const uint PlaceholderTextColor = 0xFF8C959F;
 
+    /// <summary>
+    /// Returns an override colour for placeholder text, or <see langword="null"/>
+    /// to use the element's computed colour.
+    /// </summary>
+    /// <param name="node">The node whose text is being painted.</param>
+    /// <param name="text">The text run being painted; not inspected.</param>
+    /// <returns>
+    /// <see cref="PlaceholderTextColor"/> for an empty text control that has a
+    /// placeholder, otherwise <see langword="null"/>.
+    /// </returns>
     private static uint? GetTextColorOverride(IgniteSupportedDomNode node, string text)
     {
         if (node is not ElementNode element || !IsTextControl(element))
@@ -1082,6 +1833,11 @@ public sealed partial class IgniteWindow : IDisposable
         return PlaceholderTextColor;
     }
 
+    /// <summary>
+    /// Collects the <c>option</c> descendants of a <c>select</c> in document order.
+    /// </summary>
+    /// <param name="select">The select element to search.</param>
+    /// <returns>A new list, empty when the select has no options.</returns>
     private static List<ElementNode> FindOptions(ElementNode select)
     {
         var results = new List<ElementNode>();
@@ -1089,6 +1845,13 @@ public sealed partial class IgniteWindow : IDisposable
         return results;
     }
 
+    /// <summary>
+    /// Appends <c>option</c> descendants to <paramref name="results"/>, descending
+    /// through wrappers such as <c>optgroup</c>.
+    /// </summary>
+    /// <param name="node">Subtree to walk.</param>
+    /// <param name="results">Accumulator; not cleared.</param>
+    /// <remarks>Stops descending once an option is found, since options are not nested.</remarks>
     private static void CollectOptions(Node node, List<ElementNode> results)
     {
         if (node is ElementNode element)
@@ -1113,6 +1876,19 @@ public sealed partial class IgniteWindow : IDisposable
 
     // ---------------------------------------------------------------- select
 
+    /// <summary>
+    /// Resolves which option a <c>select</c> currently shows.
+    /// </summary>
+    /// <param name="select">The select element.</param>
+    /// <param name="options">Its options, in document order.</param>
+    /// <returns>
+    /// A valid index into <paramref name="options"/>; <c>0</c> when nothing is marked.
+    /// </returns>
+    /// <remarks>
+    /// A committed index wins over markup, but is ignored if it fell out of range
+    /// (options added or removed since the user picked). The markup fallback is
+    /// the first option carrying the <c>selected</c> attribute.
+    /// </remarks>
     private int GetSelectedIndex(ElementNode select, List<ElementNode> options)
     {
         if (_selectIndices.TryGetValue(select, out var index) && index >= 0 && index < options.Count)
@@ -1131,6 +1907,16 @@ public sealed partial class IgniteWindow : IDisposable
         return 0;
     }
 
+    /// <summary>
+    /// Opens the dropdown of a <c>select</c> and highlights its current option.
+    /// </summary>
+    /// <param name="select">The select to open.</param>
+    /// <remarks>
+    /// No-op for a select without options. Opening does not invalidate layout: the
+    /// menu is an overlay rebuilt from <c>_openSelect</c> every frame. Only one
+    /// menu can be open at a time, and <see cref="Focus"/> closes it when focus
+    /// moves elsewhere.
+    /// </remarks>
     private void OpenSelectMenu(ElementNode select)
     {
         var options = FindOptions(select);
@@ -1144,12 +1930,27 @@ public sealed partial class IgniteWindow : IDisposable
         _openSelectHover = GetSelectedIndex(select, options);
     }
 
+    /// <summary>Closes any open dropdown and forgets its highlight row.</summary>
     private void CloseSelectMenu()
     {
         _openSelect = null;
         _openSelectHover = -1;
     }
 
+    /// <summary>
+    /// Commits an option as the selection of a <c>select</c> and dispatches its
+    /// <c>change</c> event.
+    /// </summary>
+    /// <param name="select">The select being changed.</param>
+    /// <param name="index">
+    /// Zero-based option index; clamped into the valid range instead of throwing.
+    /// </param>
+    /// <remarks>
+    /// The committed index is stored per element, the <c>selected</c> attribute is
+    /// moved onto exactly one option, and a full relayout is requested because the
+    /// control's displayed text changed. The <c>change</c> event receives the
+    /// option's text, falling back to its <c>value</c> attribute.
+    /// </remarks>
     private void SelectOption(ElementNode select, int index)
     {
         var options = FindOptions(select);
@@ -1178,8 +1979,23 @@ public sealed partial class IgniteWindow : IDisposable
         Invoke(select, "change", options[index].TextContent ?? GetAttribute(options[index], "value") ?? string.Empty);
     }
 
+    /// <summary>Geometry of an open dropdown, in window CSS pixels.</summary>
+    /// <param name="Menu">The full menu rectangle, including its padding.</param>
+    /// <param name="RowHeight">Height of one option row.</param>
     private readonly record struct SelectMenuLayout(Rect Menu, float RowHeight);
 
+    /// <summary>
+    /// Tests whether a window point falls on a row of an open dropdown.
+    /// </summary>
+    /// <param name="select">The select whose dropdown is open.</param>
+    /// <param name="x">Pointer X in window CSS pixels.</param>
+    /// <param name="y">Pointer Y in window CSS pixels.</param>
+    /// <param name="index">The row index under the point, or <c>-1</c>.</param>
+    /// <returns><see langword="true"/> when the point is inside a valid option row.</returns>
+    /// <remarks>
+    /// The row is derived from the same geometry used for painting
+    /// (<see cref="ComputeSelectMenu"/>), so hit testing and rendering cannot drift.
+    /// </remarks>
     private bool TryHitSelectOption(ElementNode select, float x, float y, out int index)
     {
         index = -1;
@@ -1214,8 +2030,21 @@ public sealed partial class IgniteWindow : IDisposable
         return true;
     }
 
+    /// <summary>Padding in CSS pixels between the dropdown edge and its rows.</summary>
     private const float SelectMenuPadding = 4;
 
+    /// <summary>
+    /// Computes where a dropdown opens relative to its control.
+    /// </summary>
+    /// <param name="box">The select's layout box, in unscrolled layout coordinates.</param>
+    /// <param name="optionCount">Number of rows to fit.</param>
+    /// <returns>The menu rectangle and row height, already clamped to the window.</returns>
+    /// <remarks>
+    /// The menu prefers the space below the control, flips above when it does not
+    /// fit, and finally clamps inside the viewport. It is at least as wide as the
+    /// control and never narrower than 140 CSS px. Row height is the line height
+    /// plus 10 px, with a 28 px floor.
+    /// </remarks>
     private SelectMenuLayout ComputeSelectMenu(LayoutBox box, int optionCount)
     {
         var selectRect = PaintedBorderBox(box);
@@ -1249,6 +2078,18 @@ public sealed partial class IgniteWindow : IDisposable
         return new SelectMenuLayout(new Rect(x, y, width, height), rowHeight);
     }
 
+    /// <summary>
+    /// Returns a box's border box translated into painted (window) coordinates by
+    /// subtracting every scrolling ancestor's offset.
+    /// </summary>
+    /// <param name="box">The box to project.</param>
+    /// <returns>The border box as it appears on screen, in CSS pixels.</returns>
+    /// <remarks>
+    /// Layout boxes keep unscrolled absolute coordinates; the display list applies
+    /// the scroll translation during paint. Anything comparing against pointer
+    /// coordinates must apply the same translation, which is why hit testing,
+    /// overlays and caret placement all route through this helper.
+    /// </remarks>
     private static Rect PaintedBorderBox(LayoutBox box)
     {
         var scrollX = 0f;
@@ -1266,6 +2107,21 @@ public sealed partial class IgniteWindow : IDisposable
         return box.BorderBox.Translate(-scrollX, -scrollY);
     }
 
+    /// <summary>
+    /// Rebuilds the app overlay display list (open dropdown, caret and inspector
+    /// hover highlight).
+    /// </summary>
+    /// <param name="overlay">Receives the overlay instructions.</param>
+    /// <param name="constants">Receives the constants those instructions reference.</param>
+    /// <returns>
+    /// <see langword="true"/> when at least one overlay instruction was produced.
+    /// </returns>
+    /// <remarks>
+    /// Returns early without clearing the buffers when no overlay can exist, which
+    /// keeps the common idle frame allocation-free. The order matters: the dropdown
+    /// paints first so the caret stays visible above it, and the inspector highlight
+    /// paints last so it always sits on top.
+    /// </remarks>
     private bool BuildOverlays(out InstructionBuffer overlay, out ConstantPool constants)
     {
         var hasHover = _settings.EnableDevTools
@@ -1298,6 +2154,17 @@ public sealed partial class IgniteWindow : IDisposable
         return overlay.Count > 0;
     }
 
+    /// <summary>
+    /// Paints the inspect-mode highlight: a translucent fill, a 1 px outline and a
+    /// size label for the element hovered in the inspector.
+    /// </summary>
+    /// <param name="overlay">Overlay display list to append to.</param>
+    /// <param name="constants">Constant pool for the label text and corner radius.</param>
+    /// <remarks>
+    /// The label is positioned above the highlight and flips below when it would
+    /// leave the top of the window. Label width is estimated from the character
+    /// count rather than measured, so it is deliberately padded.
+    /// </remarks>
     private void BuildHoverOverlay(InstructionBuffer overlay, ConstantPool constants)
     {
         if (!_settings.EnableDevTools
@@ -1349,6 +2216,19 @@ public sealed partial class IgniteWindow : IDisposable
         overlay.Add(Instruction.DrawText(labelRect.Deflate(5, 5, 2, 2), textId));
     }
 
+    /// <summary>
+    /// Finds a laid-out box for a node, falling back to a descendant and then to
+    /// the nearest ancestor.
+    /// </summary>
+    /// <param name="layout">Layout result to search.</param>
+    /// <param name="node">The DOM node to locate.</param>
+    /// <param name="box">The first usable box, or <see langword="null"/>.</param>
+    /// <returns><see langword="true"/> when a box was found.</returns>
+    /// <remarks>
+    /// The inspector can hover a wrapper, a text node's parent or a
+    /// <c>display: contents</c> element that owns no box; outlining the descendant
+    /// or ancestor box is more useful than drawing nothing.
+    /// </remarks>
     private static bool TryFindBox(
         LayoutResult layout,
         IgniteSupportedDomNode node,
@@ -1381,6 +2261,18 @@ public sealed partial class IgniteWindow : IDisposable
         return false;
     }
 
+    /// <summary>
+    /// Paints the open dropdown: rounded border, translucent background, the hover
+    /// row, the selected row and one text run per option.
+    /// </summary>
+    /// <param name="overlay">Overlay display list to append to.</param>
+    /// <param name="constants">Constant pool for borders, radii and text.</param>
+    /// <remarks>
+    /// The current row is highlighted more strongly than the committed selection,
+    /// matching native combo boxes. Text uses the select's computed font and
+    /// colour, with the selected row in the accent colour and a fallback to the
+    /// default foreground when the colour is <c>currentColor</c>.
+    /// </remarks>
     private void BuildSelectOverlay(InstructionBuffer overlay, ConstantPool constants)
     {
         if (_openSelect is null
@@ -1461,6 +2353,16 @@ public sealed partial class IgniteWindow : IDisposable
         }
     }
 
+    /// <summary>
+    /// Appends a caret quad for the focused control to an overlay display list.
+    /// </summary>
+    /// <param name="overlay">Overlay display list to append to.</param>
+    /// <remarks>
+    /// Uses the control's computed colour, falling back to the default foreground
+    /// when it resolves to <c>currentColor</c>. Produces nothing while the control
+    /// owns a text selection, while the blink phase is off, or when the focused
+    /// element is not a text control; see <see cref="TryGetCaretRect"/>.
+    /// </remarks>
     private void BuildCaretOverlay(InstructionBuffer overlay)
     {
         var layout = LayoutFor(_focused);
@@ -1480,8 +2382,20 @@ public sealed partial class IgniteWindow : IDisposable
         overlay.AddDrawRect(caret, color);
     }
 
+    /// <summary>Returns the layout result that contains the given element.</summary>
+    /// <param name="element">Element to locate; may be <see langword="null"/>.</param>
+    /// <returns>The inspector layout for inspector nodes, otherwise the app layout.</returns>
     private LayoutResult? LayoutFor(ElementNode? element) => LayoutForNode(element);
 
+    /// <summary>
+    /// Chooses the layout result that owns a node: the inspector's tree when the
+    /// node descends from the inspector root, the app's tree otherwise.
+    /// </summary>
+    /// <param name="node">Node to classify; may be <see langword="null"/>.</param>
+    /// <returns>
+    /// The matching <see cref="LayoutResult"/>, which may be
+    /// <see langword="null"/> before the first layout.
+    /// </returns>
     private LayoutResult? LayoutForNode(IgniteSupportedDomNode? node)
     {
         if (node is not null
@@ -1499,6 +2413,13 @@ public sealed partial class IgniteWindow : IDisposable
     /// hovered, focused or open-select node alive also keeps its whole unmounted
     /// subtree and event delegates reachable.
     /// </summary>
+    /// <remarks>
+    /// Runs once per frame after layout, when box lookups can finally answer
+    /// whether a node still exists. It clears committed select indices, the open
+    /// dropdown, the pressed and pointer-capture targets, scroll animations, the
+    /// focused element (dispatching <c>blur</c> and <c>change</c>) and the hover
+    /// chain; the app tree and the inspector tree are both considered.
+    /// </remarks>
     private void PruneInteractionNodes()
     {
         if (_layoutResult is null && _devToolsLayout is null)
@@ -1573,12 +2494,30 @@ public sealed partial class IgniteWindow : IDisposable
         }
     }
 
+    /// <summary>Reports whether a node still has a box in the layout that owns it.</summary>
+    /// <param name="node">The element to check.</param>
+    /// <returns><see langword="true"/> when the node is still part of a laid-out tree.</returns>
+    /// <remarks>
+    /// Box presence is the cheapest reliable liveness signal: a
+    /// <see cref="Display.None"/> node is not laid out, so it is treated as gone
+    /// here and its interaction state is dropped.
+    /// </remarks>
     private bool IsLiveNode(ElementNode node)
     {
         var layout = LayoutForNode(node);
         return layout is not null && layout.TryGetBox(node, out var ignoredBox);
     }
 
+    /// <summary>
+    /// Reports whether an element accepts typed text: <c>textarea</c>, or an
+    /// <c>input</c> whose type is text-like or absent.
+    /// </summary>
+    /// <param name="element">The element to test.</param>
+    /// <returns><see langword="true"/> for editable text controls.</returns>
+    /// <remarks>
+    /// Checkbox, radio, range, colour and file inputs are excluded; they respond to
+    /// clicks and keys but not to character input.
+    /// </remarks>
     private static bool IsTextControl(ElementNode element)
     {
         if (element.Tag == "textarea")
@@ -1596,6 +2535,16 @@ public sealed partial class IgniteWindow : IDisposable
             or "password" or "number";
     }
 
+    /// <summary>
+    /// Returns the painted top-left corner of a box's content area, in window CSS
+    /// pixels.
+    /// </summary>
+    /// <param name="box">The box to project.</param>
+    /// <returns>The content origin after ancestor scroll offsets are applied.</returns>
+    /// <remarks>
+    /// Computed as the painted border box plus the content box's offset inside it,
+    /// so padding, borders and scrolling are all accounted for.
+    /// </remarks>
     private (float X, float Y) ContentOrigin(LayoutBox box)
     {
         var painted = PaintedBorderBox(box);
@@ -1604,12 +2553,38 @@ public sealed partial class IgniteWindow : IDisposable
             painted.Y + (box.ContentBox.Y - box.BorderBox.Y));
     }
 
+    /// <summary>
+    /// Builds the text style used to measure and paint a control's editable text.
+    /// </summary>
+    /// <param name="box">The control's layout box.</param>
+    /// <param name="color">ARGB colour to force, usually the caret or text colour.</param>
+    /// <returns>The computed style adapted to a <see cref="TextStyle"/>.</returns>
+    /// <remarks>Font size is resolved against the current root length context.</remarks>
     private TextStyle GetControlTextStyle(LayoutBox box, uint color)
     {
         var fontSize = box.Style.ResolveFontSize(in _lengthContext);
         return box.Style.ToTextStyle(in _lengthContext, fontSize, color);
     }
 
+    /// <summary>
+    /// Moves the caret of a text control to the character boundary nearest a
+    /// pointer X coordinate, and restarts the blink cycle.
+    /// </summary>
+    /// <param name="element">The control whose caret moves.</param>
+    /// <param name="x">Pointer X in window CSS pixels.</param>
+    /// <remarks>
+    /// <para>
+    /// Single-line inputs walk text elements (respecting surrogate pairs) and stop
+    /// at the first boundary whose measured prefix is already right of the pointer,
+    /// so placement snaps left rather than to the globally closest boundary.
+    /// </para>
+    /// <para>
+    /// A <c>textarea</c> first derives the line from the last known pointer Y, then
+    /// measures every prefix and keeps the boundary on that line whose trailing edge
+    /// is closest to the pointer. This is O(n) text layouts per click and is
+    /// intended for the click path only.
+    /// </para>
+    /// </remarks>
     private void PlaceCaretFromPoint(ElementNode element, float x)
     {
         var boxLayout = LayoutFor(element);
@@ -1717,6 +2692,31 @@ public sealed partial class IgniteWindow : IDisposable
         ResetCaretBlink();
     }
 
+    /// <summary>
+    /// Computes the caret rectangle for the focused control, in window CSS pixels.
+    /// </summary>
+    /// <param name="caret">
+    /// The rectangle to paint; <c>default</c> when this returns <see langword="false"/>.
+    /// </param>
+    /// <returns>
+    /// <see langword="true"/> when a caret should be drawn right now.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// Returns <see langword="false"/> when nothing is focused, the focus is not a
+    /// text control, the blink phase is off, or the control owns a text selection
+    /// (a selected run replaces the caret visually).
+    /// </para>
+    /// <para>
+    /// A <c>textarea</c> caret sits at the end of the last laid-out line of the
+    /// text before the index, which follows wrapping, <c>white-space</c> and line
+    /// clamping. Single-line carets use the measured prefix width.
+    /// </para>
+    /// <para>
+    /// The caret is clamped inside the content box and is at least one pixel tall;
+    /// its width scales with font size so it stays visible at small text sizes.
+    /// </para>
+    /// </remarks>
     private bool TryGetCaretRect(out Rect caret)
     {
         caret = default;
@@ -1797,6 +2797,27 @@ public sealed partial class IgniteWindow : IDisposable
 
     // -------------------------------------------------------------- replaced
 
+    /// <summary>
+    /// Supplies the intrinsic size of replaced elements so layout can size them
+    /// before CSS constraints apply.
+    /// </summary>
+    /// <param name="node">The node being laid out.</param>
+    /// <returns>
+    /// The intrinsic size, or <see langword="null"/> when the element is not
+    /// replaced or has no usable size.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// Images prefer the decoded pixel size so aspect ratio is preserved, then the
+    /// <c>width</c>/<c>height</c> attributes, then nothing. Canvas, video, iframe,
+    /// object and embed default to the HTML 300 × 150 box.
+    /// </para>
+    /// <para>
+    /// Form controls deliberately return <see langword="null"/>: they are sized by
+    /// CSS plus their text line box, and reporting an intrinsic height here would
+    /// be treated as a border-box height and clip that line box.
+    /// </para>
+    /// </remarks>
     private Size? GetIntrinsicSize(IgniteSupportedDomNode node)
     {
         if (node is not ElementNode element)
@@ -1853,6 +2874,17 @@ public sealed partial class IgniteWindow : IDisposable
         return null;
     }
 
+    /// <summary>
+    /// Resolves the image to draw for a box: an <c>img</c> with a non-empty
+    /// <c>src</c> attribute.
+    /// </summary>
+    /// <param name="box">The box being painted.</param>
+    /// <returns>The image descriptor, or <see langword="null"/> for any other box.</returns>
+    /// <remarks>
+    /// The fit mode comes from the computed <c>object-fit</c>. The descriptor is
+    /// produced every layout, so the caller must treat it as transient; the image
+    /// cache owns the decoded texture.
+    /// </remarks>
     private ImageSpec? GetImage(LayoutBox box)
     {
         if (box.Node is not ElementNode element || !string.Equals(element.Tag, "img", StringComparison.OrdinalIgnoreCase))
@@ -1876,6 +2908,18 @@ public sealed partial class IgniteWindow : IDisposable
 
     // --------------------------------------------------------------- controls
 
+    /// <summary>
+    /// Custom painter for inspector chrome; runs after the box's background and
+    /// border have been written.
+    /// </summary>
+    /// <param name="box">The box being painted.</param>
+    /// <param name="instructions">Display list to append to.</param>
+    /// <param name="constants">Constant pool for radii and colours.</param>
+    /// <remarks>
+    /// Paints the text selection first, then delegates to the colour wheel and
+    /// swatch painters based on the element's classes. Everything else is left to
+    /// the standard painter.
+    /// </remarks>
     private void PaintDevToolsContent(
         LayoutBox box,
         InstructionBuffer instructions,
@@ -1926,6 +2970,18 @@ public sealed partial class IgniteWindow : IDisposable
         instructions.AddDrawRoundedRect(inner, color, radius);
     }
 
+    /// <summary>
+    /// Paints a hue/saturation wheel as a grid of small ellipses, plus the current
+    /// colour knob.
+    /// </summary>
+    /// <param name="box">The wheel's layout box.</param>
+    /// <param name="instructions">Display list to append to.</param>
+    /// <param name="element">The element holding <c>data-color</c>.</param>
+    /// <remarks>
+    /// This is a software approximation, not a shader: 96 hues × 10 saturation
+    /// rings of ellipses approximate a continuous wheel at low cost. The centre is
+    /// drawn as a white dot to hide the innermost gap.
+    /// </remarks>
     private static void PaintColorWheel(
         LayoutBox box,
         InstructionBuffer instructions,
@@ -1980,6 +3036,14 @@ public sealed partial class IgniteWindow : IDisposable
         PaintColorWheelKnob(box, instructions, element);
     }
 
+    /// <summary>
+    /// Draws the two-tone knob marking the current hue and saturation on a colour
+    /// wheel.
+    /// </summary>
+    /// <param name="box">The wheel's layout box.</param>
+    /// <param name="instructions">Display list to append to.</param>
+    /// <param name="element">The element holding <c>data-color</c>.</param>
+    /// <remarks>Silently draws nothing when the attribute is missing or unparsable.</remarks>
     private static void PaintColorWheelKnob(
         LayoutBox box,
         InstructionBuffer instructions,
@@ -2021,6 +3085,18 @@ public sealed partial class IgniteWindow : IDisposable
             unchecked((int)0xFFFFFFFF)));
     }
 
+    /// <summary>
+    /// Custom painter for app content that CSS alone cannot express: spinners, the
+    /// Bootstrap toggler icon and native-looking form controls.
+    /// </summary>
+    /// <param name="box">The box being painted.</param>
+    /// <param name="instructions">Display list to append to.</param>
+    /// <param name="constants">Constant pool for radii and colours.</param>
+    /// <remarks>
+    /// Paints the text selection first so highlights stay behind glyphs. Control
+    /// painting is additive: the box background and border have already been
+    /// emitted by the layout engine.
+    /// </remarks>
     private void PaintElementContent(LayoutBox box, InstructionBuffer instructions, ConstantPool constants)
     {
         PaintSelection(box, instructions);
@@ -2070,6 +3146,17 @@ public sealed partial class IgniteWindow : IDisposable
         }
     }
 
+    /// <summary>
+    /// Draws a Bootstrap-style spinner as a 270° arc of small quads.
+    /// </summary>
+    /// <param name="box">The spinner's layout box.</param>
+    /// <param name="instructions">Display list to append to.</param>
+    /// <remarks>
+    /// The rotation is derived from the shared animation clock and the element's
+    /// <c>animation-duration</c> when it names a spinner animation, defaulting to
+    /// 0.75 s. The arc is only repositioned when something repaints the element,
+    /// normally the matching CSS animation.
+    /// </remarks>
     private void PaintSpinner(LayoutBox box, InstructionBuffer instructions)
     {
         var rect = PaintedBorderBox(box);
@@ -2117,6 +3204,16 @@ public sealed partial class IgniteWindow : IDisposable
         }
     }
 
+    /// <summary>
+    /// Draws the three bars of a collapsed navbar toggler, standing in for the SVG
+    /// data URI the engine cannot decode.
+    /// </summary>
+    /// <param name="box">The icon's layout box.</param>
+    /// <param name="instructions">Display list to append to.</param>
+    /// <remarks>
+    /// Uses the content box, falling back to the border box minus borders when the
+    /// content box is empty, so the icon still appears for a zero-padding element.
+    /// </remarks>
     private static void PaintTogglerIcon(LayoutBox box, InstructionBuffer instructions)
     {
         var rect = box.ContentBox;
@@ -2146,6 +3243,18 @@ public sealed partial class IgniteWindow : IDisposable
         }
     }
 
+    /// <summary>
+    /// Draws the accent mark of a checked checkbox (rounded square) or radio
+    /// button (ellipse).
+    /// </summary>
+    /// <param name="box">The input's layout box.</param>
+    /// <param name="instructions">Display list to append to.</param>
+    /// <param name="constants">Constant pool for the checkbox radius.</param>
+    /// <param name="radio">Whether to draw a radio dot instead of a check box.</param>
+    /// <remarks>
+    /// The mark is inset to 56% of the content box. Unchecked controls paint
+    /// nothing: their appearance comes from CSS borders and background.
+    /// </remarks>
     private static void PaintCheckControl(
         LayoutBox box,
         InstructionBuffer instructions,
@@ -2193,6 +3302,19 @@ public sealed partial class IgniteWindow : IDisposable
         }
     }
 
+    /// <summary>
+    /// Draws a range input as a rounded track with an accent-colored fill up to the
+    /// current value.
+    /// </summary>
+    /// <param name="box">The input's layout box.</param>
+    /// <param name="instructions">Display list to append to.</param>
+    /// <param name="constants">Constant pool for the track radius.</param>
+    /// <param name="element">The input, read for <c>min</c>, <c>max</c> and <c>value</c>.</param>
+    /// <remarks>
+    /// The ratios are clamped to 0–1 and the divisor is floored at 0.0001, so equal
+    /// bounds or a zero-height box cannot produce NaN geometry. No thumb is drawn;
+    /// the fill edge stands in for it.
+    /// </remarks>
     private static void PaintRange(
         LayoutBox box,
         InstructionBuffer instructions,
@@ -2219,6 +3341,19 @@ public sealed partial class IgniteWindow : IDisposable
             checked((ushort)radius));
     }
 
+    /// <summary>
+    /// Draws a <c>progress</c> or <c>meter</c> element as a pill track with a fill
+    /// proportional to its value.
+    /// </summary>
+    /// <param name="box">The element's layout box.</param>
+    /// <param name="instructions">Display list to append to.</param>
+    /// <param name="constants">Constant pool for the track radius.</param>
+    /// <param name="element">The element, read for <c>min</c>, <c>max</c> and <c>value</c>.</param>
+    /// <remarks>
+    /// <c>max</c> defaults to 1, matching the HTML progress default, whereas range
+    /// inputs default it to 100. The fill is at least one track height wide so a
+    /// tiny non-zero value stays visible.
+    /// </remarks>
     private static void PaintProgress(
         LayoutBox box,
         InstructionBuffer instructions,
@@ -2250,6 +3385,15 @@ public sealed partial class IgniteWindow : IDisposable
 
     // ------------------------------------------------------------------ input
 
+    /// <summary>
+    /// Subscribes every keyboard and mouse reported by the input context to the
+    /// window's routing handlers.
+    /// </summary>
+    /// <remarks>
+    /// Called once from <see cref="OnLoad"/>. Handlers are anonymous closures that
+    /// forward to the instance methods; they are never unsubscribed because the
+    /// whole input context is disposed on close.
+    /// </remarks>
     private void ConfigureInput()
     {
         if (_input is null)
@@ -2272,6 +3416,29 @@ public sealed partial class IgniteWindow : IDisposable
         }
     }
 
+    /// <summary>
+    /// Routes a pointer move: drags win first, then pointer capture, then an open
+    /// dropdown, and finally hit testing, cursor and hover chain updates.
+    /// </summary>
+    /// <param name="x">Pointer X in window CSS pixels.</param>
+    /// <param name="y">Pointer Y in window CSS pixels.</param>
+    /// <remarks>
+    /// <para>
+    /// The last position is cached for click handling and for wheel routing. An
+    /// active selection drag or scrollbar drag consumes the move entirely; a
+    /// captured pointer target receives coordinates relative to its own painted
+    /// border box.
+    /// </para>
+    /// <para>
+    /// While a dropdown is open, hovering a row suppresses page hover so the row
+    /// highlight is not competed with by <c>:hover</c> styles underneath.
+    /// </para>
+    /// <para>
+    /// In inspect mode the hit result is published to
+    /// <see cref="DevToolsState.Hovered"/> but only for app nodes, never for the
+    /// inspector's own chrome.
+    /// </para>
+    /// </remarks>
     private void OnMouseMove(float x, float y)
     {
         _mouseX = x;
@@ -2322,6 +3489,48 @@ public sealed partial class IgniteWindow : IDisposable
         SetHovered(element);
     }
 
+    /// <summary>
+    /// Routes a pointer press, from inspect-mode picking and pointer capture down
+    /// to focus, text selection, dropdowns and control activation.
+    /// </summary>
+    /// <param name="button">
+    /// The pressed button. Only the left button has browser-like semantics; other
+    /// buttons run the same path because the engine exposes no context menu.
+    /// </param>
+    /// <remarks>
+    /// <para>Precedence, highest first:</para>
+    /// <list type="number">
+    /// <item><description>
+    /// Inspect mode consumes app hits so picking never activates the app.
+    /// </description></item>
+    /// <item><description>
+    /// A <c>pointerdown</c> handler on the hit element or an ancestor captures the
+    /// pointer; the element becomes active and no other press work runs.
+    /// </description></item>
+    /// <item><description>
+    /// A scrollbar track or thumb starts a scroll interaction.
+    /// </description></item>
+    /// <item><description>
+    /// An open dropdown either commits a row or closes; pressing the control itself
+    /// re-focuses it without reopening.
+    /// </description></item>
+    /// <item><description>
+    /// A text control focuses, places the caret, starts a selection drag and counts
+    /// multi-clicks (2 selects a word, 3 or more selects everything).
+    /// </description></item>
+    /// <item><description>
+    /// A selectable text run starts a text selection with the same click counting.
+    /// </description></item>
+    /// <item><description>
+    /// Anything else focuses the target, opens a <c>select</c> and dispatches
+    /// <c>mousedown</c>.
+    /// </description></item>
+    /// </list>
+    /// <para>
+    /// Shift suppresses the initial selection clear, so a click extends the existing
+    /// selection instead of replacing it.
+    /// </para>
+    /// </remarks>
     private void OnMouseDown(MouseButton button)
     {
         _devTools.PointerX = _mouseX;
@@ -2471,6 +3680,29 @@ public sealed partial class IgniteWindow : IDisposable
         Invoke(element, "mousedown");
     }
 
+    /// <summary>
+    /// Routes a pointer release: completes inspect picks, selection drags, pointer
+    /// capture and scrollbar drags, then synthesizes <c>mouseup</c> and <c>click</c>.
+    /// </summary>
+    /// <param name="button">The released button; all buttons share one path.</param>
+    /// <remarks>
+    /// <para>
+    /// A pick is committed when the release lands on an app node, not on the
+    /// inspector's own chrome; a drag that actually moved ends the selection and
+    /// suppresses the click, which prevents selecting text from also activating
+    /// the element under the pointer.
+    /// </para>
+    /// <para>
+    /// A click is synthesized only when press and release hit the same element and
+    /// that element is not disabled. It runs control activation first (checkbox,
+    /// radio), then dispatches <c>click</c>, and finally focuses text controls so a
+    /// click always leaves the caret in the field.
+    /// </para>
+    /// <para>
+    /// <c>mouseup</c> is dispatched to the pressed element even when the pointer
+    /// moved away, mirroring browsers; the click is not.
+    /// </para>
+    /// </remarks>
     private void OnMouseUp(MouseButton button)
     {
         _devTools.PointerX = _mouseX;
@@ -2550,6 +3782,23 @@ public sealed partial class IgniteWindow : IDisposable
         _selectionDragged = false;
     }
 
+    /// <summary>
+    /// Activates an <c>input</c> on click: toggles checkboxes, and selects radios
+    /// while clearing same-named siblings.
+    /// </summary>
+    /// <param name="element">The input element that was clicked.</param>
+    /// <remarks>
+    /// <para>
+    /// Checkbox state is mirrored into both the DOM attribute and the node's
+    /// <c>IsChecked</c> flag so CSS selectors and layout agree. Radio grouping is by
+    /// parent and <c>name</c> attribute only, matching the simplest browser rule;
+    /// a radio without a name still clears nothing.
+    /// </para>
+    /// <para>
+    /// Both paths dispatch <c>change</c> with no value and request a relayout. Other
+    /// input types are ignored.
+    /// </para>
+    /// </remarks>
     private void ToggleInput(ElementNode element)
     {
         if (element.TryGetAttribute("disabled", out var ignoredDisabled))
@@ -2606,6 +3855,26 @@ public sealed partial class IgniteWindow : IDisposable
         }
     }
 
+    /// <summary>
+    /// Routes wheel input to the nearest scrollable ancestor of the pointer.
+    /// </summary>
+    /// <param name="vertical">
+    /// Vertical wheel delta in notches, positive away from the user.
+    /// </param>
+    /// <param name="horizontal">Horizontal wheel delta in notches.</param>
+    /// <remarks>
+    /// <para>
+    /// An open dropdown is closed first so a wheel cannot leave a stale menu
+    /// floating. Each axis is only applied when the chosen container actually
+    /// overflows on that axis, which lets a nested horizontal scroller pass vertical
+    /// input through to its parent.
+    /// </para>
+    /// <para>
+    /// One notch is 48 CSS px, negated so scrolling down moves content up, and the
+    /// result is clamped to the scrollable range to keep the opposite direction
+    /// responsive.
+    /// </para>
+    /// </remarks>
     private void OnScroll(float vertical, float horizontal)
     {
         CloseSelectMenu();
@@ -2642,6 +3911,17 @@ public sealed partial class IgniteWindow : IDisposable
         }
     }
 
+    /// <summary>
+    /// Adds a relative scroll delta to a container and clamps it to its range.
+    /// </summary>
+    /// <param name="scroll">The container box providing scroll metrics.</param>
+    /// <param name="dx">Horizontal delta in CSS pixels.</param>
+    /// <param name="dy">Vertical delta in CSS pixels.</param>
+    /// <remarks>
+    /// While a smooth scroll is animating, the delta is applied to the animation's
+    /// pending target rather than the current offset, so a fast train of wheel
+    /// events accumulates instead of fighting the interpolation.
+    /// </remarks>
     private void ScrollBy(LayoutBox scroll, float dx, float dy)
     {
         var node = scroll.Node;
@@ -2659,6 +3939,18 @@ public sealed partial class IgniteWindow : IDisposable
         ScrollTo(scroll, Math.Clamp(baseX + dx, 0, maxX), Math.Clamp(baseY + dy, 0, maxY));
     }
 
+    /// <summary>
+    /// Requests a scroll offset, animating it when the container asks for smooth
+    /// scrolling and applying it immediately otherwise.
+    /// </summary>
+    /// <param name="scroll">The container box providing scroll metrics.</param>
+    /// <param name="x">Target horizontal offset in CSS pixels; clamped to range.</param>
+    /// <param name="y">Target vertical offset in CSS pixels; clamped to range.</param>
+    /// <remarks>
+    /// Distance-dependent duration (0.18–0.45 s) keeps short hops quick and long
+    /// jumps readable. A target within half a pixel of the current offset cancels
+    /// any running animation instead of starting a new one.
+    /// </remarks>
     private void ScrollTo(LayoutBox scroll, float x, float y)
     {
         var maxX = MathF.Max(0, scroll.ScrollWidth - scroll.ClientWidth);
@@ -2696,6 +3988,19 @@ public sealed partial class IgniteWindow : IDisposable
         };
     }
 
+    /// <summary>
+    /// Decides whether a scroll should be animated.
+    /// </summary>
+    /// <param name="scroll">The container being scrolled.</param>
+    /// <returns><see langword="true"/> when the offset should ease to its target.</returns>
+    /// <remarks>
+    /// <c>scroll-behavior: smooth</c> on the container always animates.
+    /// <c>auto</c> inherits a smooth root style only for the outermost scrollable
+    /// container: browsers apply the root's behaviour to the viewport, and the
+    /// engine has no viewport scroller, so the outermost container stands in.
+    /// Overflow-hidden containers are skipped when deciding "outermost" because
+    /// they cannot scroll.
+    /// </remarks>
     private bool IsSmoothScrolling(LayoutBox scroll)
     {
         if (scroll.Style.ScrollBehavior == ScrollBehavior.Smooth)
@@ -2728,6 +4033,18 @@ public sealed partial class IgniteWindow : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Applies a scroll offset immediately, cancelling any animation for the node.
+    /// </summary>
+    /// <param name="node">The scrolling node.</param>
+    /// <param name="x">New horizontal offset in CSS pixels.</param>
+    /// <param name="y">New vertical offset in CSS pixels.</param>
+    /// <remarks>
+    /// A change smaller than a thousandth of a pixel is ignored, which avoids
+    /// re-building display lists for no visual difference. A real change sets both
+    /// the app and inspector paint flags, because a shared scroll container can feed
+    /// painters of either tree.
+    /// </remarks>
     private void SetScrollOffset(IgniteSupportedDomNode node, float x, float y)
     {
         _scrollAnimations.Remove(node);
@@ -2744,6 +4061,16 @@ public sealed partial class IgniteWindow : IDisposable
         _needsDevToolsPaint = true;
     }
 
+    /// <summary>
+    /// Advances every smooth-scroll animation by one frame and publishes the new
+    /// offsets.
+    /// </summary>
+    /// <param name="delta">Seconds elapsed since the previous frame.</param>
+    /// <remarks>
+    /// Uses a cubic ease-out. Finished animations snap exactly to their target and
+    /// are removed after iteration; a sub-hundredth-of-a-pixel move is skipped to
+    /// avoid needless repaints. Any actual movement sets both paint flags.
+    /// </remarks>
     private void AdvanceScrollAnimations(double delta)
     {
         if (_scrollAnimations.Count == 0)
@@ -2796,6 +4123,21 @@ public sealed partial class IgniteWindow : IDisposable
         }
     }
 
+    /// <summary>
+    /// Starts a scrollbar interaction at a point: dragging a thumb or jumping to a
+    /// track position.
+    /// </summary>
+    /// <param name="x">Pointer X in window CSS pixels.</param>
+    /// <param name="y">Pointer Y in window CSS pixels.</param>
+    /// <returns>
+    /// <see langword="true"/> when a scrollbar was hit and the press was consumed.
+    /// </returns>
+    /// <remarks>
+    /// A thumb press records the pointer and scroll origins so subsequent moves are
+    /// relative and do not jump; a track press centres the thumb on the pointer.
+    /// Hitting a scrollbar also closes the dropdown and clears press/active state,
+    /// because scrollbars are chrome rather than content.
+    /// </remarks>
     private bool TryBeginScrollbarInteraction(float x, float y)
     {
         var hit = FindScrollbarAt(x, y);
@@ -2844,6 +4186,16 @@ public sealed partial class IgniteWindow : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Continues an active scrollbar thumb drag for the current pointer position.
+    /// </summary>
+    /// <param name="x">Pointer X in window CSS pixels.</param>
+    /// <param name="y">Pointer Y in window CSS pixels.</param>
+    /// <remarks>
+    /// The scrollbar metrics are recomputed from the live box, so a resize or reflow
+    /// mid-drag cannot desynchronize the thumb. Silently stops when the node or its
+    /// scrollbar disappeared.
+    /// </remarks>
     private void UpdateScrollbarDrag(float x, float y)
     {
         if (_scrollDrag is not { } drag
@@ -2880,6 +4232,16 @@ public sealed partial class IgniteWindow : IDisposable
             drag.Vertical ? offset : drag.Node.ScrollOffsetY);
     }
 
+    /// <summary>
+    /// Finds the scrollbar under a window point, checking a docked inspector first.
+    /// </summary>
+    /// <param name="x">Pointer X in window CSS pixels.</param>
+    /// <param name="y">Pointer Y in window CSS pixels.</param>
+    /// <returns>The hit box and its scrollbar metrics, or <see langword="null"/>.</returns>
+    /// <remarks>
+    /// The inspector is composited above the app, so it gets first refusal. A
+    /// standalone inspector window has its own input loop and is not tested here.
+    /// </remarks>
     private ScrollbarHit? FindScrollbarAt(float x, float y)
     {
         if (_settings.EnableDevTools
@@ -2900,6 +4262,21 @@ public sealed partial class IgniteWindow : IDisposable
             : null;
     }
 
+    /// <summary>
+    /// Recursively searches a box subtree for a scrollbar track under a point.
+    /// </summary>
+    /// <param name="box">Subtree root.</param>
+    /// <param name="x">Pointer X in window CSS pixels.</param>
+    /// <param name="y">Pointer Y in window CSS pixels.</param>
+    /// <param name="scrollX">Accumulated horizontal scroll offset from ancestors.</param>
+    /// <param name="scrollY">Accumulated vertical scroll offset from ancestors.</param>
+    /// <returns>The deepest matching scrollbar, or <see langword="null"/>.</returns>
+    /// <remarks>
+    /// Children are visited in reverse paint order so the topmost scrollbar wins.
+    /// A container's own scrollbar is tested only after its children, since content
+    /// can overlap the track. Scroll offsets are accumulated exactly as the painter
+    /// applies them.
+    /// </remarks>
     private static ScrollbarHit? FindScrollbarAt(
         LayoutBox box,
         float x,
@@ -2974,6 +4351,49 @@ public sealed partial class IgniteWindow : IDisposable
         return null;
     }
 
+    /// <summary>
+    /// Routes a key press: window shortcuts first, then <c>select</c> navigation,
+    /// then text editing keys on the focused element.
+    /// </summary>
+    /// <param name="keyboard">
+    /// The keyboard that reported the event, read for modifiers and clipboard.
+    /// </param>
+    /// <param name="key">The pressed key.</param>
+    /// <remarks>
+    /// <para>Order of handling:</para>
+    /// <list type="bullet">
+    /// <item><description>
+    /// <c>Ctrl+Shift+I</c> and <c>F12</c> toggle devtools when enabled.
+    /// </description></item>
+    /// <item><description>
+    /// <c>Ctrl+C</c> and <c>Ctrl+X</c> run selection commands and consume the key
+    /// only when they actually had something to act on; <c>Ctrl+A</c> always
+    /// selects all text.
+    /// </description></item>
+    /// <item><description>
+    /// With no focused element, nothing further happens.
+    /// </description></item>
+    /// <item><description>
+    /// <c>Ctrl+V</c> on a text control prefers a <c>paste</c> handler, otherwise
+    /// normalizes the clipboard text and inserts it.
+    /// </description></item>
+    /// <item><description>
+    /// A focused <c>select</c> handles arrows, Enter/Space and Escape to navigate
+    /// its dropdown.
+    /// </description></item>
+    /// <item><description>
+    /// Backspace, Delete, arrows, Home/End, Enter, Escape and Tab edit text, commit
+    /// or move focus, with Ctrl switching between character and word steps and
+    /// Shift extending the selection.
+    /// </description></item>
+    /// </list>
+    /// <para>
+    /// Enter commits the working text, dispatches <c>change</c> and relayouts;
+    /// Escape drops focus without committing. In the inspector, Enter on a value
+    /// field also advances to the next row via
+    /// <see cref="DevToolsState.AdvanceAfterCommit"/>.
+    /// </para>
+    /// </remarks>
     private void OnKeyDown(IKeyboard keyboard, Key key)
     {
         var control = keyboard.IsKeyPressed(Key.ControlLeft) || keyboard.IsKeyPressed(Key.ControlRight);
@@ -3226,6 +4646,16 @@ public sealed partial class IgniteWindow : IDisposable
         }
     }
 
+    /// <summary>
+    /// Moves one text element backwards, keeping surrogate pairs together.
+    /// </summary>
+    /// <param name="text">The text being edited.</param>
+    /// <param name="index">Current caret offset in UTF-16 code units.</param>
+    /// <returns>The previous caret offset, or <c>0</c> at the start.</returns>
+    /// <remarks>
+    /// Only surrogate pairing is handled; combining marks and grapheme clusters are
+    /// not grouped.
+    /// </remarks>
     private static int PreviousTextElement(string text, int index)
     {
         if (index <= 0)
@@ -3243,6 +4673,15 @@ public sealed partial class IgniteWindow : IDisposable
         return index;
     }
 
+    /// <summary>
+    /// Moves one text element forwards, keeping surrogate pairs together.
+    /// </summary>
+    /// <param name="text">The text being edited.</param>
+    /// <param name="index">Current caret offset in UTF-16 code units.</param>
+    /// <returns>The next caret offset, or <c>text.Length</c> at the end.</returns>
+    /// <remarks>
+    /// Mirrors <see cref="PreviousTextElement"/>; grapheme clusters are not grouped.
+    /// </remarks>
     private static int NextTextElement(string text, int index)
     {
         if (index >= text.Length)
@@ -3260,6 +4699,27 @@ public sealed partial class IgniteWindow : IDisposable
         return index;
     }
 
+    /// <summary>
+    /// Inserts a typed character into the focused control, replacing any control
+    /// selection, then dispatches <c>input</c>.
+    /// </summary>
+    /// <param name="character">The character produced by the platform keyboard layout.</param>
+    /// <remarks>
+    /// <para>
+    /// Control characters are ignored (Enter, Tab and Escape arrive separately), as
+    /// are disabled elements and element types that do not accept text: select,
+    /// button, anchor, checkbox, radio and range.
+    /// </para>
+    /// <para>
+    /// In the inspector, <c>:</c> on a property-name field moves focus to the next
+    /// field and <c>;</c> on a value field commits and advances, matching the
+    /// spreadsheet-style entry the panel is designed around.
+    /// </para>
+    /// <para>
+    /// Any non-control text selection is cleared before inserting, so typing over a
+    /// selection behaves as expected.
+    /// </para>
+    /// </remarks>
     private void OnKeyChar(char character)
     {
         if (_focused is null || char.IsControl(character))
@@ -3317,11 +4777,26 @@ public sealed partial class IgniteWindow : IDisposable
         Invoke(_focused, "input", _editText ?? string.Empty);
     }
 
+    /// <summary>
+    /// Restarts the caret blink so the caret is visible immediately after an edit or
+    /// focus change.
+    /// </summary>
     private void ResetCaretBlink()
     {
         _caretBlinkStart = Stopwatch.GetTimestamp();
     }
 
+    /// <summary>
+    /// Gets whether the caret is in the visible half of its one-second blink cycle.
+    /// </summary>
+    /// <value>
+    /// <see langword="true"/> for the first 500 ms after <see cref="ResetCaretBlink"/>,
+    /// <see langword="false"/> for the next 500 ms.
+    /// </value>
+    /// <remarks>
+    /// The phase is derived from a timestamp rather than a frame counter, so the
+    /// blink rate is independent of the refresh rate and of skipped frames.
+    /// </remarks>
     private bool IsCaretVisible
     {
         get
@@ -3331,6 +4806,17 @@ public sealed partial class IgniteWindow : IDisposable
         }
     }
 
+    /// <summary>
+    /// Mirrors the working edit text into the DOM on every keystroke so both CSS
+    /// selectors (<c>:placeholder-shown</c>, <c>value</c>) and layout see it.
+    /// </summary>
+    /// <param name="element">The focused control being edited.</param>
+    /// <remarks>
+    /// A <c>textarea</c> stores the text as its <c>TextContent</c>, an <c>input</c>
+    /// stores it in the interned <c>value</c> attribute. The layout is invalidated
+    /// because the control's intrinsic width and text run change; the inspector is
+    /// invalidated only when the element belongs to its tree.
+    /// </remarks>
     private void CascadeEdit(ElementNode element)
     {
         if (string.Equals(element.Tag, "textarea", StringComparison.OrdinalIgnoreCase))
@@ -3350,6 +4836,16 @@ public sealed partial class IgniteWindow : IDisposable
         }
     }
 
+    /// <summary>
+    /// Writes the working edit text into the DOM when an edit is accepted (Enter or
+    /// focus loss).
+    /// </summary>
+    /// <param name="element">The control whose edit is being committed.</param>
+    /// <remarks>
+    /// Semantically separate from <see cref="CascadeEdit"/> but currently performs
+    /// the same attributes update and invalidation; it exists so the commit points
+    /// read clearly and can diverge from per-keystroke mirroring later.
+    /// </remarks>
     private void CommitEdit(ElementNode element)
     {
         if (string.Equals(element.Tag, "textarea", StringComparison.OrdinalIgnoreCase))
@@ -3369,6 +4865,36 @@ public sealed partial class IgniteWindow : IDisposable
         }
     }
 
+    /// <summary>
+    /// Moves keyboard focus to an element, or clears focus when passed
+    /// <see langword="null"/>.
+    /// </summary>
+    /// <param name="element">The element to focus, or <see langword="null"/> to blur.</param>
+    /// <param name="focusVisible">
+    /// Whether the focus should use the <c>:focus-visible</c> style. Text controls
+    /// are always treated as visible because a caret is drawn.
+    /// </param>
+    /// <param name="preserveSelection">
+    /// Keep the current text selection across the focus change, used by shift-click
+    /// so extending a selection does not collapse it.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// Focusing a disabled element is ignored and leaves the current focus intact.
+    /// An open dropdown closes when focus moves to a different element.
+    /// </para>
+    /// <para>
+    /// Leaving a control commits its working text first, dispatches <c>change</c>
+    /// when the control was an input or textarea, then dispatches <c>blur</c>.
+    /// Entering a control loads its current value into the working text and puts the
+    /// caret at the end, then dispatches <c>focus</c>.
+    /// </para>
+    /// <para>
+    /// The hover flag <c>:focus-visible</c> is only written when it actually
+    /// changes, and the inspector's layout is invalidated so its own focus rings
+    /// update even though it is a separate tree.
+    /// </para>
+    /// </remarks>
     private void Focus(ElementNode? element, bool focusVisible = false, bool preserveSelection = false)
     {
         if (element is not null && element.TryGetAttribute("disabled", out var ignoredDisabled))
@@ -3442,6 +4968,17 @@ public sealed partial class IgniteWindow : IDisposable
         _lastDevToolsVersion = -1;
     }
 
+    /// <summary>
+    /// Moves focus to the next focusable element in document order, wrapping at the
+    /// end.
+    /// </summary>
+    /// <remarks>
+    /// The candidate list is rebuilt on every Tab press by walking the app tree, or
+    /// the inspector tree when focus is inside it, so focus roving never escapes
+    /// its own document. The new element is focused with
+    /// <c>focusVisible: true</c>. Disabled elements are not filtered out of the
+    /// list, so a disabled control can consume one Tab stop without taking focus.
+    /// </remarks>
     private void FocusNext()
     {
         var focusable = new List<ElementNode>();
@@ -3461,6 +4998,13 @@ public sealed partial class IgniteWindow : IDisposable
         Focus(focusable[(index + 1) % focusable.Count], focusVisible: true);
     }
 
+    /// <summary>Reports whether a node is the inspector root or a descendant of it.</summary>
+    /// <param name="node">Node to classify; may be <see langword="null"/>.</param>
+    /// <returns><see langword="true"/> for the inspector subtree.</returns>
+    /// <remarks>
+    /// The check walks parent references, so it stays O(depth) and never depends on
+    /// the node still having a layout box.
+    /// </remarks>
     private bool IsInDevToolsTree(IgniteSupportedDomNode? node)
     {
         for (var current = node; current is not null; current = current.Parent)
@@ -3474,6 +5018,17 @@ public sealed partial class IgniteWindow : IDisposable
         return false;
     }
 
+    /// <summary>
+    /// Appends every focusable element in document order: inputs, textareas,
+    /// selects, buttons and anchors.
+    /// </summary>
+    /// <param name="node">Subtree root; may be <see langword="null"/>.</param>
+    /// <param name="result">Accumulator; not cleared.</param>
+    /// <remarks>
+    /// Recurses through non-element nodes (text, fragments) so focusables nested in
+    /// them are still found. Tab order is plain DOM order; there is no
+    /// <c>tabindex</c> support and no radio-group skipping.
+    /// </remarks>
     private static void CollectFocusable(Node? node, List<ElementNode> result)
     {
         if (node is not ElementNode element)
@@ -3510,6 +5065,15 @@ public sealed partial class IgniteWindow : IDisposable
         }
     }
 
+    /// <summary>
+    /// Chooses the pointer cursor for the element under the pointer.
+    /// </summary>
+    /// <param name="element">The hovered element, or <see langword="null"/>.</param>
+    /// <remarks>
+    /// Inspector splitters resize; text controls and elements with selectable text
+    /// show an I-beam; everything else uses the arrow. CSS <c>cursor</c> is not
+    /// modelled.
+    /// </remarks>
     private void UpdateCursor(ElementNode? element)
     {
         if (element is not null && element.HasClass("dt-splitter"))
@@ -3529,6 +5093,13 @@ public sealed partial class IgniteWindow : IDisposable
         }
     }
 
+    /// <summary>Applies a standard cursor to every attached mouse, if it changed.</summary>
+    /// <param name="cursor">The cursor shape to show.</param>
+    /// <remarks>
+    /// The last shape is cached so pointer moves over the same element do not issue
+    /// redundant platform calls. Backends that reject cursor changes are ignored:
+    /// a missing hand cursor must never break input.
+    /// </remarks>
     private void SetCursor(StandardCursor cursor)
     {
         if (_cursorKind == cursor)
@@ -3564,6 +5135,18 @@ public sealed partial class IgniteWindow : IDisposable
         }
     }
 
+    /// <summary>
+    /// Updates the hovered element, propagating <c>IsHovered</c> to its ancestors
+    /// and dispatching <c>mouseout</c>/<c>mouseover</c>.
+    /// </summary>
+    /// <param name="element">The new hovered element, or <see langword="null"/>.</param>
+    /// <remarks>
+    /// Hover is stored on the whole ancestor chain because CSS <c>:hover</c> matches
+    /// every ancestor of the pointed element, not just the leaf. A no-op move keeps
+    /// the previous chain. Both events are dispatched through
+    /// <see cref="Invoke"/>, which walks up to the
+    /// nearest handler.
+    /// </remarks>
     private void SetHovered(ElementNode? element)
     {
         if (ReferenceEquals(_hovered, element))
@@ -3589,6 +5172,18 @@ public sealed partial class IgniteWindow : IDisposable
         _needsLayout = true;
     }
 
+    /// <summary>
+    /// Updates the pressed element, propagating <c>IsActive</c> to its ancestors.
+    /// </summary>
+    /// <param name="element">
+    /// The element to mark active, or <see langword="null"/> to clear.
+    /// </param>
+    /// <remarks>
+    /// Like hover, active state is applied up the ancestor chain so <c>:active</c>
+    /// matches parents. Clearing is skipped when nothing was active, which keeps
+    /// every mouse-up from forcing a layout. The inspector's layout is invalidated
+    /// when either the old or the new chain belongs to it.
+    /// </remarks>
     private void SetActive(ElementNode? element)
     {
         if (element is null && _activeChain.Count == 0)
@@ -3608,6 +5203,17 @@ public sealed partial class IgniteWindow : IDisposable
         _needsLayout = true;
     }
 
+    /// <summary>
+    /// Walks from a hit element up to the nearest ancestor that handles a
+    /// two-coordinate pointer event.
+    /// </summary>
+    /// <param name="element">The hit element, or <see langword="null"/>.</param>
+    /// <param name="eventName">The handler key, such as <c>pointerdown</c>.</param>
+    /// <returns>The capturing element, or <see langword="null"/> when nobody handles it.</returns>
+    /// <remarks>
+    /// Only <c>Action&lt;float, float&gt;</c> handlers are accepted;
+    /// other delegate shapes are treated as no handler and are not invoked.
+    /// </remarks>
     private static ElementNode? FindPointerTarget(ElementNode? element, string eventName)
     {
         for (var node = (IgniteSupportedDomNode?)element; node is not null; node = node.Parent)
@@ -3623,6 +5229,19 @@ public sealed partial class IgniteWindow : IDisposable
         return null;
     }
 
+    /// <summary>
+    /// Dispatches a two-coordinate pointer event with coordinates relative to the
+    /// target's painted border box.
+    /// </summary>
+    /// <param name="target">The element that captured the pointer.</param>
+    /// <param name="eventName">The handler key, such as <c>pointermove</c>.</param>
+    /// <param name="x">Pointer X in window CSS pixels.</param>
+    /// <param name="y">Pointer Y in window CSS pixels.</param>
+    /// <remarks>
+    /// Local coordinates make handlers independent of scrolling and of where the
+    /// element happens to sit. Nothing is dispatched when the target has no box in
+    /// its layout result.
+    /// </remarks>
     private void InvokePointer(ElementNode target, string eventName, float x, float y)
     {
         if (!target.TryGetEventHandler(eventName, out var handler)
@@ -3642,6 +5261,17 @@ public sealed partial class IgniteWindow : IDisposable
         action(x - painted.X, y - painted.Y);
     }
 
+    /// <summary>
+    /// Selects an app element from an inspect-mode pick, expands the tree to it and
+    /// requests that it be scrolled into view.
+    /// </summary>
+    /// <param name="element">The picked application element.</param>
+    /// <remarks>
+    /// Turns inspect mode off after a pick, clears the hover highlight and forces
+    /// the inspector to rebuild. <see cref="DevToolsState.ScrollSelectedIntoView"/>
+    /// is consumed by the next frame, which calls
+    /// <see cref="ScrollDevToolsSelectionIntoView"/>.
+    /// </remarks>
     private void SelectInspectElement(ElementNode element)
     {
         _devTools.Selected = element;
@@ -3655,6 +5285,16 @@ public sealed partial class IgniteWindow : IDisposable
         _devTools.ScrollSelectedIntoView = true;
     }
 
+    /// <summary>
+    /// Scrolls the inspector's DOM tree pane so the selected row is centred.
+    /// </summary>
+    /// <remarks>
+    /// Finds the row by its <c>dt-tree-selected</c> class, walks up to the nearest
+    /// vertical scroll container and sets its offset directly, clamped to its range.
+    /// The offset is applied immediately without smooth scrolling because this is a
+    /// programmatic reveal. Uses the inspector layout when docked and the app layout
+    /// when the inspector is composed into the app.
+    /// </remarks>
     private void ScrollDevToolsSelectionIntoView()
     {
         var root = _devToolsRoot ?? _root;
@@ -3702,6 +5342,19 @@ public sealed partial class IgniteWindow : IDisposable
         }
     }
 
+    /// <summary>
+    /// Replaces a cached ancestor chain and applies the new state to every element
+    /// in it.
+    /// </summary>
+    /// <param name="chain">The list holding the previous chain; cleared and refilled.</param>
+    /// <param name="element">The leaf element, or <see langword="null"/> to clear only.</param>
+    /// <param name="apply">Sets the state on one element.</param>
+    /// <param name="clear">Clears the state on one element.</param>
+    /// <remarks>
+    /// The chain always runs leaf-first up to the root element. Every old entry is
+    /// cleared before the new chain is built, so a move between two branches cannot
+    /// leave a stale hover/active flag behind.
+    /// </remarks>
     private static void SetChainState(
         List<ElementNode> chain,
         ElementNode? element,
@@ -3725,6 +5378,16 @@ public sealed partial class IgniteWindow : IDisposable
         }
     }
 
+    /// <summary>Finds the element under a window point.</summary>
+    /// <param name="x">Pointer X in window CSS pixels.</param>
+    /// <param name="y">Pointer Y in window CSS pixels.</param>
+    /// <returns>
+    /// The topmost element at the point, or <see langword="null"/> when the point is
+    /// outside every box.
+    /// </returns>
+    /// <remarks>
+    /// Text and other non-element boxes resolve to their nearest element ancestor.
+    /// </remarks>
     private ElementNode? HitTest(float x, float y)
     {
         var box = HitTestBox(x, y);
@@ -3732,6 +5395,15 @@ public sealed partial class IgniteWindow : IDisposable
         return node as ElementNode ?? FindElement(node);
     }
 
+    /// <summary>Finds the box under a window point, giving a docked inspector priority.</summary>
+    /// <param name="x">Pointer X in window CSS pixels.</param>
+    /// <param name="y">Pointer Y in window CSS pixels.</param>
+    /// <returns>The topmost box, or <see langword="null"/>.</returns>
+    /// <remarks>
+    /// The inspector is composited above the app but lives in a separate box tree, so
+    /// it is tested first. A hit on the inspector's root is treated as a miss: the
+    /// root covers the whole window and would otherwise swallow every app click.
+    /// </remarks>
     private LayoutBox? HitTestBox(float x, float y)
     {
         // The inspector is composited above the app but lives in its own box
@@ -3757,6 +5429,19 @@ public sealed partial class IgniteWindow : IDisposable
         return HitTestRoot(root, x, y);
     }
 
+    /// <summary>
+    /// Tests a point against a root box after first testing <c>position: fixed</c>
+    /// boxes.
+    /// </summary>
+    /// <param name="root">The root of the box tree to test.</param>
+    /// <param name="x">Pointer X in window CSS pixels.</param>
+    /// <param name="y">Pointer Y in window CSS pixels.</param>
+    /// <returns>The topmost hit box, or <see langword="null"/>.</returns>
+    /// <remarks>
+    /// Fixed boxes paint after the normal tree, so they are tested first, in reverse
+    /// paint order, and with zero scroll offset so an ancestor's scroll cannot move
+    /// them. The normal tree is then walked with fixed boxes skipped.
+    /// </remarks>
     private LayoutBox? HitTestRoot(LayoutBox root, float x, float y)
     {
         _hitFixedBoxes.Clear();
@@ -3778,6 +5463,12 @@ public sealed partial class IgniteWindow : IDisposable
         return HitTestBox(root, x, y, 0, 0, skipFixed: true);
     }
 
+    /// <summary>
+    /// Collects fixed-position boxes in paint order, skipping invisible subtrees.
+    /// </summary>
+    /// <param name="box">Subtree root.</param>
+    /// <param name="boxes">Accumulator; not cleared.</param>
+    /// <remarks>Hidden and <c>display: none</c> subtrees contribute no fixed boxes.</remarks>
     private static void CollectFixedBoxes(LayoutBox box, List<LayoutBox> boxes)
     {
         if (box.Style.Display == Display.None
@@ -3797,6 +5488,28 @@ public sealed partial class IgniteWindow : IDisposable
         }
     }
 
+    /// <summary>
+    /// Recursively hit-tests a box subtree in reverse paint order.
+    /// </summary>
+    /// <param name="box">Subtree root.</param>
+    /// <param name="x">Pointer X in window CSS pixels.</param>
+    /// <param name="y">Pointer Y in window CSS pixels.</param>
+    /// <param name="scrollX">Accumulated horizontal scroll offset from ancestors.</param>
+    /// <param name="scrollY">Accumulated vertical scroll offset from ancestors.</param>
+    /// <param name="skipFixed">Skip fixed-position boxes, which are tested separately.</param>
+    /// <returns>The deepest hit box, or <see langword="null"/>.</returns>
+    /// <remarks>
+    /// <para>
+    /// Layout boxes keep unscrolled coordinates, so every containment test applies the
+    /// accumulated ancestor scroll offset. Scroll containers additionally clip their
+    /// children to the padding box and add their own offset before recursing.
+    /// </para>
+    /// <para>
+    /// A <c>display: contents</c> box has no geometry of its own: it is never
+    /// rejected for an empty border box, and it is never returned, so it cannot
+    /// swallow a point meant for a sibling.
+    /// </para>
+    /// </remarks>
     private static LayoutBox? HitTestBox(
         LayoutBox box,
         float x,
@@ -3859,6 +5572,9 @@ public sealed partial class IgniteWindow : IDisposable
         return isContents ? null : box;
     }
 
+    /// <summary>Climbs from a node to the nearest element ancestor, including itself.</summary>
+    /// <param name="node">Starting node; may be <see langword="null"/>.</param>
+    /// <returns>The nearest <see cref="ElementNode"/>, or <see langword="null"/>.</returns>
     private static ElementNode? FindElement(IgniteSupportedDomNode? node)
     {
         while (node is not null)
@@ -3874,6 +5590,22 @@ public sealed partial class IgniteWindow : IDisposable
         return null;
     }
 
+    /// <summary>
+    /// Walks up from a hit box to the container that should consume a wheel event.
+    /// </summary>
+    /// <param name="box">The box under the pointer, or <see langword="null"/>.</param>
+    /// <param name="vertical">Vertical wheel delta; zero when the wheel is horizontal only.</param>
+    /// <param name="horizontal">
+    /// Horizontal wheel delta; zero when the wheel is vertical only.
+    /// </param>
+    /// <returns>The best scroll container, or <see langword="null"/> for none.</returns>
+    /// <remarks>
+    /// A container qualifies only when the CSS overflow allows user scrolling on the
+    /// requested axis and it actually overflows; this keeps <c>overflow: hidden</c>
+    /// boxes, such as a text input clipping its text, from swallowing the wheel. If
+    /// no ancestor overflows on the requested axis, the nearest user-scrollable
+    /// ancestor is returned so scrolling still lands somewhere sensible.
+    /// </remarks>
     private static LayoutBox? FindScrollContainer(LayoutBox? box, float vertical, float horizontal)
     {
         var firstScrollContainer = (LayoutBox?)null;
@@ -3906,6 +5638,27 @@ public sealed partial class IgniteWindow : IDisposable
         return firstScrollContainer;
     }
 
+    /// <summary>
+    /// Dispatches a DOM-style event to the nearest handler at or above an element.
+    /// </summary>
+    /// <param name="element">The target, or <see langword="null"/> for no dispatch.</param>
+    /// <param name="eventName">The handler key, such as <c>click</c> or <c>change</c>.</param>
+    /// <param name="value">
+    /// Optional payload passed to string handlers; <see langword="null"/> invokes a
+    /// parameterless handler instead.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// Bubbling is modelled by walking parents and invoking only the first handler
+    /// found, so an event never fires twice. Delegate shapes are matched against
+    /// <see cref="Action"/> and <see cref="Action{T}"/> of <see cref="string"/>,
+    /// falling back to dynamic invocation for anything else.
+    /// </para>
+    /// <para>
+    /// Handler exceptions are swallowed deliberately: a throwing app handler must not
+    /// tear down the frame loop. The trade-off is that a bug in a handler is silent.
+    /// </para>
+    /// </remarks>
     private static void Invoke(ElementNode? element, string eventName, string? value = null)
     {
         IgniteSupportedDomNode? node = element;
@@ -3947,11 +5700,20 @@ public sealed partial class IgniteWindow : IDisposable
         }
     }
 
+    /// <summary>
+    /// Reads an attribute, treating a missing attribute as <see langword="null"/>.
+    /// </summary>
+    /// <param name="element">The element to read.</param>
+    /// <param name="name">The attribute name.</param>
+    /// <returns>The attribute value, or <see langword="null"/> when absent.</returns>
     private static string? GetAttribute(ElementNode element, string name)
     {
         return element.TryGetAttribute(name, out var value) ? value : null;
     }
 
+    /// <summary>Converts a packed 0xAARRGGBB colour to normalized RGBA components.</summary>
+    /// <param name="argb">The packed colour.</param>
+    /// <returns>RGBA components in the 0–1 range, as expected by OpenGL clear calls.</returns>
     private static Vector4 Color(uint argb)
     {
         return new Vector4(
@@ -3961,6 +5723,16 @@ public sealed partial class IgniteWindow : IDisposable
             ((argb >> 24) & 0xFF) / 255f);
     }
 
+    /// <summary>
+    /// Releases input devices and GPU objects while the native window and OpenGL
+    /// context are still alive, then raises <see cref="Closed"/>.
+    /// </summary>
+    /// <remarks>
+    /// This is the only safe moment to destroy textures, buffers and fonts: the
+    /// context becomes invalid as soon as the Silk.NET loop returns. The native
+    /// window itself is disposed later, by <see cref="Run(Ignite.UILab.Node, string)"/>, because disposing it
+    /// from inside the closing callback resets an active context.
+    /// </remarks>
     private void OnClosing()
     {
         // The GLFW window and OpenGL context are still alive here, which is the
@@ -3972,6 +5744,16 @@ public sealed partial class IgniteWindow : IDisposable
         Closed?.Invoke(this);
     }
 
+    /// <summary>
+    /// Disposes the display-list renderer, image textures and font atlas exactly
+    /// once.
+    /// </summary>
+    /// <remarks>
+    /// Must run with the OpenGL context current. The instance stays marked as
+    /// disposed so both <see cref="OnClosing"/> and <see cref="Dispose"/> can call it
+    /// safely. After this the renderer reference is null and the frame loop stops
+    /// producing frames.
+    /// </remarks>
     private void DisposeGpu()
     {
         if (_gpuDisposed)
@@ -3986,6 +5768,19 @@ public sealed partial class IgniteWindow : IDisposable
         _fonts.Dispose();
     }
 
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// Idempotent: the first call releases the input context, the GPU objects and the
+    /// native window; later calls do nothing. <see cref="Run(Ignite.UILab.Node, string)"/> invokes it when the
+    /// frame loop exits, so hosts rarely need to call it directly.
+    /// </para>
+    /// <para>
+    /// GPU teardown requires a current OpenGL context. Disposing after the loop has
+    /// exited, or without ever calling <see cref="Run(Ignite.UILab.Node, string)"/>, is safe because there is
+    /// nothing left to release in that case.
+    /// </para>
+    /// </remarks>
     public void Dispose()
     {
         if (_disposed)
@@ -3999,23 +5794,50 @@ public sealed partial class IgniteWindow : IDisposable
         _window?.Dispose();
     }
 
+    /// <summary>State of one in-flight smooth scroll.</summary>
+    /// <remarks>
+    /// Stored per scrolling node; a new target replaces the entry rather than
+    /// stacking animations. Distances and offsets are CSS pixels, times seconds.
+    /// </remarks>
     private sealed class ScrollAnimation
     {
+        /// <summary>Horizontal offset when the animation started.</summary>
         public float FromX;
+
+        /// <summary>Vertical offset when the animation started.</summary>
         public float FromY;
+
+        /// <summary>Horizontal target offset, already clamped to range.</summary>
         public float ToX;
+
+        /// <summary>Vertical target offset, already clamped to range.</summary>
         public float ToY;
+
+        /// <summary>Seconds elapsed since the animation started.</summary>
         public double Elapsed;
+
+        /// <summary>Total duration in seconds, in the range 0.18–0.45.</summary>
         public double Duration;
     }
 
+    /// <summary>State of an active scrollbar thumb drag.</summary>
     private sealed class ScrollbarDrag
     {
+        /// <summary>The node whose scrollbar is being dragged.</summary>
         public required IgniteSupportedDomNode Node;
+
+        /// <summary><see langword="true"/> for a vertical scrollbar.</summary>
         public bool Vertical;
+
+        /// <summary>Pointer coordinate on the drag axis when the drag began.</summary>
         public float PointerStart;
+
+        /// <summary>Scroll offset on the drag axis when the drag began.</summary>
         public float ScrollStart;
     }
 
+    /// <summary>A scrollbar hit: the owning box and the metrics used to resolve the drag.</summary>
+    /// <param name="Box">The scroll container whose scrollbar was hit.</param>
+    /// <param name="Metrics">Track and thumb geometry, already in window coordinates.</param>
     private readonly record struct ScrollbarHit(LayoutBox Box, ScrollbarMetrics Metrics);
 }

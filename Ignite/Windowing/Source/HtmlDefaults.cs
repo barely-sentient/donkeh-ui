@@ -6,6 +6,21 @@ namespace Ignite.Windowing;
 /// The built-in user-agent rules and element knowledge that make a plain HTML
 /// tree lay out and paint sensibly without an author stylesheet.
 /// </summary>
+/// <remarks>
+/// <para>
+/// <see cref="Css"/> is parsed before every author sheet when
+/// <see cref="IgniteWindow"/> rebuilds its styles, so ordinary author rules win
+/// the cascade by source order even when specificity is equal. The inspector
+/// stylesheet is appended after the author sheets.
+/// </para>
+/// <para>
+/// The helper members work from tag names alone and never consult the cascade,
+/// computed style or author CSS. They provide the element defaults used while
+/// building the DOM and intrinsic sizes, and their tag sets largely mirror the
+/// <c>display</c> declarations in <see cref="Css"/>.
+/// </para>
+/// </remarks>
+/// <seealso cref="IgniteWindow"/>
 public static class HtmlDefaults
 {
     /// <summary>
@@ -14,6 +29,26 @@ public static class HtmlDefaults
     /// silently collapsing. Author rules are appended after this sheet, so they
     /// always win the cascade.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The sheet starts with <c>box-sizing: border-box</c> for every element and
+    /// pseudo-element, then sets the document defaults: block flow, zero margins
+    /// and padding, a 15 px Segoe UI stack, 1.45 line height, dark text on white.
+    /// </para>
+    /// <para>
+    /// Section order matters because later rules override earlier ones within the
+    /// same specificity: hidden metadata elements, block elements, inline
+    /// elements, replaced/media elements, headings, paragraphs and lists, inline
+    /// text semantics, links, rules and breaks, form controls, tables, then image,
+    /// media, progress and dialog sizing. Media placeholders default to 300 by
+    /// 150 px, inputs and selects to a 32 px minimum height, and textareas to
+    /// 72 px.
+    /// </para>
+    /// <para>
+    /// The text is an ordinary CSS string parsed by the tokenizer each time the
+    /// window rebuilds styles; it is not precompiled.
+    /// </para>
+    /// </remarks>
     public const string Css = """
         *, *::before, *::after { box-sizing: border-box; }
 
@@ -109,6 +144,15 @@ public static class HtmlDefaults
         dialog { margin: 1em auto; padding: 1em; border-width: 1px; border-style: solid; border-color: #d0d7de; border-radius: 8px; background-color: #ffffff; }
         """;
 
+    /// <summary>
+    /// Tags treated as block-level containers by <see cref="DisplayFor"/>.
+    /// </summary>
+    /// <remarks>
+    /// Includes document roots, sectioning and flow content, headings, lists and
+    /// the table structure elements. Comparison is case-insensitive. The set
+    /// mirrors the <c>display: block</c> and table <c>display</c> declarations in
+    /// <see cref="Css"/> and must be kept in sync with it manually.
+    /// </remarks>
     private static readonly HashSet<string> BlockTags = new(StringComparer.OrdinalIgnoreCase)
     {
         "html", "body", "div", "p", "section", "article", "aside", "header",
@@ -118,6 +162,14 @@ public static class HtmlDefaults
         "h3", "h4", "h5", "h6", "table", "thead", "tbody", "tfoot", "tr"
     };
 
+    /// <summary>
+    /// Tags treated as inline text content by <see cref="DisplayFor"/>.
+    /// </summary>
+    /// <remarks>
+    /// Covers phrasing content such as links, emphasis, code, quotations and Ruby
+    /// annotations. Comparison is case-insensitive, and the set mirrors the
+    /// <c>display: inline</c> rule in <see cref="Css"/>.
+    /// </remarks>
     private static readonly HashSet<string> InlineTags = new(StringComparer.OrdinalIgnoreCase)
     {
         "span", "a", "strong", "em", "b", "i", "u", "s", "small", "sub", "sup",
@@ -125,6 +177,15 @@ public static class HtmlDefaults
         "label", "output", "ruby", "rt", "rp", "bdi", "bdo"
     };
 
+    /// <summary>
+    /// Tags suppressed by the user-agent sheet's <c>display: none</c> rule.
+    /// </summary>
+    /// <remarks>
+    /// Document metadata, stylesheet and script carriers, templates and replaced
+    /// content sources live here. The set drives <see cref="IsHidden"/> and the
+    /// <c>display: none</c> branch of <see cref="DisplayFor"/>; it is matched by
+    /// tag name only, so author CSS may still override the visual result.
+    /// </remarks>
     private static readonly HashSet<string> HiddenTags = new(StringComparer.OrdinalIgnoreCase)
     {
         "head", "title", "meta", "link", "style", "script", "base", "template",
@@ -132,9 +193,31 @@ public static class HtmlDefaults
     };
 
     /// <summary>True for tags that are hidden by the user-agent sheet.</summary>
+    /// <param name="tag">The element tag to test; may be <see langword="null"/>.</param>
+    /// <returns>
+    /// <see langword="true"/> when the tag is in the metadata/script set;
+    /// <see langword="false"/> for <see langword="null"/> or any other tag.
+    /// </returns>
+    /// <remarks>
+    /// Comparison ignores case. This is a tag-name test, not a computed-style
+    /// query: it ignores <c>display</c> overrides, <c>hidden</c> attributes and
+    /// author rules, so it is only suitable for default element handling.
+    /// </remarks>
     public static bool IsHidden(string? tag) => tag is not null && HiddenTags.Contains(tag);
 
     /// <summary>The default display keyword for a tag.</summary>
+    /// <param name="tag">The element tag, or <see langword="null"/> for the root.</param>
+    /// <returns>
+    /// <c>none</c> for hidden metadata tags, <c>inline</c> for phrasing content,
+    /// <c>block</c> for flow and table structure elements and for
+    /// <see langword="null"/>, and <c>inline-block</c> for anything unknown
+    /// (including form controls and media placeholders).
+    /// </returns>
+    /// <remarks>
+    /// The keyword is the user-agent default only; the resolved style may replace
+    /// it. Tag comparison is case-insensitive and unknown custom elements
+    /// deliberately default to <c>inline-block</c> so they still get a box.
+    /// </remarks>
     public static string DisplayFor(string? tag)
     {
         if (tag is null)
@@ -164,6 +247,18 @@ public static class HtmlDefaults
     /// True for elements that have replaced content and therefore need an
     /// intrinsic size rather than normal flow sizing.
     /// </summary>
+    /// <param name="tag">The element tag; may be <see langword="null"/>.</param>
+    /// <returns>
+    /// <see langword="true"/> for <c>img</c>, <c>canvas</c>, <c>video</c>,
+    /// <c>audio</c>, <c>iframe</c>, <c>object</c> and <c>embed</c>; otherwise
+    /// <see langword="false"/>.
+    /// </returns>
+    /// <remarks>
+    /// Form controls such as <c>input</c>, <c>select</c> and <c>textarea</c> are
+    /// intentionally excluded; they participate in normal box sizing. The check
+    /// is ordinal case-sensitive, so callers should pass normalised lower-case
+    /// tags.
+    /// </remarks>
     public static bool IsReplaced(string? tag) => tag is "img" or "canvas" or "video"
         or "audio" or "iframe" or "object" or "embed";
 
@@ -171,6 +266,29 @@ public static class HtmlDefaults
     /// Reads a length attribute such as <c>width="320"</c> on an image. CSS
     /// pixels are used when no unit is supplied.
     /// </summary>
+    /// <param name="node">The element to read from; must not be <see langword="null"/>.</param>
+    /// <param name="name">The attribute name, for example <c>width</c> or <c>height</c>.</param>
+    /// <param name="fallback">
+    /// The value returned when the attribute is absent or unparsable.
+    /// </param>
+    /// <returns>
+    /// The numeric prefix of the attribute converted to a float, or
+    /// <paramref name="fallback"/>.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// The scanner accepts digits plus <c>.</c>, <c>-</c>, <c>+</c> and spaces,
+    /// then stops at the first other character. A trailing unit such as
+    /// <c>px</c> or <c>%</c> is therefore ignored and the number is treated as CSS
+    /// pixels, so percentage attributes are not resolved proportionally here.
+    /// </para>
+    /// <para>
+    /// Parsing uses <see cref="float.TryParse(ReadOnlySpan{char}, out float)"/> and
+    /// therefore the current culture; a decimal comma in a comma-decimal locale is
+    /// not treated as part of the number because the scanner stops there. The
+    /// result is not clamped, so negative and zero values pass through.
+    /// </para>
+    /// </remarks>
     public static float AttributeLength(IgniteSupportedDomNode node, string name, float fallback)
     {
         if (!node.TryGetAttribute(name, out var text) || string.IsNullOrWhiteSpace(text))
