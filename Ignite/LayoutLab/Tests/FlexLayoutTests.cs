@@ -432,6 +432,26 @@ public class FlexLayoutTests
     }
 
     [Fact]
+    public void WrappingRowContributesAllLinesWhenMeasuredAsAFlexItem()
+    {
+        var root = TestSupport.Node("div", "root");
+        var row = TestSupport.Node("div", "row");
+        var a = TestSupport.Node("div", "a");
+        var b = TestSupport.Node("div", "b");
+        root.Children = [row];
+        row.Children = [a, b];
+
+        var result = Lay(
+            "#root { display: flex; flex-direction: column; width: 200px; }"
+            + " #row { display: flex; flex-wrap: wrap; }"
+            + " #a, #b { width: 120px; height: 30px; }",
+            root);
+
+        Assert.Equal(60, TestSupport.Box(result, row).BorderBox.Height, 3);
+        Assert.Equal(60, TestSupport.Box(result, root).BorderBox.Height, 3);
+    }
+
+    [Fact]
     public void WrappingAccountsForColumnGap()
     {
         var (root, a, b, c) = Tree();

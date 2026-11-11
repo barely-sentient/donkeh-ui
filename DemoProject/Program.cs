@@ -137,7 +137,7 @@ internal sealed class BootstrapDemo : Component
                         H("input",
                             new Props
                             {
-                                ClassName = "form-control me-2",
+                                ClassName = "form-control me-3",
                                 Type = "search",
                                 Placeholder = "Search components",
                                 Value = search,

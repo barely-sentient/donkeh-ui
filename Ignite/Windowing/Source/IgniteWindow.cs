@@ -1096,6 +1096,15 @@ public sealed class IgniteWindow : IDisposable
             return;
         }
 
+        // Bootstrap draws its hamburger from an SVG data URI, which the engine
+        // does not decode. Draw the three bars directly so the toggler does not
+        // appear as an empty pill.
+        if (element.HasClass("navbar-toggler-icon"))
+        {
+            PaintTogglerIcon(box, instructions);
+            return;
+        }
+
         switch (element.Tag)
         {
             case "input":
@@ -1118,6 +1127,35 @@ public sealed class IgniteWindow : IDisposable
             case "meter":
                 PaintProgress(box, instructions, constants, element);
                 break;
+        }
+    }
+
+    private static void PaintTogglerIcon(LayoutBox box, InstructionBuffer instructions)
+    {
+        var rect = box.ContentBox;
+
+        if (rect.IsEmpty)
+        {
+            rect = box.BorderBox.Deflate(box.Style.BorderWidth.Left.Value, box.Style.BorderWidth.Right.Value,
+                box.Style.BorderWidth.Top.Value, box.Style.BorderWidth.Bottom.Value);
+        }
+
+        if (rect.IsEmpty)
+        {
+            return;
+        }
+
+        var horizontalInset = rect.Width * 0.18f;
+        var barWidth = MathF.Max(1, rect.Width - horizontalInset * 2);
+        var barHeight = MathF.Max(1.5f, rect.Height * 0.08f);
+        var x = rect.X + horizontalInset;
+
+        for (var i = 0; i < 3; i++)
+        {
+            var centerY = rect.Y + rect.Height * (0.28f + i * 0.22f);
+            instructions.AddDrawRect(
+                new Rect(x, centerY - barHeight * 0.5f, barWidth, barHeight),
+                0xFFB0B0B0);
         }
     }
 

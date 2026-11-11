@@ -678,40 +678,121 @@ public sealed partial class LayoutEngine
         var row = style.IsFlexContainer
             && style.FlexDirection is FlexDirection.Row or FlexDirection.RowReverse;
 
+        // A wrapping row container is taller than its tallest child: each flex
+        // line contributes its own height. Ignoring this makes a navbar measure
+        // its collapsed content as a single line and then clip the overflow.
+        var wraps = row && style.FlexWrap is FlexWrap.Wrap or FlexWrap.WrapReverse;
+
         // A table row lays its cells out horizontally even though it is not a
         // flex container; summing their heights makes a table measure many
         // times taller than it actually is.
-        var horizontal = row || style.Display == Display.TableRow;
+        var horizontal = row && !wraps || style.Display == Display.TableRow;
 
-        var gap = style.IsFlexContainer && !row
-            ? ResolveGap(style.RowGap, in context, cbWidth)
+        var mainGap = style.IsFlexContainer
+            ? ResolveGap(row ? style.ColumnGap : style.RowGap, in context, cbWidth)
+            : 0f;
+        var crossGap = style.IsFlexContainer
+            ? ResolveGap(row ? style.RowGap : style.ColumnGap, in context, cbWidth)
             : 0f;
 
-        for (var i = 0; i < box.Children.Count; i++)
+        if (wraps)
         {
-            var child = box.Children[i];
+            var available = MathF.Max(1, cbWidth - padding.Horizontal - border.Horizontal);
+            var lineWidth = 0f;
+            var lineHeight = 0f;
+            var wrappedHeight = 0f;
+            var hasLine = false;
 
-            if (child.IsOutOfFlow || child.IsContents)
+            for (var i = 0; i < box.Children.Count; i++)
             {
-                continue;
-            }
+                var child = box.Children[i];
 
-            var childContext = CreateContext(child.Style);
-            var margin = child.Style.Margin.Resolve(in childContext, cbWidth);
-            var childHeight = MeasureMaxContentHeight(child, MathF.Max(1, cbWidth)) + margin.Vertical;
-
-            if (horizontal)
-            {
-                content = MathF.Max(content, childHeight);
-            }
-            else
-            {
-                if (content > 0)
+                if (child.IsOutOfFlow || child.IsContents)
                 {
-                    content += gap;
+                    continue;
                 }
 
-                content += childHeight;
+                var childContext = CreateContext(child.Style);
+                var margin = child.Style.Margin.Resolve(in childContext, cbWidth);
+                var childPadding = child.Style.Padding.Resolve(in childContext, available);
+                var childBorder = ResolveBorders(child.Style, in childContext, available);
+                var childWidth = MeasureMaxContentWidth(child);
+
+                // A definite flex basis (Bootstrap's collapsed navbar uses
+                // flex-basis:100%) or width decides how much of the line the
+                // item occupies. Ignoring it makes the wrapper measure every
+                // child as one line and then clip the wrapped content.
+                var basis = child.Style.FlexBasis;
+                var basisWidth = !basis.IsAuto && !basis.IsIntrinsic
+                    ? basis.ResolveOr(in childContext, available, float.NaN)
+                    : float.NaN;
+                var specifiedWidth = float.IsFinite(basisWidth) && basisWidth > 0
+                    ? basisWidth
+                    : child.Style.Width.ResolveOr(in childContext, available, float.NaN);
+
+                if (float.IsFinite(specifiedWidth))
+                {
+                    childWidth = child.Style.BoxSizing == BoxSizing.BorderBox
+                        ? specifiedWidth
+                        : specifiedWidth + childPadding.Horizontal + childBorder.Horizontal;
+                }
+
+                childWidth += margin.Horizontal;
+                var childHeight = MeasureMaxContentHeight(child, MathF.Max(1, cbWidth)) + margin.Vertical;
+
+                if (hasLine && lineWidth + mainGap + childWidth > available)
+                {
+                    wrappedHeight += lineHeight + crossGap;
+                    lineWidth = 0;
+                    lineHeight = 0;
+                    hasLine = false;
+                }
+
+                if (hasLine)
+                {
+                    lineWidth += mainGap;
+                }
+
+                lineWidth += childWidth;
+                lineHeight = MathF.Max(lineHeight, childHeight);
+                hasLine = true;
+            }
+
+            if (hasLine)
+            {
+                wrappedHeight += lineHeight;
+            }
+
+            content = MathF.Max(content, wrappedHeight);
+        }
+        else
+        {
+            for (var i = 0; i < box.Children.Count; i++)
+            {
+                var child = box.Children[i];
+
+                if (child.IsOutOfFlow || child.IsContents)
+                {
+                    continue;
+                }
+
+                var childContext = CreateContext(child.Style);
+                var margin = child.Style.Margin.Resolve(in childContext, cbWidth);
+                var childHeight = MeasureMaxContentHeight(child, MathF.Max(1, cbWidth)) + margin.Vertical;
+
+                if (horizontal)
+                {
+                    content = MathF.Max(content, childHeight);
+                }
+                else
+                {
+                    if (content > 0)
+                    {
+                        content += mainGap;
+                    }
+
+                    content += childHeight;
+                }
             }
         }
 
