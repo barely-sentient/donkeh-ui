@@ -393,7 +393,7 @@ public sealed class IgniteWindow : IDisposable
     private void RebuildStyles()
     {
         var table = new DataTable();
-        var engine = new Ignite.DataEngine.DataEngine(Condition.AlwaysTrueCompiler);
+        var engine = new Ignite.DataEngine.DataEngine(Ignite.DataEngine.MediaConditionCompiler.Instance);
         engine.Build(Tokenizer.Parse(HtmlDefaults.Css), table);
 
         foreach (var sheet in _stylesheets)
