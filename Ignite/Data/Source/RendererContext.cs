@@ -23,6 +23,13 @@
         /// </summary>
         public long Version { get; private set; }
 
+        /// <summary>
+        /// Increments for every environment change except a viewport-height-only
+        /// change. Style caches use it so resizing the inspector vertically does
+        /// not invalidate every rule when the stylesheet has no height queries.
+        /// </summary>
+        public long ConditionVersion { get; private set; }
+
         public int ViewportWidth
         {
             get => _viewportWidth;
@@ -32,7 +39,7 @@
         public int ViewportHeight
         {
             get => _viewportHeight;
-            set => Set(ref _viewportHeight, value);
+            set => Set(ref _viewportHeight, value, affectsHeightOnly: true);
         }
 
         public Orientation Orientation
@@ -65,9 +72,13 @@
         /// Marks the environment as changed, forcing every cached condition
         /// result to be recomputed.
         /// </summary>
-        public void Invalidate() => Version = unchecked(Version + 1);
+        public void Invalidate()
+        {
+            Version = unchecked(Version + 1);
+            ConditionVersion = unchecked(ConditionVersion + 1);
+        }
 
-        private void Set(ref int field, int value)
+        private void Set(ref int field, int value, bool affectsHeightOnly = false)
         {
             if (field == value)
             {
@@ -75,7 +86,12 @@
             }
 
             field = value;
-            Invalidate();
+            Version = unchecked(Version + 1);
+
+            if (!affectsHeightOnly)
+            {
+                ConditionVersion = unchecked(ConditionVersion + 1);
+            }
         }
 
         private void Set(ref Orientation field, Orientation value)

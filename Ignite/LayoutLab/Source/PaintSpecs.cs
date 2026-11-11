@@ -167,7 +167,39 @@ public readonly record struct ScrollbarSpec(
 /// </summary>
 public sealed class ConstantPool
 {
-    private readonly List<object> _items = [];
+    private enum ConstantKind : byte
+    {
+        Text,
+        Border,
+        Shadow,
+        Background,
+        Image,
+        Scrollbar,
+        Radius,
+        Transform,
+        Filter,
+        ClipPath,
+        Mask
+    }
+
+    private readonly record struct ConstantRef(ConstantKind Kind, int Index);
+
+    // Constants live in typed lists. Storing them as object boxes every
+    // struct constant on every frame, which was one of the largest remaining
+    // per-layout allocations.
+    private readonly List<ConstantRef> _items = [];
+    private readonly List<TextCommand> _textItems = [];
+    private readonly List<BorderSpec> _borderItems = [];
+    private readonly List<ShadowSpec> _shadowItems = [];
+    private readonly List<BackgroundImageSpec> _backgroundItems = [];
+    private readonly List<ImageSpec> _imageItems = [];
+    private readonly List<ScrollbarSpec> _scrollbarItems = [];
+    private readonly List<CornerRadius> _radiusItems = [];
+    private readonly List<Matrix3x2> _transformItems = [];
+    private readonly List<FilterSpec> _filterItems = [];
+    private readonly List<ClipPathSpec> _clipPathItems = [];
+    private readonly List<MaskSpec> _maskItems = [];
+
     private readonly Dictionary<TextCommand, int> _texts = [];
     private readonly Dictionary<CornerRadius, int> _radii = [];
     private readonly Dictionary<Matrix3x2, int> _transforms = [];
@@ -186,6 +218,17 @@ public sealed class ConstantPool
     public void Clear()
     {
         _items.Clear();
+        _textItems.Clear();
+        _borderItems.Clear();
+        _shadowItems.Clear();
+        _backgroundItems.Clear();
+        _imageItems.Clear();
+        _scrollbarItems.Clear();
+        _radiusItems.Clear();
+        _transformItems.Clear();
+        _filterItems.Clear();
+        _clipPathItems.Clear();
+        _maskItems.Clear();
         _texts.Clear();
         _radii.Clear();
         _transforms.Clear();
@@ -199,29 +242,43 @@ public sealed class ConstantPool
         _backgrounds.Clear();
     }
 
-    public object Get(int id) => _items[id];
+    public object Get(int id) => _items[id].Kind switch
+    {
+        ConstantKind.Text => _textItems[_items[id].Index],
+        ConstantKind.Border => _borderItems[_items[id].Index],
+        ConstantKind.Shadow => _shadowItems[_items[id].Index],
+        ConstantKind.Background => _backgroundItems[_items[id].Index],
+        ConstantKind.Image => _imageItems[_items[id].Index],
+        ConstantKind.Scrollbar => _scrollbarItems[_items[id].Index],
+        ConstantKind.Radius => _radiusItems[_items[id].Index],
+        ConstantKind.Transform => _transformItems[_items[id].Index],
+        ConstantKind.Filter => _filterItems[_items[id].Index],
+        ConstantKind.ClipPath => _clipPathItems[_items[id].Index],
+        ConstantKind.Mask => _maskItems[_items[id].Index],
+        _ => throw new ArgumentOutOfRangeException(nameof(id))
+    };
 
-    public TextCommand GetText(int id) => (TextCommand)_items[id];
+    public TextCommand GetText(int id) => _textItems[_items[id].Index];
 
-    public BorderSpec GetBorder(int id) => (BorderSpec)_items[id];
+    public BorderSpec GetBorder(int id) => _borderItems[_items[id].Index];
 
-    public ShadowSpec GetShadow(int id) => (ShadowSpec)_items[id];
+    public ShadowSpec GetShadow(int id) => _shadowItems[_items[id].Index];
 
-    public BackgroundImageSpec GetBackground(int id) => (BackgroundImageSpec)_items[id];
+    public BackgroundImageSpec GetBackground(int id) => _backgroundItems[_items[id].Index];
 
-    public ImageSpec GetImage(int id) => (ImageSpec)_items[id];
+    public ImageSpec GetImage(int id) => _imageItems[_items[id].Index];
 
-    public ScrollbarSpec GetScrollbar(int id) => (ScrollbarSpec)_items[id];
+    public ScrollbarSpec GetScrollbar(int id) => _scrollbarItems[_items[id].Index];
 
-    public CornerRadius GetRadius(int id) => (CornerRadius)_items[id];
+    public CornerRadius GetRadius(int id) => _radiusItems[_items[id].Index];
 
-    public Matrix3x2 GetTransform(int id) => (Matrix3x2)_items[id];
+    public Matrix3x2 GetTransform(int id) => _transformItems[_items[id].Index];
 
-    public FilterSpec GetFilter(int id) => (FilterSpec)_items[id];
+    public FilterSpec GetFilter(int id) => _filterItems[_items[id].Index];
 
-    public ClipPathSpec GetClipPath(int id) => (ClipPathSpec)_items[id];
+    public ClipPathSpec GetClipPath(int id) => _clipPathItems[_items[id].Index];
 
-    public MaskSpec GetMask(int id) => (MaskSpec)_items[id];
+    public MaskSpec GetMask(int id) => _maskItems[_items[id].Index];
 
     public int AddText(string text, TextStyle style)
     {
@@ -232,7 +289,7 @@ public sealed class ConstantPool
             return existing;
         }
 
-        var id = AddItem(command);
+        var id = AddItem(_textItems, ConstantKind.Text, command);
         _texts[command] = id;
         return id;
     }
@@ -244,7 +301,7 @@ public sealed class ConstantPool
             return existing;
         }
 
-        var id = AddItem(border);
+        var id = AddItem(_borderItems, ConstantKind.Border, border);
         _borders[border] = id;
         return id;
     }
@@ -256,7 +313,7 @@ public sealed class ConstantPool
             return existing;
         }
 
-        var id = AddItem(shadow);
+        var id = AddItem(_shadowItems, ConstantKind.Shadow, shadow);
         _shadows[shadow] = id;
         return id;
     }
@@ -268,7 +325,7 @@ public sealed class ConstantPool
             return existing;
         }
 
-        var id = AddItem(background);
+        var id = AddItem(_backgroundItems, ConstantKind.Background, background);
         _backgrounds[background] = id;
         return id;
     }
@@ -280,7 +337,7 @@ public sealed class ConstantPool
             return existing;
         }
 
-        var id = AddItem(image);
+        var id = AddItem(_imageItems, ConstantKind.Image, image);
         _images[image] = id;
         return id;
     }
@@ -292,7 +349,7 @@ public sealed class ConstantPool
             return existing;
         }
 
-        var id = AddItem(scrollbar);
+        var id = AddItem(_scrollbarItems, ConstantKind.Scrollbar, scrollbar);
         _scrollbars[scrollbar] = id;
         return id;
     }
@@ -304,7 +361,7 @@ public sealed class ConstantPool
             return existing;
         }
 
-        var id = AddItem(radius);
+        var id = AddItem(_radiusItems, ConstantKind.Radius, radius);
         _radii[radius] = id;
         return id;
     }
@@ -316,7 +373,7 @@ public sealed class ConstantPool
             return existing;
         }
 
-        var id = AddItem(transform);
+        var id = AddItem(_transformItems, ConstantKind.Transform, transform);
         _transforms[transform] = id;
         return id;
     }
@@ -328,7 +385,7 @@ public sealed class ConstantPool
             return existing;
         }
 
-        var id = AddItem(filter);
+        var id = AddItem(_filterItems, ConstantKind.Filter, filter);
         _filters[filter] = id;
         return id;
     }
@@ -340,7 +397,7 @@ public sealed class ConstantPool
             return existing;
         }
 
-        var id = AddItem(clipPath);
+        var id = AddItem(_clipPathItems, ConstantKind.ClipPath, clipPath);
         _clipPaths[clipPath] = id;
         return id;
     }
@@ -352,12 +409,12 @@ public sealed class ConstantPool
             return existing;
         }
 
-        var id = AddItem(mask);
+        var id = AddItem(_maskItems, ConstantKind.Mask, mask);
         _masks[mask] = id;
         return id;
     }
 
-    private int AddItem(object value)
+    private int AddItem<T>(List<T> list, ConstantKind kind, T value)
     {
         var id = _items.Count;
 
@@ -367,7 +424,8 @@ public sealed class ConstantPool
                 "The constant pool exceeds the 16-bit aux index range.");
         }
 
-        _items.Add(value);
+        list.Add(value);
+        _items.Add(new ConstantRef(kind, list.Count - 1));
         return id;
     }
 }

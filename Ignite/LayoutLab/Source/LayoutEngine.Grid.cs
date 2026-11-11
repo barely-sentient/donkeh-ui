@@ -11,6 +11,9 @@ public sealed partial class LayoutEngine
     {
         var style = box.Style;
         var items = CollectFlowChildren(box);
+
+        try
+        {
         StableSortByOrder(items);
 
         if (items.Count == 0)
@@ -200,6 +203,11 @@ public sealed partial class LayoutEngine
         }
 
         return MathF.Max(0, usedHeight);
+        }
+        finally
+        {
+            ReleaseFlowChildren();
+        }
     }
 
     private readonly record struct GridItemPlacement(int Row, int Column, int RowSpan, int ColumnSpan);

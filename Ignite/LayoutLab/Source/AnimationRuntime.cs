@@ -18,6 +18,8 @@ internal sealed class AnimationRuntime
     private readonly DataTable _table;
     private readonly Dictionary<int, KeyframeTrack?> _tracks = [];
     private readonly Dictionary<IgniteSupportedDomNode, NodeAnimationState> _states = [];
+    private readonly List<IgniteSupportedDomNode> _staleStates = [];
+    private int _frame;
 
     public AnimationRuntime(DataTable table)
     {
@@ -27,9 +29,42 @@ internal sealed class AnimationRuntime
     /// <summary>True when at least one animation was active in the current frame.</summary>
     public bool HasRunningAnimations { get; private set; }
 
+    /// <summary>Number of nodes with retained animation state.</summary>
+    public int StateCount => _states.Count;
+
     public void BeginFrame()
     {
         HasRunningAnimations = false;
+        _frame++;
+    }
+
+    /// <summary>
+    /// Drops animation state for nodes that were not part of this layout pass.
+    /// Without this, an animated node that unmounts (a faded panel, a closed
+    /// modal, a removed carousel slide) stays reachable forever through the
+    /// state dictionary and its cached animated style.
+    /// </summary>
+    public void Prune()
+    {
+        if (_states.Count == 0)
+        {
+            return;
+        }
+
+        _staleStates.Clear();
+
+        foreach (var pair in _states)
+        {
+            if (pair.Value.Frame != _frame)
+            {
+                _staleStates.Add(pair.Key);
+            }
+        }
+
+        for (var i = 0; i < _staleStates.Count; i++)
+        {
+            _states.Remove(_staleStates[i]);
+        }
     }
 
     public ComputedStyle Apply(
@@ -58,6 +93,8 @@ internal sealed class AnimationRuntime
 
             _states[node] = state;
         }
+
+        state.Frame = _frame;
 
         ComputedStyle? animated = null;
 
@@ -90,7 +127,12 @@ internal sealed class AnimationRuntime
                 continue;
             }
 
-            animated ??= baseStyle.Clone();
+            if (animated is null)
+            {
+                animated = state.Animated ??= baseStyle.CloneForAnimation();
+                animated.CopyAllFrom(baseStyle);
+            }
+
             ApplyTrack(animated, baseStyle, parent, track, progress);
         }
 
@@ -1160,6 +1202,13 @@ internal sealed class AnimationRuntime
     {
         public int Signature;
         public double StartTime;
+        public int Frame;
+
+        /// <summary>
+        /// The animated style is reused between frames so descendants keep a
+        /// stable parent identity and their cached styles stay valid.
+        /// </summary>
+        public ComputedStyle? Animated;
     }
 
     private sealed class KeyframeTrack

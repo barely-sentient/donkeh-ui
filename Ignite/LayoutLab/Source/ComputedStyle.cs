@@ -142,7 +142,23 @@ public sealed class ComputedStyle
     public int ColumnCount { get; set; } = 1;
     public CssLength ColumnGapFallback { get; set; } = CssLength.Px(16);
 
+    /// <summary>
+    /// Custom properties declared by this element's own rules. Inherited
+    /// variables are resolved by walking <see cref="StyleParent"/> instead of
+    /// copying the whole map into every descendant.
+    /// </summary>
     public Dictionary<string, string>? CustomProperties { get; set; }
+
+    /// <summary>The style this element inherited from, used for variable lookup.</summary>
+    internal ComputedStyle? StyleParent;
+
+    /// <summary>
+    /// Hash of this style's effective custom-property chain. Variable-resolved
+    /// declaration values are cached by this hash so restyles reuse the same
+    /// resolved strings instead of rebuilding them.
+    /// </summary>
+    internal long CustomPropertyHash;
+
     public List<int>? UnsupportedProperties { get; set; }
 
     /// <summary>Animation entries resolved from the <c>animation</c> properties.</summary>
@@ -150,6 +166,13 @@ public sealed class ComputedStyle
 
     /// <summary>True when this style is the result of applying an animation at the current frame.</summary>
     public bool IsAnimated { get; set; }
+
+    /// <summary>
+    /// True when one of this element's declarations uses a viewport-height
+    /// unit (<c>vh</c>, <c>dvh</c>, ...). The layout engine then includes the
+    /// viewport height in its style cache signature.
+    /// </summary>
+    internal bool UsesViewportHeight;
 
     public bool IsAbsolutelyPositioned => Position is Position.Absolute or Position.Fixed;
 
@@ -169,6 +192,69 @@ public sealed class ComputedStyle
 
     public void CopyInheritedFrom(ComputedStyle parent)
     {
+        CopyInheritedScalarsFrom(parent);
+        StyleParent = parent;
+
+        if (parent.CustomProperties is { Count: > 0 })
+        {
+            CustomProperties = new Dictionary<string, string>(parent.CustomProperties, StringComparer.Ordinal);
+        }
+    }
+
+    /// <summary>
+    /// Inherits the scalar values and links the style parent. Custom
+    /// properties are resolved through the parent chain on demand, so this hot
+    /// path never copies the inherited variable map.
+    /// </summary>
+    internal void CopyInheritedFromShared(ComputedStyle parent)
+    {
+        CopyInheritedScalarsFrom(parent);
+        StyleParent = parent;
+    }
+
+    /// <summary>Recomputes <see cref="CustomPropertyHash"/> after custom properties change.</summary>
+    internal void RefreshCustomPropertyHash()
+    {
+        var parentHash = StyleParent?.CustomPropertyHash ?? 0;
+
+        if (CustomProperties is not { Count: > 0 } properties)
+        {
+            CustomPropertyHash = parentHash;
+            return;
+        }
+
+        var hash = new HashCode();
+        hash.Add(parentHash);
+
+        foreach (var pair in properties)
+        {
+            hash.Add(pair.Key, StringComparer.Ordinal);
+            hash.Add(pair.Value, StringComparer.Ordinal);
+        }
+
+        CustomPropertyHash = hash.ToHashCode();
+    }
+
+    /// <summary>
+    /// Looks up a custom property declared on this style or any ancestor.
+    /// </summary>
+    public bool TryGetCustomProperty(string name, out string? value)
+    {
+        for (var style = this; style is not null; style = style.StyleParent)
+        {
+            if (style.CustomProperties is { } properties
+                && properties.TryGetValue(name, out value))
+            {
+                return true;
+            }
+        }
+
+        value = null;
+        return false;
+    }
+
+    private void CopyInheritedScalarsFrom(ComputedStyle parent)
+    {
         Color = parent.Color;
         FontFamily = parent.FontFamily;
         FontSize = parent.FontSize;
@@ -186,11 +272,6 @@ public sealed class ComputedStyle
         BorderCollapse = parent.BorderCollapse;
         BorderSpacing = parent.BorderSpacing;
         ObjectFit = parent.ObjectFit;
-
-        if (parent.CustomProperties is { Count: > 0 })
-        {
-            CustomProperties = new Dictionary<string, string>(parent.CustomProperties, StringComparer.Ordinal);
-        }
     }
 
     public float ResolveFontSize(in LengthContext context)
@@ -228,6 +309,15 @@ public sealed class ComputedStyle
             WhiteSpace,
             Direction);
     }
+
+    /// <summary>
+    /// Creates a shallow copy for the animation runtime. Animation tracks only
+    /// replace individual computed properties, so the custom-property map and
+    /// animation list can stay shared with the base style. Copying the map on
+    /// every animated frame is expensive because Bootstrap inherits a large
+    /// set of <c>--bs-*</c> variables to every element.
+    /// </summary>
+    public ComputedStyle CloneForAnimation() => (ComputedStyle)MemberwiseClone();
 
     public ComputedStyle Clone()
     {
@@ -364,9 +454,12 @@ public sealed class ComputedStyle
         ColumnCount = source.ColumnCount;
         ColumnGapFallback = source.ColumnGapFallback;
         CustomProperties = source.CustomProperties;
+        CustomPropertyHash = source.CustomPropertyHash;
+        StyleParent = source.StyleParent;
         UnsupportedProperties = source.UnsupportedProperties;
         Animations = source.Animations;
         IsAnimated = source.IsAnimated;
+        UsesViewportHeight = source.UsesViewportHeight;
     }
 }
 

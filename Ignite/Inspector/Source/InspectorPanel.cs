@@ -57,6 +57,8 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
         _tick = tick;
         _setTick = setTick;
 
+        PruneExpanded(state);
+
         if (_lastVersion < 0)
         {
             _lastVersion = state.Version;
@@ -122,18 +124,52 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
                     new Props
                     {
                         ClassName = "dt-splitter dt-splitter-right",
-                        OnPointerDown = (x, y) => ResizeRight(state),
-                        OnPointerMove = (x, y) => ResizeRight(state),
-                        OnPointerUp = (x, y) => ResizeRight(state)
+                        OnPointerDown = (x, y) =>
+                        {
+                            state.IsResizingDock = true;
+                            ResizeRight(state);
+                        },
+                        OnPointerMove = (x, y) =>
+                        {
+                            if (state.IsResizingDock)
+                            {
+                                ResizeRight(state);
+                            }
+                        },
+                        OnPointerUp = (x, y) =>
+                        {
+                            if (state.IsResizingDock)
+                            {
+                                ResizeRight(state);
+                                state.IsResizingDock = false;
+                            }
+                        }
                     })
                 : _.H(
                     "div",
                     new Props
                     {
                         ClassName = "dt-splitter dt-splitter-bottom",
-                        OnPointerDown = (x, y) => ResizeBottom(state),
-                        OnPointerMove = (x, y) => ResizeBottom(state),
-                        OnPointerUp = (x, y) => ResizeBottom(state)
+                        OnPointerDown = (x, y) =>
+                        {
+                            state.IsResizingDock = true;
+                            ResizeBottom(state);
+                        },
+                        OnPointerMove = (x, y) =>
+                        {
+                            if (state.IsResizingDock)
+                            {
+                                ResizeBottom(state);
+                            }
+                        },
+                        OnPointerUp = (x, y) =>
+                        {
+                            if (state.IsResizingDock)
+                            {
+                                ResizeBottom(state);
+                                state.IsResizingDock = false;
+                            }
+                        }
                     });
         }
 
@@ -1735,6 +1771,50 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
                 : element.Children.OfType<Node>().ToArray(),
             _ => []
         };
+    }
+
+    /// <summary>
+    /// Removes expansion entries for nodes that have left the app tree.
+    /// Expansion is keyed by live nodes, so conditional components (fade
+    /// panels, modal bodies, carousel slides) would otherwise stay reachable
+    /// through the inspector's HashSet after they unmount.
+    /// </summary>
+    private static void PruneExpanded(DevToolsState state)
+    {
+        if (state.AppRoot is null || state.Expanded.Count == 0)
+        {
+            return;
+        }
+
+        var live = new HashSet<Node>(ReferenceEqualityComparer.Instance);
+        CollectLogicalNodes(state.AppRoot, live);
+        state.Expanded.RemoveWhere(node => !live.Contains(node));
+        state.PruneElementStyles(live);
+
+        if (state.Selected is not null && !live.Contains(state.Selected))
+        {
+            state.Selected = null;
+        }
+
+        if (state.Hovered is not null && !live.Contains(state.Hovered))
+        {
+            state.Hovered = null;
+        }
+    }
+
+    private static void CollectLogicalNodes(Node node, HashSet<Node> live)
+    {
+        if (!live.Add(node))
+        {
+            return;
+        }
+
+        var children = LogicalChildren(node);
+
+        for (var i = 0; i < children.Length; i++)
+        {
+            CollectLogicalNodes(children[i], live);
+        }
     }
 
     /// <summary>

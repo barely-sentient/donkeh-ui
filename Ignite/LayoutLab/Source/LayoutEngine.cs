@@ -26,7 +26,12 @@ public sealed partial class LayoutEngine
     private readonly DataTable _table;
     private readonly StyleValueCache _valueCache;
     private readonly Dictionary<IgniteSupportedDomNode, StyleCacheEntry> _styleCache = [];
-    private readonly Dictionary<TextLayoutKey, TextLayout> _textCache = [];
+    private Dictionary<TextLayoutKey, TextLayout> _textCache = [];
+    private Dictionary<TextLayoutKey, TextLayout> _textCachePrevious = [];
+    private readonly Dictionary<IgniteSupportedDomNode, LayoutBox> _boxCache = [];
+    private readonly List<IgniteSupportedDomNode> _staleBoxes = [];
+    private readonly List<IgniteSupportedDomNode> _staleStyles = [];
+    private readonly HashSet<IgniteSupportedDomNode> _visited = [];
     private readonly Dictionary<IgniteSupportedDomNode, LayoutBox> _byNode = [];
     private readonly List<LayoutBox> _absolutes = [];
     private readonly HashSet<LayoutBox> _absoluteLaidOut = [];
@@ -41,10 +46,14 @@ public sealed partial class LayoutEngine
     private long _contextVersion;
 
     private InstructionBuffer _instructions = new();
+    private readonly InstructionBuffer _optimisedInstructions = new();
     private ConstantPool _constants = new();
     private readonly AnimationRuntime _animations;
     private readonly List<LayoutBox> _fixedBoxes = [];
+    private readonly List<List<LayoutBox>> _flowItemLists = [];
+    private int _flowItemDepth;
     private bool _paintingFixed;
+    private bool _usesViewportHeight;
     private Rect _layoutViewport;
     private LayoutBox? _root;
     private int _maxDepth = 512;
@@ -57,6 +66,9 @@ public sealed partial class LayoutEngine
     }
 
     public StyleValueCache ValueCache => _valueCache;
+
+    /// <summary>Number of nodes with retained animation state, for tests and diagnostics.</summary>
+    public int AnimationStateCount => _animations.StateCount;
 
     public LayoutResult Layout(IgniteSupportedDomNode root)
     {
@@ -72,7 +84,9 @@ public sealed partial class LayoutEngine
         _maxDepth = Math.Max(1, _options.MaxLayoutDepth);
         _baseContext = _options.CreateRootLengthContext();
         _rendererContext = _options.CreateRendererContext();
-        _contextVersion = _rendererContext.Version;
+        _contextVersion = _usesViewportHeight || _table.HasHeightMediaQueries
+            ? _rendererContext.Version
+            : _rendererContext.ConditionVersion;
         _styleSignature = ComputeStyleSignature();
         _measurer = _options.TextMeasurer ?? SimpleTextMeasurer.Instance;
         _resolver = new StyleResolver(_table, _valueCache, _options);
@@ -82,9 +96,23 @@ public sealed partial class LayoutEngine
         _byNode.Clear();
         _absolutes.Clear();
         _absoluteLaidOut.Clear();
+        _visited.Clear();
+        _usesViewportHeight = false;
         _animations.BeginFrame();
 
+        if (!_options.ReuseLayoutBoxes)
+        {
+            _boxCache.Clear();
+        }
+
         _root = BuildBox(root, null, null, null, 0);
+
+        if (_options.ReuseLayoutBoxes)
+        {
+            PruneBoxCache();
+        }
+
+        _animations.Prune();
 
         var viewport = new Rect(0, 0, MathF.Max(0, _options.ViewportWidth), MathF.Max(0, _options.ViewportHeight));
         _layoutViewport = viewport;
@@ -97,7 +125,7 @@ public sealed partial class LayoutEngine
         }
 
         var frame = _options.Optimise
-            ? Optimiser.Run(_instructions, _constants, viewport, _options)
+            ? Optimiser.Run(_instructions, _constants, viewport, _options, _optimisedInstructions)
             : new OptimisationResult(_instructions, _constants, OptimisationStats.Empty);
 
         return new LayoutResult(
@@ -106,7 +134,8 @@ public sealed partial class LayoutEngine
             frame.Constants,
             _byNode,
             frame.Stats,
-            _animations.HasRunningAnimations);
+            _animations.HasRunningAnimations,
+            snapshot: _options.SnapshotResults);
     }
 
     /// <summary>
@@ -122,19 +151,28 @@ public sealed partial class LayoutEngine
         _maxDepth = Math.Max(1, _options.MaxLayoutDepth);
         _baseContext = _options.CreateRootLengthContext();
         _rendererContext = _options.CreateRendererContext();
-        _contextVersion = _rendererContext.Version;
+        _contextVersion = _usesViewportHeight || _table.HasHeightMediaQueries
+            ? _rendererContext.Version
+            : _rendererContext.ConditionVersion;
         _styleSignature = ComputeStyleSignature();
         _measurer = _options.TextMeasurer ?? SimpleTextMeasurer.Instance;
         _resolver = new StyleResolver(_table, _valueCache, _options);
 
         _instructions.Clear();
         _constants.Clear();
-        _byNode.Clear();
         _animations.BeginFrame();
 
-        foreach (var pair in previous.Boxes)
+        // When results are not snapshotted the previous result already points
+        // at this engine's node map. Clearing it would erase the source and
+        // leave every box lookup empty after a scroll repaint.
+        if (!ReferenceEquals(previous.Boxes, _byNode))
         {
-            _byNode[pair.Key] = pair.Value;
+            _byNode.Clear();
+
+            foreach (var pair in previous.Boxes)
+            {
+                _byNode[pair.Key] = pair.Value;
+            }
         }
 
         _root = previous.Root;
@@ -149,7 +187,7 @@ public sealed partial class LayoutEngine
         }
 
         var frame = _options.Optimise
-            ? Optimiser.Run(_instructions, _constants, viewport, _options)
+            ? Optimiser.Run(_instructions, _constants, viewport, _options, _optimisedInstructions)
             : new OptimisationResult(_instructions, _constants, OptimisationStats.Empty);
 
         return new LayoutResult(
@@ -158,7 +196,8 @@ public sealed partial class LayoutEngine
             frame.Constants,
             _byNode,
             frame.Stats,
-            previous.HasAnimations);
+            previous.HasAnimations,
+            snapshot: _options.SnapshotResults);
     }
 
     /// <summary>Re-clamps scroll offsets without touching box geometry.</summary>
@@ -177,19 +216,98 @@ public sealed partial class LayoutEngine
     {
         _styleCache.Clear();
         _textCache.Clear();
+        _textCachePrevious.Clear();
+        _boxCache.Clear();
         _valueCache.Clear();
+    }
+
+    /// <summary>
+    /// Removes cached boxes for nodes that are no longer part of the mounted
+    /// tree. Without this the cache would keep detached devtools or rerendered
+    /// subtrees alive forever.
+    /// </summary>
+    private void PruneBoxCache()
+    {
+        _staleBoxes.Clear();
+
+        foreach (var pair in _boxCache)
+        {
+            if (!_byNode.ContainsKey(pair.Key))
+            {
+                _staleBoxes.Add(pair.Key);
+            }
+        }
+
+        for (var i = 0; i < _staleBoxes.Count; i++)
+        {
+            _boxCache.Remove(_staleBoxes[i]);
+        }
+
+        // The devtools rebuilds its inspector tree periodically, so styles for
+        // detached nodes would otherwise stay reachable forever and promote
+        // into gen2.
+        _staleStyles.Clear();
+
+        foreach (var pair in _styleCache)
+        {
+            // Use the visited set rather than the box map: display:none nodes
+            // (head, closed dropdowns, select options) have no box but are
+            // still part of the live tree and must keep their cached style.
+            if (!_visited.Contains(pair.Key))
+            {
+                _staleStyles.Add(pair.Key);
+            }
+        }
+
+        for (var i = 0; i < _staleStyles.Count; i++)
+        {
+            _styleCache.Remove(_staleStyles[i]);
+        }
     }
 
     private long ComputeStyleSignature()
     {
         var hash = new HashCode();
         hash.Add(_options.ViewportWidth);
-        hash.Add(_options.ViewportHeight);
+
+        if (_usesViewportHeight || _table.HasHeightMediaQueries)
+        {
+            hash.Add(_options.ViewportHeight);
+        }
+
         hash.Add(_options.Orientation);
         hash.Add(_options.RootFontSize);
         hash.Add(_options.DefaultFontSize);
         hash.Add(_options.DevicePixelRatio);
         hash.Add(_contextVersion);
+        return hash.ToHashCode();
+    }
+
+    /// <summary>
+    /// Hash of the properties a child inherits. It lets the style cache notice
+    /// when an animated parent's inherited values changed even though the
+    /// parent style object itself is reused between frames.
+    /// </summary>
+    private static long InheritedHash(ComputedStyle style)
+    {
+        var hash = new HashCode();
+        hash.Add(style.Color);
+        hash.Add(style.FontFamily);
+        hash.Add(style.FontSize);
+        hash.Add(style.FontWeight);
+        hash.Add(style.Italic);
+        hash.Add(style.LineHeight);
+        hash.Add(style.LetterSpacing);
+        hash.Add(style.TextAlign);
+        hash.Add(style.WhiteSpace);
+        hash.Add(style.TextOverflow);
+        hash.Add(style.TextTransform);
+        hash.Add(style.Direction);
+        hash.Add(style.WritingMode);
+        hash.Add(style.Visibility);
+        hash.Add(style.BorderCollapse);
+        hash.Add(style.BorderSpacing);
+        hash.Add(style.ObjectFit);
         return hash.ToHashCode();
     }
 
@@ -200,15 +318,23 @@ public sealed partial class LayoutEngine
         public required ComputedStyle Style;
         public int Revision;
         public ComputedStyle? Parent;
+        public long ParentInheritedHash;
         public long Signature;
         public long ContextVersion;
     }
 
     private ComputedStyle ResolveStyle(IgniteSupportedDomNode node, ComputedStyle? parent)
     {
-        if (_styleCache.TryGetValue(node, out var entry)
+        // Animated parents keep a stable style object but their inherited
+        // values can still change each frame. Only pay for the hash when the
+        // parent is actually animated.
+        var parentInheritedHash = parent is { IsAnimated: true } ? InheritedHash(parent) : 0;
+        _styleCache.TryGetValue(node, out var entry);
+
+        if (entry is not null
             && entry.Revision == node.Revision
             && ReferenceEquals(entry.Parent, parent)
+            && entry.ParentInheritedHash == parentInheritedHash
             && entry.Signature == _styleSignature
             && entry.ContextVersion == _contextVersion)
         {
@@ -230,6 +356,7 @@ public sealed partial class LayoutEngine
             Style = style,
             Revision = node.Revision,
             Parent = parent,
+            ParentInheritedHash = parentInheritedHash,
             Signature = _styleSignature,
             ContextVersion = _contextVersion
         };
@@ -251,6 +378,7 @@ public sealed partial class LayoutEngine
         LayoutBox? positionedAncestor,
         int depth)
     {
+        _visited.Add(node);
         var style = ResolveStyle(node, parentStyle);
 
         if (_options.AnimationsEnabled)
@@ -263,11 +391,32 @@ public sealed partial class LayoutEngine
             return null;
         }
 
-        var box = new LayoutBox(node, style, depth, node.Children.Length)
+        if (style.UsesViewportHeight)
         {
-            Parent = parentBox,
-            IsContents = style.Display == Display.Contents
-        };
+            _usesViewportHeight = true;
+        }
+
+        LayoutBox box;
+
+        if (_options.ReuseLayoutBoxes && _boxCache.TryGetValue(node, out var cached))
+        {
+            cached.Reset(style, depth, parentBox);
+            cached.IsContents = style.Display == Display.Contents;
+            box = cached;
+        }
+        else
+        {
+            box = new LayoutBox(node, style, depth, node.Children.Length)
+            {
+                Parent = parentBox,
+                IsContents = style.Display == Display.Contents
+            };
+
+            if (_options.ReuseLayoutBoxes)
+            {
+                _boxCache[node] = box;
+            }
+        }
 
         if (style.IsAbsolutelyPositioned)
         {
@@ -998,9 +1147,20 @@ public sealed partial class LayoutEngine
             style.WebkitLineClamp,
             style.TextOverflow);
 
-        if (_textCache.TryGetValue(key, out var cached))
+        var cacheText = _options.CacheTextLayouts;
+
+        if (cacheText)
         {
-            return cached;
+            if (_textCache.TryGetValue(key, out var cached))
+            {
+                return cached;
+            }
+
+            if (_textCachePrevious.TryGetValue(key, out cached))
+            {
+                _textCache[key] = cached;
+                return cached;
+            }
         }
 
         var layoutWidth = widthKey == int.MaxValue ? float.PositiveInfinity : widthKey * 0.25f;
@@ -1015,12 +1175,21 @@ public sealed partial class LayoutEngine
             style.WebkitLineClamp,
             style.TextOverflow);
 
-        if (_textCache.Count > 8192)
+        if (cacheText)
         {
-            _textCache.Clear();
+            // Two generations give a simple LRU-ish bound: recent layouts stay
+            // in the current map, the previous generation survives one rotation
+            // and then becomes unreachable. A full clear on a fixed threshold
+            // caused a large promotion spike whenever dynamic text filled it.
+            if (_textCache.Count >= 1024)
+            {
+                (_textCache, _textCachePrevious) = (_textCachePrevious, _textCache);
+                _textCache.Clear();
+            }
+
+            _textCache[key] = layout;
         }
 
-        _textCache[key] = layout;
         return layout;
     }
 
@@ -1098,9 +1267,17 @@ public sealed partial class LayoutEngine
 
     private float LayoutContent(LayoutBox box, Rect content, float definiteContentHeight)
     {
-        box.FloatContext = EstablishesBlockFormattingContext(box.Style) || ReferenceEquals(box, _root)
-            ? new FloatContext()
-            : box.Parent?.FloatContext ?? new FloatContext();
+        if (EstablishesBlockFormattingContext(box.Style) || ReferenceEquals(box, _root))
+        {
+            var context = box.OwnedFloatContext ?? new FloatContext();
+            context.Reset();
+            box.OwnedFloatContext = context;
+            box.FloatContext = context;
+        }
+        else
+        {
+            box.FloatContext = box.Parent?.FloatContext ?? new FloatContext();
+        }
 
         if (box.IsContents)
         {

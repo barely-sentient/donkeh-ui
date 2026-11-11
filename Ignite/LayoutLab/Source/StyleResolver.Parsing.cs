@@ -63,12 +63,27 @@ public sealed partial class StyleResolver
             return value;
         }
 
-        return ResolveVariablesCore(value, style.CustomProperties, 0);
+        var key = (valueId, style.CustomPropertyHash);
+
+        if (_cache.ResolvedValues.TryGetValue(key, out var cached))
+        {
+            return cached;
+        }
+
+        var resolved = ResolveVariablesCore(value, style, 0);
+
+        if (_cache.ResolvedValues.Count > 4096)
+        {
+            _cache.ResolvedValues.Clear();
+        }
+
+        _cache.ResolvedValues[key] = resolved;
+        return resolved;
     }
 
     private static string ResolveVariablesCore(
         string value,
-        Dictionary<string, string>? customProperties,
+        ComputedStyle? style,
         int depth)
     {
         if (depth > 16)
@@ -107,8 +122,8 @@ public sealed partial class StyleResolver
             string? replacement = null;
 
             if (name.StartsWith("--", StringComparison.Ordinal)
-                && customProperties is not null
-                && customProperties.TryGetValue(name, out var custom))
+                && style is not null
+                && style.TryGetCustomProperty(name, out var custom))
             {
                 replacement = custom;
             }
@@ -117,7 +132,7 @@ public sealed partial class StyleResolver
 
             if (replacement.Contains("var(", StringComparison.OrdinalIgnoreCase))
             {
-                replacement = ResolveVariablesCore(replacement, customProperties, depth + 1);
+                replacement = ResolveVariablesCore(replacement, style, depth + 1);
             }
 
             builder.Append(replacement);

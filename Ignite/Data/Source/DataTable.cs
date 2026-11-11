@@ -147,6 +147,32 @@ namespace Ignite.Data
             _conditionTokens = new Token[tokenCapacity];
         }
 
+        private bool? _hasHeightMediaQueries;
+
+        /// <summary>
+        /// True when a media condition depends on the viewport height, for
+        /// example <c>@media (min-height: 600px)</c>. Layout can then keep style
+        /// caches across height-only resizes when no laid-out element uses
+        /// viewport-height units.
+        /// </summary>
+        public bool HasHeightMediaQueries => _hasHeightMediaQueries ??= ComputeHeightMediaQueries();
+
+        private bool ComputeHeightMediaQueries()
+        {
+            for (var i = 0; i < _conditionTokenCount; i++)
+            {
+                var text = InternTable.GetString(_conditionTokens[i].InternedId);
+
+                if (text is not null
+                    && text.Contains("height", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         public IReadOnlyList<SelectorRecord> Selectors => _selectors;
 
         public IReadOnlyList<Rule> Rules => _rules;

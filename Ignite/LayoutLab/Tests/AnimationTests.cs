@@ -127,4 +127,28 @@ public class AnimationTests
         Assert.False(result.HasAnimations);
         Assert.Equal(1f, box.Style.Opacity, 2);
     }
+
+    [Fact]
+    public void UnmountedAnimatedNodesReleaseTheirAnimationState()
+    {
+        const string css = """
+            @keyframes spin { to { transform: rotate(360deg); } }
+            .spin { width: 20px; height: 20px; animation: 1s linear infinite spin; }
+            """;
+
+        var table = TestSupport.Build(css);
+        var root = TestSupport.Node("div", "root", null);
+        var animated = TestSupport.Node("div", null, null, "spin");
+        root.Children = [animated];
+
+        var options = TestSupport.Options();
+        var engine = new LayoutEngine(table);
+
+        engine.Layout(root, options);
+        Assert.Equal(1, engine.AnimationStateCount);
+
+        root.Children = [];
+        engine.Layout(root, options);
+        Assert.Equal(0, engine.AnimationStateCount);
+    }
 }

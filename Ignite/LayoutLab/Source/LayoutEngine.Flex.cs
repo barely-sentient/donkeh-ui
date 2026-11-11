@@ -1,3 +1,5 @@
+using System.Buffers;
+
 namespace Ignite.LayoutLab;
 
 public sealed partial class LayoutEngine
@@ -15,6 +17,9 @@ public sealed partial class LayoutEngine
         var reverse = style.FlexDirection is FlexDirection.RowReverse or FlexDirection.ColumnReverse;
 
         var items = CollectFlowChildren(box);
+
+        try
+        {
         StableSortByOrder(items);
 
         var count = items.Count;
@@ -34,12 +39,18 @@ public sealed partial class LayoutEngine
             ? content.Width
             : (definiteContentHeight is { } height ? height : float.PositiveInfinity);
 
-        var bases = new float[count];
-        var mains = new float[count];
-        var minMains = new float[count];
-        var mainMargins = new float[count];
-        var lineOf = new int[count];
-        var lineStarts = new List<int>(4) { 0 };
+        // Flex layout is a hot path: a page with a few dozen flex containers
+        // would otherwise allocate six arrays per container on every frame.
+        // Rent the scratch storage from the shared pool and return it when the
+        // method exits.
+        using var scratch = new FlexScratch(count);
+        var bases = scratch.Bases;
+        var mains = scratch.Mains;
+        var minMains = scratch.MinMains;
+        var mainMargins = scratch.MainMargins;
+        var lineOf = scratch.LineOf;
+        var lineStarts = scratch.LineStarts;
+        var lineCount = 1;
 
         for (var i = 0; i < count; i++)
         {
@@ -64,10 +75,10 @@ public sealed partial class LayoutEngine
             }
 
             if (style.FlexWrap != FlexWrap.NoWrap
-                && i > lineStarts[^1]
+                && i > lineStarts[lineCount - 1]
                 && float.IsFinite(mainAvailable))
             {
-                var lineStart = lineStarts[^1];
+                var lineStart = lineStarts[lineCount - 1];
                 var used = 0f;
 
                 for (var j = lineStart; j < i; j++)
@@ -82,17 +93,19 @@ public sealed partial class LayoutEngine
 
                 if (used + mainGap + bases[i] + mainMargins[i] > mainAvailable)
                 {
-                    lineStarts.Add(i);
+                    lineStarts[lineCount++] = i;
                 }
             }
 
-            lineOf[i] = lineStarts.Count - 1;
+            lineOf[i] = lineCount - 1;
         }
 
-        lineStarts.Add(count);
+        lineStarts[lineCount++] = count;
 
-        var lineCross = new float[lineStarts.Count - 1];
-        var crossSizes = new float[count];
+        var lineCrossCount = lineCount - 1;
+        var lineCross = scratch.LineCross;
+        Array.Clear(lineCross, 0, lineCrossCount);
+        var crossSizes = scratch.CrossSizes;
 
         if (!float.IsFinite(mainAvailable))
         {
@@ -110,7 +123,7 @@ public sealed partial class LayoutEngine
         }
 
         // Resolve flexible lengths per line.
-        for (var line = 0; line < lineStarts.Count - 1; line++)
+        for (var line = 0; line < lineCount - 1; line++)
         {
             var start = lineStarts[line];
             var end = lineStarts[line + 1];
@@ -294,9 +307,9 @@ public sealed partial class LayoutEngine
         // A single line fills a definite cross size. With several lines,
         // align-content: stretch distributes the free space equally, which is
         // also what makes align-items: stretch reach the container edge.
-        if (float.IsFinite(crossAvailable) && lineCross.Length > 0)
+        if (float.IsFinite(crossAvailable) && lineCrossCount > 0)
         {
-            if (lineCross.Length == 1)
+            if (lineCrossCount == 1)
             {
                 // A single flex line fills the container's definite cross size.
                 // Items that establish their own scroll container then overflow
@@ -305,9 +318,9 @@ public sealed partial class LayoutEngine
             }
             else if (style.AlignContent == AlignContent.Stretch)
             {
-                var usedCrossSpace = crossGap * (lineCross.Length - 1);
+                var usedCrossSpace = crossGap * (lineCrossCount - 1);
 
-                for (var line = 0; line < lineCross.Length; line++)
+                for (var line = 0; line < lineCrossCount; line++)
                 {
                     usedCrossSpace += lineCross[line];
                 }
@@ -316,9 +329,9 @@ public sealed partial class LayoutEngine
 
                 if (extra > 0)
                 {
-                    var share = extra / lineCross.Length;
+                    var share = extra / lineCrossCount;
 
-                    for (var line = 0; line < lineCross.Length; line++)
+                    for (var line = 0; line < lineCrossCount; line++)
                     {
                         lineCross[line] += share;
                     }
@@ -328,14 +341,14 @@ public sealed partial class LayoutEngine
 
         var totalCross = 0f;
 
-        for (var line = 0; line < lineCross.Length; line++)
+        for (var line = 0; line < lineCrossCount; line++)
         {
             totalCross += lineCross[line];
         }
 
-        if (lineCross.Length > 1)
+        if (lineCrossCount > 1)
         {
-            totalCross += crossGap * (lineCross.Length - 1);
+            totalCross += crossGap * (lineCrossCount - 1);
         }
 
         var crossStart = 0f;
@@ -354,15 +367,15 @@ public sealed partial class LayoutEngine
                     _ => JustifyContent.FlexStart
                 },
                 crossAvailable - totalCross,
-                lineCross.Length,
+                lineCrossCount,
                 out crossStart,
                 out crossBetween);
         }
 
-        var lineCrossStart = new float[lineCross.Length];
+        var lineCrossStart = scratch.LineCrossStart;
         var cursorCross = crossStart;
 
-        for (var line = 0; line < lineCross.Length; line++)
+        for (var line = 0; line < lineCrossCount; line++)
         {
             lineCrossStart[line] = cursorCross;
             cursorCross += lineCross[line] + crossGap + crossBetween;
@@ -371,7 +384,7 @@ public sealed partial class LayoutEngine
         // Final pass: place every item.
         var usedCross = 0f;
 
-        for (var line = 0; line < lineStarts.Count - 1; line++)
+        for (var line = 0; line < lineCount - 1; line++)
         {
             var start = lineStarts[line];
             var end = lineStarts[line + 1];
@@ -543,7 +556,7 @@ public sealed partial class LayoutEngine
 
             usedCross += lineCross[line] + crossBetween;
 
-            if (line + 1 < lineStarts.Count - 1)
+            if (line + 1 < lineCount - 1)
             {
                 usedCross += crossGap;
             }
@@ -555,6 +568,11 @@ public sealed partial class LayoutEngine
         }
 
         return MathF.Max(0, mainAvailable);
+        }
+        finally
+        {
+            ReleaseFlowChildren();
+        }
     }
 
     private static void MoveMeasuredItem(LayoutBox item, float borderX, float borderY)
@@ -575,7 +593,13 @@ public sealed partial class LayoutEngine
 
     private List<LayoutBox> CollectFlowChildren(LayoutBox box)
     {
-        var items = new List<LayoutBox>(box.Children.Count);
+        if (_flowItemDepth == _flowItemLists.Count)
+        {
+            _flowItemLists.Add(new List<LayoutBox>());
+        }
+
+        var items = _flowItemLists[_flowItemDepth++];
+        items.Clear();
         Collect(box, items);
         return items;
 
@@ -601,6 +625,14 @@ public sealed partial class LayoutEngine
 
                 items.Add(child);
             }
+        }
+    }
+
+    private void ReleaseFlowChildren()
+    {
+        if (_flowItemDepth > 0)
+        {
+            _flowItemDepth--;
         }
     }
 
@@ -925,5 +957,59 @@ public sealed partial class LayoutEngine
     private static float ResolveGap(CssLength gap, in LengthContext context, float basis)
     {
         return MathF.Max(0, gap.ResolveOr(in context, basis, 0));
+    }
+
+    /// <summary>
+    /// Pooled scratch arrays for one flex layout. A ref struct keeps the
+    /// bookkeeping on the stack; the arrays themselves come from the shared
+    /// pool and are returned by <see cref="Dispose"/>.
+    /// </summary>
+    private ref struct FlexScratch
+    {
+        public float[] Bases;
+        public float[] Mains;
+        public float[] MinMains;
+        public float[] MainMargins;
+        public float[] CrossSizes;
+        public float[] LineCross;
+        public float[] LineCrossStart;
+        public int[] LineOf;
+        public int[] LineStarts;
+
+        public FlexScratch(int count)
+        {
+            Bases = ArrayPool<float>.Shared.Rent(count);
+            Mains = ArrayPool<float>.Shared.Rent(count);
+            MinMains = ArrayPool<float>.Shared.Rent(count);
+            MainMargins = ArrayPool<float>.Shared.Rent(count);
+            CrossSizes = ArrayPool<float>.Shared.Rent(count);
+            LineCross = ArrayPool<float>.Shared.Rent(count + 1);
+            LineCrossStart = ArrayPool<float>.Shared.Rent(count + 1);
+            LineOf = ArrayPool<int>.Shared.Rent(count);
+            LineStarts = ArrayPool<int>.Shared.Rent(count + 1);
+
+            Array.Clear(Bases, 0, count);
+            Array.Clear(Mains, 0, count);
+            Array.Clear(MinMains, 0, count);
+            Array.Clear(MainMargins, 0, count);
+            Array.Clear(CrossSizes, 0, count);
+            Array.Clear(LineCross, 0, count + 1);
+            Array.Clear(LineCrossStart, 0, count + 1);
+            Array.Clear(LineOf, 0, count);
+            LineStarts[0] = 0;
+        }
+
+        public void Dispose()
+        {
+            ArrayPool<float>.Shared.Return(Bases);
+            ArrayPool<float>.Shared.Return(Mains);
+            ArrayPool<float>.Shared.Return(MinMains);
+            ArrayPool<float>.Shared.Return(MainMargins);
+            ArrayPool<float>.Shared.Return(CrossSizes);
+            ArrayPool<float>.Shared.Return(LineCross);
+            ArrayPool<float>.Shared.Return(LineCrossStart);
+            ArrayPool<int>.Shared.Return(LineOf);
+            ArrayPool<int>.Shared.Return(LineStarts);
+        }
     }
 }

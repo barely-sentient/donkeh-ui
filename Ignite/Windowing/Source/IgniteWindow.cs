@@ -100,12 +100,14 @@ public sealed partial class IgniteWindow : IDisposable
     private int _caretIndex;
     private long _caretBlinkStart;
     private readonly Dictionary<ElementNode, int> _selectIndices = [];
+    private readonly List<ElementNode> _staleSelects = [];
     private ElementNode? _openSelect;
     private int _openSelectHover = -1;
     private LengthContext _lengthContext;
     private float _mouseX;
     private float _mouseY;
     private readonly Dictionary<IgniteSupportedDomNode, ScrollAnimation> _scrollAnimations = [];
+    private readonly List<IgniteSupportedDomNode> _staleScrollAnimations = [];
     private ScrollbarDrag? _scrollDrag;
 
     public IgniteWindow(WindowSettings settings)
@@ -493,6 +495,8 @@ public sealed partial class IgniteWindow : IDisposable
             _needsDevToolsPaint = false;
         }
 
+        PruneInteractionNodes();
+
         // Animated styles change every frame, so keep the box tree and display
         // list fresh while any CSS animation is running.
         // CSS animations do not need a fresh box tree at the display refresh
@@ -592,6 +596,7 @@ public sealed partial class IgniteWindow : IDisposable
         }
 
         LastRenderMilliseconds = Stopwatch.GetElapsedTime(renderStart).TotalMilliseconds;
+
         FrameCount++;
         LastFrameMilliseconds = delta * 1000;
 
@@ -677,7 +682,7 @@ public sealed partial class IgniteWindow : IDisposable
         // the user selected something, which already bumps the state version.
         var appChanged = _ui.Version != _lastInspectorAppVersion;
         var due = _devTools.Tab == DevToolsTab.Performance
-            ? _lastDevToolsRefresh >= 0.2
+            ? _lastDevToolsRefresh >= 1.0
             : appChanged;
 
         if (due || _devTools.Version == 0)
@@ -861,6 +866,14 @@ public sealed partial class IgniteWindow : IDisposable
         context.ViewportWidth = width;
         context.ViewportHeight = height;
 
+        // The standalone inspector reads the app's LayoutResult from another
+        // thread. Box reuse mutates that tree in place, so keep a stable
+        // snapshot while the inspector owns a separate window.
+        var reuseBoxes = !isApp
+            || !(_settings.EnableDevTools
+                && _devTools.Visible
+                && _devTools.Dock == DevToolsDock.Window);
+
         var options = new LayoutOptions
         {
             ViewportWidth = width,
@@ -878,6 +891,11 @@ public sealed partial class IgniteWindow : IDisposable
             MergeDraws = true,
             CompactConstants = false,
             EnableCaching = true,
+            ReuseLayoutBoxes = reuseBoxes,
+            SnapshotResults = !reuseBoxes,
+            // The inspector renders live, constantly changing numbers. Caching
+            // those one-off strings would retain thousands of text layouts.
+            CacheTextLayouts = isApp,
             AnimationsEnabled = true,
             AnimationTimeSeconds = _animationTimeSeconds
         };
@@ -1432,6 +1450,91 @@ public sealed partial class IgniteWindow : IDisposable
         }
 
         return _layoutResult;
+    }
+
+    /// <summary>
+    /// Drops interaction references to nodes that left the tree. Keeping a
+    /// hovered, focused or open-select node alive also keeps its whole unmounted
+    /// subtree and event delegates reachable.
+    /// </summary>
+    private void PruneInteractionNodes()
+    {
+        if (_layoutResult is null && _devToolsLayout is null)
+        {
+            return;
+        }
+
+        if (_selectIndices.Count > 0)
+        {
+            _staleSelects.Clear();
+
+            foreach (var pair in _selectIndices)
+            {
+                if (!IsLiveNode(pair.Key))
+                {
+                    _staleSelects.Add(pair.Key);
+                }
+            }
+
+            for (var i = 0; i < _staleSelects.Count; i++)
+            {
+                _selectIndices.Remove(_staleSelects[i]);
+            }
+        }
+
+        if (_openSelect is not null && !IsLiveNode(_openSelect))
+        {
+            CloseSelectMenu();
+        }
+
+        if (_pressed is not null && !IsLiveNode(_pressed))
+        {
+            _pressed = null;
+        }
+
+        if (_pointerTarget is not null && !IsLiveNode(_pointerTarget))
+        {
+            _pointerTarget = null;
+        }
+
+        if (_scrollAnimations.Count > 0)
+        {
+            _staleScrollAnimations.Clear();
+
+            foreach (var pair in _scrollAnimations)
+            {
+                if (pair.Key is ElementNode element && !IsLiveNode(element))
+                {
+                    _staleScrollAnimations.Add(pair.Key);
+                }
+            }
+
+            for (var i = 0; i < _staleScrollAnimations.Count; i++)
+            {
+                _scrollAnimations.Remove(_staleScrollAnimations[i]);
+            }
+        }
+
+        if (_focused is not null && !IsLiveNode(_focused))
+        {
+            Focus(null);
+        }
+
+        if (_hovered is not null && !IsLiveNode(_hovered))
+        {
+            SetChainState(
+                _hoverChain,
+                null,
+                static node => node.IsHovered = true,
+                static node => node.IsHovered = false);
+            _hovered = null;
+        }
+    }
+
+    private bool IsLiveNode(ElementNode node)
+    {
+        var layout = LayoutForNode(node);
+        return layout is not null && layout.TryGetBox(node, out var ignoredBox);
     }
 
     private static bool IsTextControl(ElementNode element)

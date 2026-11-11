@@ -56,7 +56,8 @@ public static class Optimiser
         InstructionBuffer source,
         ConstantPool constants,
         Rect viewport,
-        LayoutOptions options)
+        LayoutOptions options,
+        InstructionBuffer? outputBuffer = null)
     {
         if (!options.Optimise)
         {
@@ -67,7 +68,8 @@ public static class Optimiser
             ? viewport
             : new Rect(-1e7f, -1e7f, 2e7f, 2e7f);
 
-        var output = new InstructionBuffer(Math.Max(8, source.Count));
+        var output = outputBuffer ?? new InstructionBuffer(Math.Max(8, source.Count));
+        output.Clear();
         var scopes = new List<Scope>(8);
         var clip = initialClip;
         var transformDepth = 0;

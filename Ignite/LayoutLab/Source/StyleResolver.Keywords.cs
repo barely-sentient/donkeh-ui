@@ -25,6 +25,7 @@ public sealed partial class StyleResolver
     private void ApplyAll(ComputedStyle style, ComputedStyle? parent, string keyword)
     {
         var custom = style.CustomProperties;
+        var styleParent = style.StyleParent;
         var source = new ComputedStyle();
 
         if (keyword is "inherit")
@@ -44,6 +45,7 @@ public sealed partial class StyleResolver
 
         style.CopyAllFrom(source);
         style.CustomProperties = custom;
+        style.StyleParent = styleParent;
     }
 
     private void ApplyWideKeyword(

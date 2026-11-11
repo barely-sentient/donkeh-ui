@@ -32,6 +32,8 @@ public sealed partial class IgniteWindow
     private List<TextRun>? _textRuns;
     private LayoutBox? _textRunsRoot;
     private bool _textRunsDevTools;
+    private int _textRunsUiVersion = -1;
+    private long _textRunsDevToolsVersion = -1;
     private Dictionary<ElementNode, TextRun>? _textRunIndex;
 
     private sealed class TextSelection
@@ -73,13 +75,23 @@ public sealed partial class IgniteWindow
         {
             _textRuns = null;
             _textRunsRoot = null;
+            _textRunsUiVersion = -1;
+            _textRunsDevToolsVersion = -1;
             _textRunIndex = null;
             return [];
         }
 
+        // Rebuild after any tree update. The cached runs hold element and box
+        // references; if a modal or conditional panel unmounts they would keep
+        // the old subtree alive even though the box tree was reused.
+        var uiVersion = _ui.Version;
+        var devToolsVersion = _devTools.Version;
+
         if (_textRuns is not null
             && ReferenceEquals(_textRunsRoot, root)
-            && _textRunsDevTools == devTools)
+            && _textRunsDevTools == devTools
+            && _textRunsUiVersion == uiVersion
+            && _textRunsDevToolsVersion == devToolsVersion)
         {
             return _textRuns;
         }
@@ -98,6 +110,8 @@ public sealed partial class IgniteWindow
         _textRuns = runs;
         _textRunsRoot = root;
         _textRunsDevTools = devTools;
+        _textRunsUiVersion = uiVersion;
+        _textRunsDevToolsVersion = devToolsVersion;
         _textRunIndex = index;
         return runs;
     }

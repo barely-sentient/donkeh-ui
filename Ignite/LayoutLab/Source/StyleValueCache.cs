@@ -27,6 +27,7 @@ public sealed class StyleValueCache
     internal readonly Dictionary<int, bool> Important = [];
     internal readonly Dictionary<int, string> CleanValues = [];
     internal readonly Dictionary<int, bool> HasVariables = [];
+    internal readonly Dictionary<(int ValueId, long Variables), string> ResolvedValues = [];
 
     public int Count =>
         Lengths.Count + Length4.Count + Colors.Count + Numbers.Count + Borders.Count
@@ -54,5 +55,6 @@ public sealed class StyleValueCache
         Important.Clear();
         CleanValues.Clear();
         HasVariables.Clear();
+        ResolvedValues.Clear();
     }
 }

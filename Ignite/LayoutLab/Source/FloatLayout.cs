@@ -24,6 +24,8 @@ internal sealed class FloatContext
 
     public int Count => _floats.Count;
 
+    public void Reset() => _floats.Clear();
+
     public void Add(Rect marginBox, Float side)
     {
         if (marginBox.Width <= 0 || marginBox.Height <= 0)

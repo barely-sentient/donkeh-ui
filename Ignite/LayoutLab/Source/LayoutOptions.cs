@@ -23,6 +23,29 @@ public sealed class LayoutOptions
     public bool CompactConstants { get; set; }
     public bool IncludeFrameMarkers { get; set; }
     public bool EnableCaching { get; set; } = true;
+
+    /// <summary>
+    /// Reuses <see cref="LayoutBox"/> instances across layout passes. The box
+    /// tree is mutated in place, so leave this off when a previous
+    /// <see cref="LayoutResult"/> must remain an immutable snapshot.
+    /// </summary>
+    public bool ReuseLayoutBoxes { get; set; }
+
+    /// <summary>
+    /// Copies the display list and node map into the <see cref="LayoutResult"/>.
+    /// Leave this on when a result must stay valid after the next layout pass.
+    /// Hosts that consume the result synchronously can turn it off to avoid
+    /// copying the instruction stream and node map every frame.
+    /// </summary>
+    public bool SnapshotResults { get; set; } = true;
+
+    /// <summary>
+    /// Caches shaped text layouts by text/style/width. Hosts that render highly
+    /// dynamic text (a live performance monitor, for example) can disable this
+    /// to keep the cache from retaining thousands of one-off strings.
+    /// </summary>
+    public bool CacheTextLayouts { get; set; } = true;
+
     public bool ApplyScrollOffsets { get; set; } = true;
     public int MaxLayoutDepth { get; set; } = 512;
 

@@ -22,9 +22,47 @@ public sealed class LayoutBox
 
     public IgniteSupportedDomNode Node { get; }
 
-    public ComputedStyle Style { get; }
+    public ComputedStyle Style { get; internal set; }
 
-    public int Depth { get; }
+    public int Depth { get; internal set; }
+
+    /// <summary>
+    /// Prepares a cached box for another layout pass. The node identity is
+    /// stable, so only the derived style, depth, children and geometry need to
+    /// be replaced. Reusing the box (and its child list capacity) removes the
+    /// per-frame allocation of the whole box tree.
+    /// </summary>
+    internal void Reset(ComputedStyle style, int depth, LayoutBox? parent)
+    {
+        Style = style;
+        Depth = depth;
+        Parent = parent;
+        Children.Clear();
+
+        BorderBox = default;
+        PaddingBox = default;
+        ContentBox = default;
+        MarginBox = default;
+        Margin = default;
+        Border = default;
+        Padding = default;
+        Radius = default;
+
+        IsContents = false;
+        ContainingBlock = null;
+        StaticPosition = default;
+        IsScrollContainer = false;
+        ScrollOffsetX = 0;
+        ScrollOffsetY = 0;
+        ScrollWidth = 0;
+        ScrollHeight = 0;
+        FloatContext = null;
+        Text = null;
+        TextOrigin = default;
+        Baseline = 0;
+        _intrinsicWidth = 0;
+        _hasIntrinsicWidth = false;
+    }
 
     public LayoutBox? Parent { get; internal set; }
 
@@ -73,6 +111,13 @@ public sealed class LayoutBox
     /// The storage is shared with ancestors until a box establishes a new BFC.
     /// </summary>
     internal FloatContext? FloatContext { get; set; }
+
+    /// <summary>
+    /// The float context this box owns when it establishes a block formatting
+    /// context. It is kept across layouts so the context and its list can be
+    /// cleared and reused instead of reallocated.
+    /// </summary>
+    internal FloatContext? OwnedFloatContext { get; set; }
 
     /// <summary>Laid-out text belonging directly to this element, if any.</summary>
     public TextLayout? Text { get; internal set; }
@@ -183,12 +228,15 @@ public sealed class LayoutResult
         ConstantPool constants,
         Dictionary<IgniteSupportedDomNode, LayoutBox> byNode,
         OptimisationStats stats,
-        bool hasAnimations = false)
+        bool hasAnimations = false,
+        bool snapshot = true)
     {
         Root = root;
-        Instructions = Snapshot(instructions);
+        Instructions = snapshot ? Snapshot(instructions) : instructions;
         Constants = constants;
-        _byNode = new Dictionary<IgniteSupportedDomNode, LayoutBox>(byNode);
+        _byNode = snapshot
+            ? new Dictionary<IgniteSupportedDomNode, LayoutBox>(byNode)
+            : byNode;
         Stats = stats;
         HasAnimations = hasAnimations;
     }

@@ -43,10 +43,11 @@ public sealed partial class StyleResolver
 
         if (parent is not null)
         {
-            style.CopyInheritedFrom(parent);
+            style.CopyInheritedFromShared(parent);
         }
 
         CollectCustomProperties(style, matches);
+        style.RefreshCustomPropertyHash();
 
         ApplyMatches(style, parent, matches, important: false);
         ApplyMatches(style, parent, matches, important: true);
@@ -87,8 +88,7 @@ public sealed partial class StyleResolver
                 continue;
             }
 
-            style.CustomProperties ??= new Dictionary<string, string>(StringComparer.Ordinal);
-            style.CustomProperties[name] = CleanValue(rule.ValueId, value);
+            SetCustomProperty(style, name, CleanValue(rule.ValueId, value));
         }
 
         for (var i = 0; i < matches.Length; i++)
@@ -105,10 +105,38 @@ public sealed partial class StyleResolver
 
             if (value is not null && IsImportant(rule.ValueId, value))
             {
-                style.CustomProperties ??= new Dictionary<string, string>(StringComparer.Ordinal);
-                style.CustomProperties[name] = CleanValue(rule.ValueId, value);
+                SetCustomProperty(style, name, CleanValue(rule.ValueId, value));
             }
         }
+    }
+
+    private static bool ContainsViewportHeightUnit(string value)
+    {
+        for (var i = 1; i < value.Length; i++)
+        {
+            if (!char.IsDigit(value[i - 1]) && value[i - 1] != '.')
+            {
+                continue;
+            }
+
+            var rest = value.AsSpan(i);
+
+            if (rest.StartsWith("dvh", StringComparison.OrdinalIgnoreCase)
+                || rest.StartsWith("svh", StringComparison.OrdinalIgnoreCase)
+                || rest.StartsWith("lvh", StringComparison.OrdinalIgnoreCase)
+                || rest.StartsWith("vh", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void SetCustomProperty(ComputedStyle style, string name, string value)
+    {
+        style.CustomProperties ??= new Dictionary<string, string>(StringComparer.Ordinal);
+        style.CustomProperties[name] = value;
     }
 
     private void ApplyMatches(
@@ -171,6 +199,11 @@ public sealed partial class StyleResolver
         if (value.Length == 0)
         {
             return;
+        }
+
+        if (!style.UsesViewportHeight && ContainsViewportHeightUnit(value))
+        {
+            style.UsesViewportHeight = true;
         }
 
         if (TryGetWideKeyword(value, out var keyword))

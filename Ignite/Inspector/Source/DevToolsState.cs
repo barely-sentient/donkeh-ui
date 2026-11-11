@@ -61,6 +61,13 @@ public sealed class DevToolsState
     /// <summary>Last pointer position in window client coordinates.</summary>
     public float PointerY { get; set; }
 
+    /// <summary>
+    /// True while a dock splitter is being dragged. Pointer moves must not
+    /// resize the dock on hover: changing the app viewport invalidates every
+    /// cached style and makes the whole page relayout on every pointer move.
+    /// </summary>
+    public bool IsResizingDock { get; set; }
+
     public DevToolsTab Tab { get; set; } = DevToolsTab.Elements;
 
     /// <summary>The real app root node, not a clone.</summary>
@@ -112,7 +119,32 @@ public sealed class DevToolsState
     private readonly ConcurrentQueue<Action> _pendingEdits = new();
     private readonly ConcurrentDictionary<ElementNode, int> _elementStyleSelectors =
         new(ReferenceEqualityComparer.Instance);
+    private readonly List<ElementNode> _staleElementStyles = [];
     private int _nextElementStyleId;
+
+    /// <summary>Drops inspector-created element rules for nodes that unmounted.</summary>
+    public void PruneElementStyles(IReadOnlySet<Node> live)
+    {
+        if (_elementStyleSelectors.IsEmpty)
+        {
+            return;
+        }
+
+        _staleElementStyles.Clear();
+
+        foreach (var pair in _elementStyleSelectors)
+        {
+            if (!live.Contains(pair.Key))
+            {
+                _staleElementStyles.Add(pair.Key);
+            }
+        }
+
+        for (var i = 0; i < _staleElementStyles.Count; i++)
+        {
+            _elementStyleSelectors.TryRemove(_staleElementStyles[i], out var ignoredSelector);
+        }
+    }
 
     /// <summary>
     /// Returns the selector id of the inspector-owned rule that targets this
