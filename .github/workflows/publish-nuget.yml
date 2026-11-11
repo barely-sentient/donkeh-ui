@@ -24,6 +24,7 @@ jobs:
   publish:
     name: Pack and publish all Ignite modules
     runs-on: ubuntu-latest
+    environment: production
 
     steps:
       - name: Checkout
