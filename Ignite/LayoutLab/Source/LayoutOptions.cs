@@ -36,6 +36,13 @@ public sealed class LayoutOptions
     public Func<IgniteSupportedDomNode, string?>? TextProvider { get; set; }
 
     /// <summary>
+    /// Optional colour override for a node's text. The host uses this to paint
+    /// placeholders with their own colour without the control's normal
+    /// <c>color</c> (including <c>:focus</c> rules) affecting them.
+    /// </summary>
+    public Func<IgniteSupportedDomNode, string, uint?>? TextColorProvider { get; set; }
+
+    /// <summary>
     /// Supplies the intrinsic (content) size of a replaced element such as an
     /// image. When a width or height is auto the returned value is used instead
     /// of filling the containing block.

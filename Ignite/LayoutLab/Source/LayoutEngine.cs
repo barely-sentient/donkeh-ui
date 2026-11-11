@@ -875,21 +875,27 @@ public sealed partial class LayoutEngine
         int LineClamp,
         TextOverflow Overflow);
 
-    private TextStyle CreateTextStyle(ComputedStyle style)
+    private TextStyle CreateTextStyle(ComputedStyle style, uint? color = null)
     {
         var context = CreateContext(style);
         var fontSize = context.FontSize;
-        return style.ToTextStyle(in context, fontSize, style.Color);
+        return style.ToTextStyle(in context, fontSize, color ?? style.Color);
+    }
+
+    private uint? GetTextColor(IgniteSupportedDomNode node, string text)
+    {
+        return _options.TextColorProvider?.Invoke(node, text);
     }
 
     private TextLayout GetTextLayout(
+        IgniteSupportedDomNode node,
         ComputedStyle style,
         string text,
         float maxWidth,
         out TextStyle textStyle)
     {
         text = ApplyTextTransform(text, style.TextTransform);
-        textStyle = CreateTextStyle(style);
+        textStyle = CreateTextStyle(style, GetTextColor(node, text));
 
         // Round the cache key up: rounding down makes a line that exactly fits
         // re-wrap because the cached layout width is narrower than the box.
@@ -937,6 +943,7 @@ public sealed partial class LayoutEngine
     /// on every line. It is only used when text overlaps active floats.
     /// </summary>
     private TextLayout GetTextLayoutInBands(
+        IgniteSupportedDomNode node,
         ComputedStyle style,
         string text,
         in Rect content,
@@ -944,7 +951,7 @@ public sealed partial class LayoutEngine
         FloatContext floats)
     {
         text = ApplyTextTransform(text, style.TextTransform);
-        var textStyle = CreateTextStyle(style);
+        var textStyle = CreateTextStyle(style, GetTextColor(node, text));
         var contentLeft = content.X;
         var contentRight = content.Right;
 

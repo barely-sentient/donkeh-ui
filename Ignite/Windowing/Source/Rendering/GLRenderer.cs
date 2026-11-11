@@ -107,9 +107,27 @@ public sealed unsafe class GLRenderer : IDisposable
     /// <summary>Consumes one layout result.</summary>
     public void Render(LayoutResult result)
     {
-        var opcodes = result.Opcodes;
-        var constants = result.Constants;
+        Process(result.Opcodes, result.Constants);
+        ExecuteRuns();
+    }
 
+    /// <summary>
+    /// Consumes a layout result followed by an overlay stream. The overlay is
+    /// batched with the frame but always paints last, so host-owned popups such
+    /// as a select menu sit above every element in the tree.
+    /// </summary>
+    public void Render(
+        LayoutResult result,
+        ReadOnlySpan<Instruction> overlay,
+        ConstantPool overlayConstants)
+    {
+        Process(result.Opcodes, result.Constants);
+        Process(overlay, overlayConstants);
+        ExecuteRuns();
+    }
+
+    private void Process(ReadOnlySpan<Instruction> opcodes, ConstantPool constants)
+    {
         for (var i = 0; i < opcodes.Length; i++)
         {
             var instruction = opcodes[i];
@@ -230,8 +248,6 @@ public sealed unsafe class GLRenderer : IDisposable
                     break;
             }
         }
-
-        ExecuteRuns();
     }
 
     private void AddRect(in Rect rect, uint color)

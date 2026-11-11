@@ -384,8 +384,8 @@ public sealed partial class LayoutEngine
         {
             var available = MathF.Max(0, right - lineX);
             var layout = floats is { Count: > 0 }
-                ? GetTextLayoutInBands(container.Style, text, content, lineY, floats)
-                : GetTextLayout(container.Style, text, available, out _);
+                ? GetTextLayoutInBands(container.Node, container.Style, text, content, lineY, floats)
+                : GetTextLayout(container.Node, container.Style, text, available, out _);
 
             if (layout.Lines.Length > 1)
             {

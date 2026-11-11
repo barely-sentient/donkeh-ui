@@ -671,8 +671,7 @@ public sealed partial class LayoutEngine
 
         if (!string.IsNullOrEmpty(text) && ShouldLayoutText(style, text))
         {
-            var textStyle = CreateTextStyle(style);
-            var layout = GetTextLayout(style, text, MathF.Max(1, cbWidth), out _);
+            var layout = GetTextLayout(box.Node, style, text, MathF.Max(1, cbWidth), out _);
             content = layout.Size.Height;
         }
 

@@ -21,6 +21,7 @@ public sealed class IgniteWindow : IDisposable
 {
     private static readonly int ValueAttribute = InternTable.Intern("value");
     private static readonly int CheckedAttribute = InternTable.Intern("checked");
+    private static readonly int SelectedAttribute = InternTable.Intern("selected");
 
     private readonly WindowSettings _settings;
     private readonly List<string> _stylesheets = [];
@@ -55,6 +56,12 @@ public sealed class IgniteWindow : IDisposable
     private ElementNode? _pressed;
     private ElementNode? _focused;
     private string? _editText;
+    private int _caretIndex;
+    private long _caretBlinkStart;
+    private readonly Dictionary<ElementNode, int> _selectIndices = [];
+    private ElementNode? _openSelect;
+    private int _openSelectHover = -1;
+    private LengthContext _lengthContext;
     private float _mouseX;
     private float _mouseY;
 
@@ -271,7 +278,14 @@ public sealed class IgniteWindow : IDisposable
 
         if (_layoutResult is not null)
         {
-            _renderer.Render(_layoutResult);
+            if (BuildOverlays(out var overlay, out var overlayConstants))
+            {
+                _renderer.Render(_layoutResult, overlay.Span, overlayConstants);
+            }
+            else
+            {
+                _renderer.Render(_layoutResult);
+            }
         }
 
         LastRenderMilliseconds = Stopwatch.GetElapsedTime(renderStart).TotalMilliseconds;
@@ -353,7 +367,7 @@ public sealed class IgniteWindow : IDisposable
         _context.ViewportWidth = width;
         _context.ViewportHeight = height;
 
-        return new LayoutOptions
+        var options = new LayoutOptions
         {
             ViewportWidth = width,
             ViewportHeight = height,
@@ -361,6 +375,7 @@ public sealed class IgniteWindow : IDisposable
             Context = _context,
             TextMeasurer = _measurer,
             TextProvider = GetDisplayText,
+            TextColorProvider = GetTextColorOverride,
             IntrinsicSizeProvider = GetIntrinsicSize,
             ImageProvider = GetImage,
             CustomPainter = PaintElementContent,
@@ -370,6 +385,9 @@ public sealed class IgniteWindow : IDisposable
             CompactConstants = false,
             EnableCaching = true
         };
+
+        _lengthContext = options.CreateRootLengthContext();
+        return options;
     }
 
     private void RebuildStyles()
@@ -435,7 +453,16 @@ public sealed class IgniteWindow : IDisposable
             case "select":
             {
                 var options = FindOptions(element);
-                return options.Count > 0 ? options[0].TextContent ?? string.Empty : string.Empty;
+
+                if (options.Count == 0)
+                {
+                    return string.Empty;
+                }
+
+                var index = GetSelectedIndex(element, options);
+                return options[index].TextContent
+                    ?? GetAttribute(options[index], "value")
+                    ?? string.Empty;
             }
 
             case "progress":
@@ -451,6 +478,30 @@ public sealed class IgniteWindow : IDisposable
             default:
                 return element.TextContent;
         }
+    }
+
+    private const uint PlaceholderTextColor = 0xFF8C959F;
+
+    private static uint? GetTextColorOverride(IgniteSupportedDomNode node, string text)
+    {
+        if (node is not ElementNode element || !IsTextControl(element))
+        {
+            return null;
+        }
+
+        if (string.IsNullOrEmpty(GetAttribute(element, "placeholder")))
+        {
+            return null;
+        }
+
+        var value = GetAttribute(element, "value");
+
+        if (!string.IsNullOrEmpty(value) || !string.IsNullOrEmpty(element.TextContent))
+        {
+            return null;
+        }
+
+        return PlaceholderTextColor;
     }
 
     private static List<ElementNode> FindOptions(ElementNode select)
@@ -480,6 +531,481 @@ public sealed class IgniteWindow : IDisposable
                 }
             }
         }
+    }
+
+    // ---------------------------------------------------------------- select
+
+    private int GetSelectedIndex(ElementNode select, List<ElementNode> options)
+    {
+        if (_selectIndices.TryGetValue(select, out var index) && index >= 0 && index < options.Count)
+        {
+            return index;
+        }
+
+        for (var i = 0; i < options.Count; i++)
+        {
+            if (options[i].TryGetAttribute(SelectedAttribute, out var ignored))
+            {
+                return i;
+            }
+        }
+
+        return 0;
+    }
+
+    private void OpenSelectMenu(ElementNode select)
+    {
+        var options = FindOptions(select);
+
+        if (options.Count == 0)
+        {
+            return;
+        }
+
+        _openSelect = select;
+        _openSelectHover = GetSelectedIndex(select, options);
+    }
+
+    private void CloseSelectMenu()
+    {
+        _openSelect = null;
+        _openSelectHover = -1;
+    }
+
+    private void SelectOption(ElementNode select, int index)
+    {
+        var options = FindOptions(select);
+
+        if (options.Count == 0)
+        {
+            return;
+        }
+
+        index = Math.Clamp(index, 0, options.Count - 1);
+        _selectIndices[select] = index;
+
+        for (var i = 0; i < options.Count; i++)
+        {
+            if (i == index)
+            {
+                options[i].SetAttribute(SelectedAttribute, InternTable.Intern(string.Empty));
+            }
+            else
+            {
+                options[i].RemoveAttribute(SelectedAttribute);
+            }
+        }
+
+        _needsLayout = true;
+        Invoke(select, "change", options[index].TextContent ?? GetAttribute(options[index], "value") ?? string.Empty);
+    }
+
+    private readonly record struct SelectMenuLayout(Rect Menu, float RowHeight);
+
+    private bool TryHitSelectOption(ElementNode select, float x, float y, out int index)
+    {
+        index = -1;
+
+        if (_layoutResult is null || !_layoutResult.TryGetBox(select, out var box))
+        {
+            return false;
+        }
+
+        var options = FindOptions(select);
+
+        if (options.Count == 0)
+        {
+            return false;
+        }
+
+        var layout = ComputeSelectMenu(box, options.Count);
+
+        if (!layout.Menu.Contains(x, y))
+        {
+            return false;
+        }
+
+        var row = (int)MathF.Floor((y - layout.Menu.Y - SelectMenuPadding) / layout.RowHeight);
+
+        if (row < 0 || row >= options.Count)
+        {
+            return false;
+        }
+
+        index = row;
+        return true;
+    }
+
+    private const float SelectMenuPadding = 4;
+
+    private SelectMenuLayout ComputeSelectMenu(LayoutBox box, int optionCount)
+    {
+        var selectRect = PaintedBorderBox(box);
+        var fontSize = box.Style.ResolveFontSize(in _lengthContext);
+        var lineHeight = box.Style.ResolveLineHeight(in _lengthContext);
+        var rowHeight = MathF.Max(28, lineHeight + 10);
+
+        var width = MathF.Max(selectRect.Width, 140);
+        var height = optionCount * rowHeight + SelectMenuPadding * 2;
+        var viewportWidth = MathF.Max(1, _lastWidth);
+        var viewportHeight = MathF.Max(1, _lastHeight);
+
+        var x = Math.Clamp(selectRect.X, 0, MathF.Max(0, viewportWidth - width));
+        var below = selectRect.Bottom + 2;
+        var above = selectRect.Y - height - 2;
+        float y;
+
+        if (below + height <= viewportHeight)
+        {
+            y = below;
+        }
+        else if (above >= 0)
+        {
+            y = above;
+        }
+        else
+        {
+            y = Math.Clamp(below, 0, MathF.Max(0, viewportHeight - height));
+        }
+
+        return new SelectMenuLayout(new Rect(x, y, width, height), rowHeight);
+    }
+
+    private static Rect PaintedBorderBox(LayoutBox box)
+    {
+        var scrollX = 0f;
+        var scrollY = 0f;
+
+        for (var parent = box.Parent; parent is not null; parent = parent.Parent)
+        {
+            if (parent.IsScrollContainer)
+            {
+                scrollX += parent.ScrollOffsetX;
+                scrollY += parent.ScrollOffsetY;
+            }
+        }
+
+        return box.BorderBox.Translate(-scrollX, -scrollY);
+    }
+
+    private bool BuildOverlays(out InstructionBuffer overlay, out ConstantPool constants)
+    {
+        overlay = new InstructionBuffer(64);
+        constants = new ConstantPool();
+
+        BuildSelectOverlay(overlay, constants);
+        BuildCaretOverlay(overlay);
+
+        return overlay.Count > 0;
+    }
+
+    private void BuildSelectOverlay(InstructionBuffer overlay, ConstantPool constants)
+    {
+        if (_openSelect is null
+            || _layoutResult is null
+            || !_layoutResult.TryGetBox(_openSelect, out var box))
+        {
+            return;
+        }
+
+        var options = FindOptions(_openSelect);
+
+        if (options.Count == 0)
+        {
+            return;
+        }
+
+        var layout = ComputeSelectMenu(box, options.Count);
+        var menu = layout.Menu;
+        var innerRadius = constants.AddRadius(CornerRadius.All(7));
+
+        var border = new BorderSpec(
+            new BorderSide(1, BorderStyle.Solid, 0xFFCED4DA),
+            new BorderSide(1, BorderStyle.Solid, 0xFFCED4DA),
+            new BorderSide(1, BorderStyle.Solid, 0xFFCED4DA),
+            new BorderSide(1, BorderStyle.Solid, 0xFFCED4DA),
+            CornerRadius.All(8));
+
+        overlay.Add(Instruction.DrawBorder(menu, constants.AddBorder(border)));
+        overlay.AddDrawRoundedRect(
+            menu.Deflate(1, 1, 1, 1),
+            0xFFFFFFFF,
+            checked((ushort)innerRadius));
+
+        var fontSize = box.Style.ResolveFontSize(in _lengthContext);
+        var lineHeight = box.Style.ResolveLineHeight(in _lengthContext);
+        var textY = (layout.RowHeight - lineHeight) * 0.5f;
+        var textColor = box.Style.Color == ComputedStyle.CurrentColor
+            ? 0xFF212529u
+            : box.Style.Color;
+        var selected = GetSelectedIndex(_openSelect, options);
+        var rowRadius = checked((ushort)constants.AddRadius(CornerRadius.All(4)));
+
+        for (var i = 0; i < options.Count; i++)
+        {
+            var rowY = menu.Y + SelectMenuPadding + i * layout.RowHeight;
+            var row = new Rect(
+                menu.X + SelectMenuPadding,
+                rowY,
+                menu.Width - SelectMenuPadding * 2,
+                layout.RowHeight);
+
+            if (i == _openSelectHover)
+            {
+                overlay.AddDrawRoundedRect(row, 0xFFE9ECEF, rowRadius);
+            }
+            else if (i == selected)
+            {
+                overlay.AddDrawRoundedRect(row, 0xFFE7F1FF, rowRadius);
+            }
+
+            var text = options[i].TextContent ?? GetAttribute(options[i], "value") ?? string.Empty;
+
+            if (text.Length == 0)
+            {
+                continue;
+            }
+
+            var color = i == selected ? 0xFF0D6EFD : textColor;
+            var textStyle = box.Style.ToTextStyle(in _lengthContext, fontSize, color);
+            var textId = constants.AddText(text, textStyle);
+            var textRect = new Rect(
+                row.X + 10,
+                rowY + textY,
+                MathF.Max(0, row.Width - 20),
+                lineHeight);
+
+            overlay.Add(Instruction.DrawText(textRect, textId));
+        }
+    }
+
+    private void BuildCaretOverlay(InstructionBuffer overlay)
+    {
+        if (_focused is null
+            || _layoutResult is null
+            || !_layoutResult.TryGetBox(_focused, out var box)
+            || !TryGetCaretRect(out var caret))
+        {
+            return;
+        }
+
+        var color = box.Style.Color == ComputedStyle.CurrentColor
+            ? 0xFF212529u
+            : box.Style.Color;
+
+        overlay.AddDrawRect(caret, color);
+    }
+
+    private static bool IsTextControl(ElementNode element)
+    {
+        if (element.Tag == "textarea")
+        {
+            return true;
+        }
+
+        if (element.Tag != "input")
+        {
+            return false;
+        }
+
+        var type = GetAttribute(element, "type");
+        return type is null or "text" or "search" or "email" or "url" or "tel"
+            or "password" or "number";
+    }
+
+    private (float X, float Y) ContentOrigin(LayoutBox box)
+    {
+        var painted = PaintedBorderBox(box);
+        return (
+            painted.X + (box.ContentBox.X - box.BorderBox.X),
+            painted.Y + (box.ContentBox.Y - box.BorderBox.Y));
+    }
+
+    private TextStyle GetControlTextStyle(LayoutBox box, uint color)
+    {
+        var fontSize = box.Style.ResolveFontSize(in _lengthContext);
+        return box.Style.ToTextStyle(in _lengthContext, fontSize, color);
+    }
+
+    private void PlaceCaretFromPoint(ElementNode element, float x)
+    {
+        if (!IsTextControl(element)
+            || _layoutResult is null
+            || !_layoutResult.TryGetBox(element, out var box))
+        {
+            return;
+        }
+
+        var text = _editText ?? string.Empty;
+
+        if (text.Length == 0)
+        {
+            _caretIndex = 0;
+            ResetCaretBlink();
+            return;
+        }
+
+        var color = box.Style.Color == ComputedStyle.CurrentColor
+            ? 0xFF212529u
+            : box.Style.Color;
+        var textStyle = GetControlTextStyle(box, color);
+        var (originX, originY) = ContentOrigin(box);
+        var contentWidth = MathF.Max(0, box.ContentBox.Width);
+
+        if (element.Tag == "textarea")
+        {
+            var layout = TextLayoutEngine.Layout(
+                text,
+                in textStyle,
+                _measurer,
+                contentWidth,
+                box.Style.WhiteSpace,
+                box.Style.OverflowWrap,
+                box.Style.WebkitLineClamp,
+                box.Style.TextOverflow);
+
+            if (layout.Lines.Length == 0)
+            {
+                _caretIndex = 0;
+                ResetCaretBlink();
+                return;
+            }
+
+            var lineHeight = MathF.Max(1, textStyle.LineHeight);
+            var line = Math.Clamp(
+                (int)MathF.Floor((_mouseY - originY) / lineHeight),
+                0,
+                layout.Lines.Length - 1);
+            var best = 0;
+            var bestDistance = float.MaxValue;
+
+            for (var index = 0; index <= text.Length; index = NextTextElement(text, index))
+            {
+                var prefix = TextLayoutEngine.Layout(
+                    text[..index],
+                    in textStyle,
+                    _measurer,
+                    contentWidth,
+                    box.Style.WhiteSpace,
+                    box.Style.OverflowWrap,
+                    box.Style.WebkitLineClamp,
+                    box.Style.TextOverflow);
+
+                if (prefix.Lines.Length == 0 || prefix.Lines.Length - 1 != line)
+                {
+                    continue;
+                }
+
+                var candidate = prefix.Lines[^1];
+                var distance = MathF.Abs(originX + candidate.X + candidate.Width - x);
+
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    best = index;
+                }
+            }
+
+            _caretIndex = best;
+        }
+        else
+        {
+            var target = x - originX;
+            var index = 0;
+
+            while (index < text.Length)
+            {
+                var next = NextTextElement(text, index);
+                var width = _measurer.Measure(text.AsSpan(0, next), in textStyle).Width;
+
+                if (width > target)
+                {
+                    break;
+                }
+
+                index = next;
+            }
+
+            _caretIndex = index;
+        }
+
+        ResetCaretBlink();
+    }
+
+    private bool TryGetCaretRect(out Rect caret)
+    {
+        caret = default;
+
+        if (_focused is null
+            || !IsTextControl(_focused)
+            || !IsCaretVisible
+            || _layoutResult is null
+            || !_layoutResult.TryGetBox(_focused, out var box))
+        {
+            return false;
+        }
+
+        var text = _editText ?? string.Empty;
+        var color = box.Style.Color == ComputedStyle.CurrentColor
+            ? 0xFF212529u
+            : box.Style.Color;
+        var textStyle = GetControlTextStyle(box, color);
+        var (originX, originY) = ContentOrigin(box);
+        var contentWidth = MathF.Max(0, box.ContentBox.Width);
+        var contentHeight = MathF.Max(0, box.ContentBox.Height);
+        var lineHeight = box.Style.ResolveLineHeight(in _lengthContext);
+        var index = Math.Clamp(_caretIndex, 0, text.Length);
+        float x;
+        float y;
+        float height;
+
+        if (_focused.Tag == "textarea")
+        {
+            var layout = TextLayoutEngine.Layout(
+                text[..index],
+                in textStyle,
+                _measurer,
+                contentWidth,
+                box.Style.WhiteSpace,
+                box.Style.OverflowWrap,
+                box.Style.WebkitLineClamp,
+                box.Style.TextOverflow);
+
+            if (layout.Lines.Length == 0)
+            {
+                x = originX;
+                y = originY;
+                height = lineHeight;
+            }
+            else
+            {
+                var line = layout.Lines[^1];
+                x = originX + line.X + line.Width;
+                y = originY + line.Y;
+                height = line.Height;
+            }
+        }
+        else
+        {
+            x = originX + _measurer.Measure(text.AsSpan(0, index), in textStyle).Width;
+            y = originY;
+            height = lineHeight;
+        }
+
+        if (contentHeight > 0)
+        {
+            height = MathF.Min(height, contentHeight);
+        }
+
+        height = MathF.Max(1, height);
+
+        var maxX = originX + MathF.Max(0, contentWidth - 1);
+        x = Math.Clamp(x, originX, maxX);
+        y = Math.Clamp(y, originY, originY + MathF.Max(0, contentHeight - height));
+
+        var width = MathF.Max(1, textStyle.FontSize * 0.07f);
+        caret = new Rect(x, y, width, height);
+        return true;
     }
 
     // -------------------------------------------------------------- replaced
@@ -725,6 +1251,19 @@ public sealed class IgniteWindow : IDisposable
     {
         _mouseX = x;
         _mouseY = y;
+
+        if (_openSelect is not null)
+        {
+            var overOption = TryHitSelectOption(_openSelect, x, y, out var optionIndex);
+            _openSelectHover = overOption ? optionIndex : -1;
+
+            if (overOption)
+            {
+                SetHovered(null);
+                return;
+            }
+        }
+
         var element = HitTest(x, y);
         SetHovered(element);
     }
@@ -732,12 +1271,49 @@ public sealed class IgniteWindow : IDisposable
     private void OnMouseDown(MouseButton button)
     {
         var element = HitTest(_mouseX, _mouseY);
+
+        if (_openSelect is not null)
+        {
+            if (TryHitSelectOption(_openSelect, _mouseX, _mouseY, out var optionIndex))
+            {
+                SelectOption(_openSelect, optionIndex);
+                CloseSelectMenu();
+                _pressed = null;
+                SetActive(null);
+                return;
+            }
+
+            var closed = _openSelect;
+            CloseSelectMenu();
+
+            // Clicking the open control itself closes the menu; clicking
+            // anything else continues through the normal press handling.
+            if (ReferenceEquals(element, closed))
+            {
+                _pressed = element;
+                SetActive(element);
+                Focus(element, focusVisible: false);
+                Invoke(element, "mousedown");
+                return;
+            }
+        }
+
         _pressed = element;
         SetActive(element);
 
         if (element is not null)
         {
             Focus(element, focusVisible: false);
+
+            if (IsTextControl(element))
+            {
+                PlaceCaretFromPoint(element, _mouseX);
+            }
+        }
+
+        if (element is { Tag: "select" })
+        {
+            OpenSelectMenu(element);
         }
 
         Invoke(element, "mousedown");
@@ -828,6 +1404,8 @@ public sealed class IgniteWindow : IDisposable
 
     private void OnScroll(float vertical, float horizontal)
     {
+        CloseSelectMenu();
+
         var box = HitTestBox(_mouseX, _mouseY);
         var scroll = FindScrollContainer(box, vertical, horizontal);
 
@@ -863,16 +1441,110 @@ public sealed class IgniteWindow : IDisposable
             return;
         }
 
+        if (_focused.Tag is "select")
+        {
+            var options = FindOptions(_focused);
+
+            switch (key)
+            {
+                case Key.Down:
+                case Key.Up:
+                    if (options.Count > 0)
+                    {
+                        if (_openSelect is null)
+                        {
+                            OpenSelectMenu(_focused);
+                        }
+                        else
+                        {
+                            var step = key == Key.Down ? 1 : -1;
+                            _openSelectHover = (_openSelectHover + step + options.Count) % options.Count;
+                        }
+                    }
+
+                    return;
+
+                case Key.Enter:
+                case Key.Space:
+                    if (options.Count > 0)
+                    {
+                        if (_openSelect is null)
+                        {
+                            OpenSelectMenu(_focused);
+                        }
+                        else
+                        {
+                            SelectOption(_focused, _openSelectHover);
+                            CloseSelectMenu();
+                        }
+                    }
+
+                    return;
+
+                case Key.Escape:
+                    if (_openSelect is not null)
+                    {
+                        CloseSelectMenu();
+                        return;
+                    }
+
+                    break;
+            }
+        }
+
         switch (key)
         {
             case Key.Backspace:
-                if (_editText is { Length: > 0 })
+                if (_editText is { Length: > 0 } && _caretIndex > 0)
                 {
-                    _editText = _editText[..^1];
+                    var start = PreviousTextElement(_editText, _caretIndex);
+                    _editText = _editText.Remove(start, _caretIndex - start);
+                    _caretIndex = start;
+                    ResetCaretBlink();
                     CascadeEdit(_focused);
                     Invoke(_focused, "input", _editText ?? string.Empty);
                 }
 
+                break;
+
+            case Key.Delete:
+                if (_editText is { Length: > 0 } && _caretIndex < _editText.Length)
+                {
+                    var end = NextTextElement(_editText, _caretIndex);
+                    _editText = _editText.Remove(_caretIndex, end - _caretIndex);
+                    ResetCaretBlink();
+                    CascadeEdit(_focused);
+                    Invoke(_focused, "input", _editText ?? string.Empty);
+                }
+
+                break;
+
+            case Key.Left:
+                if (_editText is { Length: > 0 })
+                {
+                    _caretIndex = PreviousTextElement(_editText, _caretIndex);
+                    ResetCaretBlink();
+                }
+
+                break;
+
+            case Key.Right:
+                if (_editText is { Length: > 0 })
+                {
+                    _caretIndex = NextTextElement(_editText, _caretIndex);
+                    ResetCaretBlink();
+                }
+
+                break;
+
+            case Key.Home:
+                _caretIndex = 0;
+                ResetCaretBlink();
+                break;
+
+            case Key.End:
+                _caretIndex = _editText?.Length ?? 0;
+                ResetCaretBlink();
                 break;
 
             case Key.Enter:
@@ -891,6 +1563,40 @@ public sealed class IgniteWindow : IDisposable
         }
     }
 
+    private static int PreviousTextElement(string text, int index)
+    {
+        if (index <= 0)
+        {
+            return 0;
+        }
+
+        index--;
+
+        if (index > 0 && char.IsLowSurrogate(text[index]) && char.IsHighSurrogate(text[index - 1]))
+        {
+            index--;
+        }
+
+        return index;
+    }
+
+    private static int NextTextElement(string text, int index)
+    {
+        if (index >= text.Length)
+        {
+            return text.Length;
+        }
+
+        index++;
+
+        if (index < text.Length && char.IsLowSurrogate(text[index]) && char.IsHighSurrogate(text[index - 1]))
+        {
+            index++;
+        }
+
+        return index;
+    }
+
     private void OnKeyChar(char character)
     {
         if (_focused is null || char.IsControl(character))
@@ -903,6 +1609,11 @@ public sealed class IgniteWindow : IDisposable
             return;
         }
 
+        if (_focused.Tag is "select" or "button" or "a")
+        {
+            return;
+        }
+
         var type = GetAttribute(_focused, "type");
 
         if (type is "checkbox" or "radio" or "range")
@@ -910,9 +1621,27 @@ public sealed class IgniteWindow : IDisposable
             return;
         }
 
-        _editText = (_editText ?? string.Empty) + character;
+        _editText ??= string.Empty;
+        _caretIndex = Math.Clamp(_caretIndex, 0, _editText.Length);
+        _editText = _editText.Insert(_caretIndex, character.ToString());
+        _caretIndex++;
+        ResetCaretBlink();
         CascadeEdit(_focused);
         Invoke(_focused, "input", _editText ?? string.Empty);
+    }
+
+    private void ResetCaretBlink()
+    {
+        _caretBlinkStart = Stopwatch.GetTimestamp();
+    }
+
+    private bool IsCaretVisible
+    {
+        get
+        {
+            var elapsed = (Stopwatch.GetTimestamp() - _caretBlinkStart) / (double)Stopwatch.Frequency;
+            return elapsed % 1.0 < 0.5;
+        }
     }
 
     private void CascadeEdit(ElementNode element)
@@ -950,6 +1679,11 @@ public sealed class IgniteWindow : IDisposable
             return;
         }
 
+        if (_openSelect is not null && !ReferenceEquals(_openSelect, element))
+        {
+            CloseSelectMenu();
+        }
+
         var visible = focusVisible
             || element is not null && element.Tag is "input" or "textarea";
 
@@ -985,6 +1719,8 @@ public sealed class IgniteWindow : IDisposable
             element.IsFocused = true;
             element.IsFocusVisible = visible;
             _editText = GetAttribute(element, "value") ?? element.TextContent ?? string.Empty;
+            _caretIndex = _editText.Length;
+            ResetCaretBlink();
 
             if (element.TryGetEventHandler("focus", out var handler) && handler is Action action)
             {
@@ -994,6 +1730,7 @@ public sealed class IgniteWindow : IDisposable
         else
         {
             _editText = null;
+            _caretIndex = 0;
         }
 
         _needsLayout = true;
