@@ -751,7 +751,13 @@ public sealed partial class LayoutEngine
         var context = CreateContext(style);
         var padding = style.Padding.Resolve(in context, 0);
         var border = ResolveBorders(style, in context, 0);
-        var width = style.Width.ResolveOr(in context, float.NaN, float.NaN);
+        // A percentage width has no meaningful max-content value: resolve it
+        // against the child's own content instead, otherwise a flex item such
+        // as Bootstrap's width:100% .form-control measures as zero and the
+        // container collapses around it.
+        var width = style.Width.Unit == LengthUnit.Percent
+            ? float.NaN
+            : style.Width.ResolveOr(in context, float.NaN, float.NaN);
 
         float content;
 

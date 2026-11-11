@@ -199,7 +199,7 @@ internal sealed class BootstrapDemo : Component
     private static Node StatCard(string label, string value, string color)
     {
         return H("div", new Props { ClassName = "col-6 col-lg-3" },
-            H("div", new Props { ClassName = "card h-100 border-0 shadow-sm" },
+            H("div", new Props { ClassName = "card border-0 shadow-sm" },
                 H("div", new Props { ClassName = "card-body" },
                     H("div", new Props { ClassName = $"text-{color} fw-bold fs-3" }, Text(value)),
                     H("div", new Props { ClassName = "text-body-secondary small text-uppercase" }, Text(label)))));
@@ -247,7 +247,7 @@ internal sealed class BootstrapDemo : Component
                 }
 
                 return H("div", new Props { ClassName = "col-md-6 col-xl-4" },
-                    H("div", new Props { ClassName = $"card h-100 shadow-sm border-2 {card.Item3}" },
+                    H("div", new Props { ClassName = $"card shadow-sm border-2 {card.Item3}" },
                         H("div", new Props { ClassName = "card-body d-flex flex-column" },
                             H("div", new Props { ClassName = "d-flex justify-content-between align-items-start mb-3" },
                                 H("h5", new Props { ClassName = "card-title mb-0" }, Text(card.Item1)),
@@ -260,7 +260,7 @@ internal sealed class BootstrapDemo : Component
 
     private static Node BuildForm(Action onSubmit)
     {
-        return H("div", new Props { ClassName = "card shadow-sm h-100" },
+        return H("div", new Props { ClassName = "card shadow-sm" },
             H("div", new Props { ClassName = "card-header bg-body fw-semibold" }, Text("Form controls")),
             H("div", new Props { ClassName = "card-body" },
                 H("div", new Props { ClassName = "mb-3" },
@@ -292,7 +292,7 @@ internal sealed class BootstrapDemo : Component
 
     private static Node BuildProgressAndAlerts()
     {
-        return H("div", new Props { ClassName = "d-flex flex-column gap-3 h-100" },
+        return H("div", new Props { ClassName = "d-flex flex-column gap-3" },
             H("div", new Props { ClassName = "card shadow-sm" },
                 H("div", new Props { ClassName = "card-body" },
                     H("div", new Props { ClassName = "d-flex justify-content-between mb-2" },
@@ -348,7 +348,7 @@ internal sealed class BootstrapDemo : Component
     {
         return H("div", new Props { ClassName = "row g-4 mt-1" },
             H("div", new Props { ClassName = "col-lg-7" },
-                H("div", new Props { ClassName = "card shadow-sm h-100" },
+                H("div", new Props { ClassName = "card shadow-sm" },
                     H("div", new Props { ClassName = "card-header bg-body fw-semibold" }, Text("List group")),
                     H("ul", new Props { ClassName = "list-group list-group-flush" },
                         ListItem("Cascade and inheritance", "12 rules"),
@@ -356,7 +356,7 @@ internal sealed class BootstrapDemo : Component
                         ListItem("Display list", "120 instructions"),
                         ListItem("OpenGL", "0.7 ms render")))),
             H("div", new Props { ClassName = "col-lg-5" },
-                H("div", new Props { ClassName = "card shadow-sm h-100" },
+                H("div", new Props { ClassName = "card shadow-sm" },
                     H("div", new Props { ClassName = "card-body d-flex flex-column" },
                         H("h5", new Props { ClassName = "card-title" }, Text("Pagination")),
                         H("p", new Props { ClassName = "card-text text-body-secondary" }, Text("Bootstrap's pagination is a flex container with nested page links.")),

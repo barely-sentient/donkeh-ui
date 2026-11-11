@@ -55,6 +55,14 @@ public sealed partial class LayoutEngine
                 minMains[i] = MeasureMaxContentHeight(item, content.Width);
             }
 
+            else if (row
+                && item.Style.MinWidth.IsAuto
+                && item.Style.Width.IsAuto
+                && !item.Style.IsScrollContainer)
+            {
+                minMains[i] = MeasureMaxContentWidth(item);
+            }
+
             if (style.FlexWrap != FlexWrap.NoWrap
                 && i > lineStarts[^1]
                 && float.IsFinite(mainAvailable))
@@ -164,6 +172,54 @@ public sealed partial class LayoutEngine
                         mains[i] = bases[i];
                     }
                 }
+
+                // If clamping to a min-content floor left the line larger than
+                // the container, keep shrinking the remaining flexible items.
+                for (var pass = 0; pass < 4; pass++)
+                {
+                    var overflow = 0f;
+
+                    for (var i = start; i < end; i++)
+                    {
+                        overflow += mains[i] + mainMargins[i];
+                    }
+
+                    overflow += mainGap * Math.Max(0, end - start - 1);
+                    overflow -= mainAvailable;
+
+                    if (overflow <= 0.01f)
+                    {
+                        break;
+                    }
+
+                    var capacity = 0f;
+
+                    for (var i = start; i < end; i++)
+                    {
+                        if (items[i].Style.FlexShrink > 0)
+                        {
+                            capacity += MathF.Max(0, mains[i] - minMains[i]);
+                        }
+                    }
+
+                    if (capacity <= 0.01f)
+                    {
+                        break;
+                    }
+
+                    var remove = MathF.Min(overflow, capacity);
+
+                    for (var i = start; i < end; i++)
+                    {
+                        if (items[i].Style.FlexShrink <= 0)
+                        {
+                            continue;
+                        }
+
+                        var room = MathF.Max(0, mains[i] - minMains[i]);
+                        mains[i] -= remove * (room / capacity);
+                    }
+                }
             }
             else
             {
@@ -189,12 +245,18 @@ public sealed partial class LayoutEngine
                     0,
                     0,
                     content.Width,
-                    definiteContentHeight ?? content.Height,
+                    definiteContentHeight ?? float.NaN,
                     forcedBorderHeight: null,
                     fillHeight: false,
                     definiteContentHeight: null);
 
-                crossSizes[i] = item.BorderBox.Height;
+                // A stretched item can be taller than the tentative line cross
+                // size when a descendant uses a percentage height. Grow the line
+                // to the item's max-content height so cards and scroll panels do
+                // not clip their own content.
+                crossSizes[i] = MathF.Max(
+                    item.BorderBox.Height,
+                    MeasureMaxContentHeight(item, content.Width));
             }
             else
             {
@@ -323,6 +385,75 @@ public sealed partial class LayoutEngine
             used += mainGap * Math.Max(0, end - start - 1);
             var free = MathF.Max(0, mainAvailable - used);
 
+            // Auto margins absorb free space before justify-content runs. This
+            // is what pushes Bootstrap's `.me-auto` nav and trailing form to
+            // opposite ends of a navbar.
+            if (free > 0)
+            {
+                var autoSlots = 0;
+
+                for (var i = start; i < end; i++)
+                {
+                    var margin = items[i].Style.Margin;
+
+                    if (row)
+                    {
+                        autoSlots += margin.Left.IsAuto ? 1 : 0;
+                        autoSlots += margin.Right.IsAuto ? 1 : 0;
+                    }
+                    else
+                    {
+                        autoSlots += margin.Top.IsAuto ? 1 : 0;
+                        autoSlots += margin.Bottom.IsAuto ? 1 : 0;
+                    }
+                }
+
+                if (autoSlots > 0)
+                {
+                    var share = free / autoSlots;
+
+                    for (var i = start; i < end; i++)
+                    {
+                        var item = items[i];
+                        var margin = item.Margin;
+                        var styleMargin = item.Style.Margin;
+
+                        if (row)
+                        {
+                            if (styleMargin.Left.IsAuto)
+                            {
+                                margin = margin with { Left = share };
+                                mainMargins[i] += share;
+                            }
+
+                            if (styleMargin.Right.IsAuto)
+                            {
+                                margin = margin with { Right = share };
+                                mainMargins[i] += share;
+                            }
+                        }
+                        else
+                        {
+                            if (styleMargin.Top.IsAuto)
+                            {
+                                margin = margin with { Top = share };
+                                mainMargins[i] += share;
+                            }
+
+                            if (styleMargin.Bottom.IsAuto)
+                            {
+                                margin = margin with { Bottom = share };
+                                mainMargins[i] += share;
+                            }
+                        }
+
+                        item.Margin = margin;
+                    }
+
+                    free = 0;
+                }
+            }
+
             ComputeJustify(style.JustifyContent, free, end - start, out var justifyStart, out var justifyBetween);
             var position = justifyStart;
 
@@ -360,7 +491,7 @@ public sealed partial class LayoutEngine
                         borderX,
                         borderY,
                         content.Width,
-                        definiteContentHeight ?? content.Height,
+                        definiteContentHeight ?? float.NaN,
                         forcedHeight,
                         fillHeight: false,
                         definiteContentHeight: null);
@@ -422,7 +553,7 @@ public sealed partial class LayoutEngine
             {
                 var child = parent.Children[i];
 
-                if (child.IsOutOfFlow)
+                if (child.IsOutOfFlow || child.Style.Display == Display.None)
                 {
                     continue;
                 }
@@ -548,17 +679,41 @@ public sealed partial class LayoutEngine
         var row = style.IsFlexContainer
             && style.FlexDirection is FlexDirection.Row or FlexDirection.RowReverse;
 
+        // A table row lays its cells out horizontally even though it is not a
+        // flex container; summing their heights makes a table measure many
+        // times taller than it actually is.
+        var horizontal = row || style.Display == Display.TableRow;
+
+        var gap = style.IsFlexContainer && !row
+            ? ResolveGap(style.RowGap, in context, cbWidth)
+            : 0f;
+
         for (var i = 0; i < box.Children.Count; i++)
         {
             var child = box.Children[i];
 
-            if (child.IsOutOfFlow)
+            if (child.IsOutOfFlow || child.IsContents)
             {
                 continue;
             }
 
-            var childHeight = MeasureMaxContentHeight(child, MathF.Max(1, cbWidth));
-            content = row ? MathF.Max(content, childHeight) : content + childHeight;
+            var childContext = CreateContext(child.Style);
+            var margin = child.Style.Margin.Resolve(in childContext, cbWidth);
+            var childHeight = MeasureMaxContentHeight(child, MathF.Max(1, cbWidth)) + margin.Vertical;
+
+            if (horizontal)
+            {
+                content = MathF.Max(content, childHeight);
+            }
+            else
+            {
+                if (content > 0)
+                {
+                    content += gap;
+                }
+
+                content += childHeight;
+            }
         }
 
         return content + padding.Vertical + border.Vertical;
