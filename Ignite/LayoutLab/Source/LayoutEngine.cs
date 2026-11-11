@@ -413,6 +413,29 @@ public sealed partial class LayoutEngine
         return height;
     }
 
+    private float ClampBorderHeight(LayoutBox box, float cbHeight, float value)
+    {
+        var style = box.Style;
+        var context = CreateContext(style);
+        var verticalExtra = box.Padding.Vertical + box.Border.Vertical;
+        var minHeight = style.MinHeight.ResolveOr(in context, cbHeight, 0);
+        var maxHeight = style.MaxHeight.IsAuto
+            ? float.PositiveInfinity
+            : style.MaxHeight.ResolveOr(in context, cbHeight, float.PositiveInfinity);
+
+        if (style.BoxSizing == BoxSizing.ContentBox)
+        {
+            minHeight += verticalExtra;
+
+            if (float.IsFinite(maxHeight))
+            {
+                maxHeight += verticalExtra;
+            }
+        }
+
+        return MathF.Max(0, MathF.Max(minHeight, MathF.Min(value, maxHeight)));
+    }
+
     private static float ClampBorderWidth(
         ComputedStyle style,
         in LengthContext context,
@@ -488,6 +511,14 @@ public sealed partial class LayoutEngine
             height = content + box.Padding.Vertical + box.Border.Vertical;
         }
 
+        // An explicitly supplied or definite height still has to honour
+        // min-height/max-height, otherwise a control such as an input whose
+        // height is forced by its container can collapse below its floor.
+        if (height is { } suppliedHeight)
+        {
+            height = ClampBorderHeight(box, cbHeight, suppliedHeight);
+        }
+
         height ??= ResolveBorderHeight(box, cbWidth, cbHeight, null, fillHeight);
 
         if (height is null
@@ -499,6 +530,8 @@ public sealed partial class LayoutEngine
                 ? width / aspectRatio
                 : MathF.Max(0, width - box.Padding.Horizontal - box.Border.Horizontal) / aspectRatio
                     + box.Padding.Vertical + box.Border.Vertical;
+
+            height = ClampBorderHeight(box, cbHeight, height.Value);
         }
 
         var startHeight = height ?? 0;
@@ -510,7 +543,12 @@ public sealed partial class LayoutEngine
 
         if (height is null)
         {
+            // Auto height: the used height is the content height, but it still
+            // has to be clamped by min-height/max-height. Without this, an
+            // element whose content collapses (e.g. an empty focused input)
+            // ignores its min-height and shrinks to nothing.
             startHeight = usedContentHeight + box.Padding.Vertical + box.Border.Vertical;
+            startHeight = ClampBorderHeight(box, cbHeight, startHeight);
         }
 
         box.ApplyBorderBox(borderX, borderY, box.BorderBox.Width, startHeight);

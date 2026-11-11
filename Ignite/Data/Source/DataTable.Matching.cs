@@ -257,7 +257,7 @@ namespace Ignite.Data
             {
                 case Combinator.Child:
                 {
-                    var parent = node.Parent;
+                    var parent = ParentElement(node);
 
                     return parent is not null
                         && MatchesCompound(selectorTokens, compounds[previous], parent)
@@ -266,7 +266,7 @@ namespace Ignite.Data
 
                 case Combinator.Descendant:
                 {
-                    for (var ancestor = node.Parent; ancestor is not null; ancestor = ancestor.Parent)
+                    for (var ancestor = ParentElement(node); ancestor is not null; ancestor = ParentElement(ancestor))
                     {
                         if (MatchesCompound(selectorTokens, compounds[previous], ancestor)
                             && MatchesAncestry(selectorTokens, compounds, previous, ancestor))
@@ -642,6 +642,24 @@ namespace Ignite.Data
             }
 
             return position;
+        }
+
+        /// <summary>
+        /// Fragments (and text nodes) are transparent to the CSS tree. UILab
+        /// inserts a fragment for <c>Each(...)</c>; a child combinator on the
+        /// surrounding row must still see the fragment's children as direct
+        /// children, which is what makes Bootstrap row gutters apply.
+        /// </summary>
+        private static IgniteSupportedDomNode? ParentElement(IgniteSupportedDomNode node)
+        {
+            var parent = node.Parent;
+
+            while (parent is not null && (parent.IsFragment || parent.IsTextNode))
+            {
+                parent = parent.Parent;
+            }
+
+            return parent;
         }
 
         private static IgniteSupportedDomNode? PreviousSibling(IgniteSupportedDomNode node)

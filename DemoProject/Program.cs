@@ -112,7 +112,7 @@ internal sealed class BootstrapDemo : Component
                 Attributes = new Dictionary<string, string> { ["data-bs-theme"] = "dark" }
             },
             H("div", new Props { ClassName = "container-fluid" },
-                H("a", new Props { ClassName = "navbar-brand fw-semibold", Href = "#" },
+                H("a", new Props { ClassName = "navbar-brand fw-semibold d-flex align-items-center", Href = "#" },
                     H("span", new Props { ClassName = "badge text-bg-primary me-2" }, Text("I")),
                     Text("Ignite Bootstrap")),
                 H("button",
@@ -166,8 +166,11 @@ internal sealed class BootstrapDemo : Component
             H("ol", new Props { ClassName = "breadcrumb" },
                 H("li", new Props { ClassName = "breadcrumb-item" },
                     H("a", new Props { Href = "#" }, Text("Home"))),
-                H("li", new Props { ClassName = "breadcrumb-item" }, Text("Components")),
+                H("li", new Props { ClassName = "breadcrumb-item" },
+                    H("span", new Props { ClassName = "text-body-secondary me-2" }, Text("/")),
+                    Text("Components")),
                 H("li", new Props { ClassName = "breadcrumb-item active", Attributes = new Dictionary<string, string> { ["aria-current"] = "page" } },
+                    H("span", new Props { ClassName = "text-body-secondary me-2" }, Text("/")),
                     Text("Overview"))));
     }
 

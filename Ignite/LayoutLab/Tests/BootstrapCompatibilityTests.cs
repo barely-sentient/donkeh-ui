@@ -64,6 +64,25 @@ public sealed class BootstrapCompatibilityTests
     }
 
     [Fact]
+    public void BootstrapRowGuttersResolve()
+    {
+        const string css = """
+            .row { --bs-gutter-x: 1.5rem; display: flex; flex-wrap: wrap; }
+            .row > * { padding-left: calc(var(--bs-gutter-x) * .5); padding-right: calc(var(--bs-gutter-x) * .5); }
+            """;
+
+        var row = TestSupport.Node("div", classes: "row");
+        var column = TestSupport.Node("div");
+        row.Children = [column];
+
+        var result = TestSupport.Layout(css, row);
+        var box = TestSupport.Box(result, column);
+
+        Assert.Equal(12, box.Padding.Left, 3);
+        Assert.Equal(12, box.Padding.Right, 3);
+    }
+
+    [Fact]
     public void NestedRgbVariablesResolve()
     {
         const string css = """

@@ -409,7 +409,13 @@ public sealed class IgniteWindow : IDisposable
 
                 if (ReferenceEquals(element, _focused))
                 {
-                    return _editText ?? string.Empty;
+                    // Browsers keep the placeholder visible while the control is
+                    // focused but still empty. Besides matching that behaviour,
+                    // it keeps the text run (and therefore the line box height)
+                    // in place instead of collapsing the input on focus.
+                    return string.IsNullOrEmpty(_editText)
+                        ? GetAttribute(element, "placeholder") ?? string.Empty
+                        : _editText;
                 }
 
                 var value = GetAttribute(element, "value");
@@ -417,9 +423,14 @@ public sealed class IgniteWindow : IDisposable
             }
 
             case "textarea":
-                return ReferenceEquals(element, _focused)
-                    ? _editText ?? string.Empty
-                    : element.TextContent ?? GetAttribute(element, "value") ?? GetAttribute(element, "placeholder");
+                if (ReferenceEquals(element, _focused))
+                {
+                    return string.IsNullOrEmpty(_editText)
+                        ? GetAttribute(element, "placeholder") ?? string.Empty
+                        : _editText;
+                }
+
+                return element.TextContent ?? GetAttribute(element, "value") ?? GetAttribute(element, "placeholder");
 
             case "select":
             {
