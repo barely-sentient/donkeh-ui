@@ -73,6 +73,83 @@ public static class ColorPreview
 
     public static bool IsColor(string? text) => TryParse(text, out _);
 
+    /// <summary>Formats packed ARGB as a CSS hex colour.</summary>
+    public static string Format(uint argb)
+    {
+        var red = (argb >> 16) & 0xFF;
+        var green = (argb >> 8) & 0xFF;
+        var blue = argb & 0xFF;
+        var alpha = (argb >> 24) & 0xFF;
+
+        return alpha == 0xFF
+            ? $"#{red:X2}{green:X2}{blue:X2}"
+            : $"#{red:X2}{green:X2}{blue:X2}{alpha:X2}";
+    }
+
+    /// <summary>Converts packed ARGB to hue, saturation and value in 0..1.</summary>
+    public static (float Hue, float Saturation, float Value) ToHsv(uint argb)
+    {
+        var r = ((argb >> 16) & 0xFF) / 255f;
+        var g = ((argb >> 8) & 0xFF) / 255f;
+        var b = (argb & 0xFF) / 255f;
+        var max = MathF.Max(r, MathF.Max(g, b));
+        var min = MathF.Min(r, MathF.Min(g, b));
+        var delta = max - min;
+        var hue = 0f;
+
+        if (delta > 0.0001f)
+        {
+            if (max == r)
+            {
+                hue = ((g - b) / delta) % 6f;
+            }
+            else if (max == g)
+            {
+                hue = (b - r) / delta + 2f;
+            }
+            else
+            {
+                hue = (r - g) / delta + 4f;
+            }
+
+            hue /= 6f;
+
+            if (hue < 0)
+            {
+                hue += 1;
+            }
+        }
+
+        return (hue, max <= 0.0001f ? 0 : delta / max, max);
+    }
+
+    /// <summary>Converts hue, saturation and value in 0..1 to packed ARGB.</summary>
+    public static uint FromHsv(float hue, float saturation, float value)
+    {
+        hue = (hue % 1f + 1f) % 1f;
+        var sector = hue * 6f;
+        var index = (int)sector;
+        var fraction = sector - index;
+        var p = value * (1f - saturation);
+        var q = value * (1f - fraction * saturation);
+        var t = value * (1f - (1f - fraction) * saturation);
+
+        var (r, g, b) = (index % 6) switch
+        {
+            0 => (value, t, p),
+            1 => (q, value, p),
+            2 => (p, value, t),
+            3 => (p, q, value),
+            4 => (t, p, value),
+            _ => (value, p, q)
+        };
+
+        return 0xFF000000
+            | ((uint)MathF.Round(Math.Clamp(r, 0, 1) * 255f) << 16)
+            | ((uint)MathF.Round(Math.Clamp(g, 0, 1) * 255f) << 8)
+            | (uint)MathF.Round(Math.Clamp(b, 0, 1) * 255f);
+    }
+
     private static bool TryNibble(
         ReadOnlySpan<char> hex,
         out int r,

@@ -193,6 +193,21 @@ namespace Ignite.UILab
                 On("paste", onPaste);
             }
 
+            if (props.OnPointerDown is { } onPointerDown)
+            {
+                On("pointerdown", onPointerDown);
+            }
+
+            if (props.OnPointerMove is { } onPointerMove)
+            {
+                On("pointermove", onPointerMove);
+            }
+
+            if (props.OnPointerUp is { } onPointerUp)
+            {
+                On("pointerup", onPointerUp);
+            }
+
             if (props.OnInput is { } onInput)
             {
                 On("input", onInput);

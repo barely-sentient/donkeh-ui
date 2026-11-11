@@ -61,7 +61,10 @@ internal sealed class DevToolsWindowHost
                 EnableDevTools = false
             };
 
-            var window = new IgniteWindow(settings);
+            var window = new IgniteWindow(settings)
+            {
+                SharedDevToolsState = state
+            };
 
             window.BeforeFrame += (host, _) =>
             {

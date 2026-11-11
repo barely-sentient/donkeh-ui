@@ -112,12 +112,17 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
             className += " dt-hidden";
         }
 
+        var picker = state.Tab == DevToolsTab.Elements && state.ColorPickerRuleIndex >= 0
+            ? BuildColorPicker(state)
+            : null;
+
         return _.H(
             "div",
             new Props { Id = "ignite-devtools", ClassName = className },
             BuildToolbar(state),
             _.H("div", new Props { ClassName = "dt-body" }, BuildBody(state)),
-            BuildStatusBar(state));
+            BuildStatusBar(state),
+            picker);
     }
 
     private void RequestUpdate()
@@ -138,6 +143,22 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
                 new Props { ClassName = "dt-tabs" },
                 BuildTab(state, DevToolsTab.Elements, "Elements"),
                 BuildTab(state, DevToolsTab.Performance, "Performance")),
+            _.H(
+                "div",
+                new Props
+                {
+                    ClassName = state.InspectMode
+                        ? "dt-icon-btn dt-inspect-btn dt-inspect-active"
+                        : "dt-icon-btn dt-inspect-btn",
+                    Title = "Select an element in the page to inspect it",
+                    OnClick = () =>
+                    {
+                        state.InspectMode = !state.InspectMode;
+                        state.Hovered = null;
+                        RequestUpdate();
+                    }
+                },
+                _.H("span", new Props { ClassName = "dt-inspect-glyph" }, _.Text("\u2316"))),
             _.H("div", new Props { ClassName = "dt-spacer" }),
             BuildDockButton(state, DevToolsDock.Bottom),
             BuildDockButton(state, DevToolsDock.Right),
@@ -168,6 +189,7 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
                 ClassName = className,
                 OnClick = () =>
                 {
+                    state.ColorPickerRuleIndex = -1;
                     state.Tab = tab;
                     RequestUpdate();
                 }
@@ -452,6 +474,7 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
                 ClassName = className,
                 OnClick = () =>
                 {
+                    state.ColorPickerRuleIndex = -1;
                     state.Selected = node;
                     RequestUpdate();
                 },
@@ -709,7 +732,9 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
 
         if (isColor)
         {
-            parts.Add(BuildSwatch(declaration.Value));
+            parts.Add(BuildSwatch(
+                declaration.Value,
+                () => OpenColorPicker(state, declaration.RuleIndex, declaration.Value)));
         }
 
         parts.Add(_.H("input", new Props
@@ -760,15 +785,176 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
                 _.Text("+")));
     }
 
-    private static Node BuildSwatch(string value)
+    private static Node BuildSwatch(string value, Action? onClick = null)
     {
         return _.H(
             "span",
             new Props
             {
                 ClassName = "dt-swatch",
+                Attributes = new Dictionary<string, string> { ["data-color"] = value },
+                OnClick = onClick
+            });
+    }
+
+    private static readonly string[] PresetColors =
+    [
+        "#000000", "#ffffff", "#212529", "#6c757d", "#adb5bd", "#e9ecef",
+        "#0d6efd", "#6610f2", "#6f42c1", "#d63384", "#dc3545", "#fd7e14",
+        "#ffc107", "#198754", "#20c997", "#0dcaf0"
+    ];
+
+    private Node BuildColorPicker(DevToolsState state)
+    {
+        var ruleIndex = state.ColorPickerRuleIndex;
+        var value = state.ColorPickerValue;
+
+        var backdrop = _.H(
+            "div",
+            new Props
+            {
+                ClassName = "dt-color-backdrop",
+                OnClick = () => CloseColorPicker(state)
+            });
+
+        var header = _.H(
+            "div",
+            new Props { ClassName = "dt-color-head" },
+            _.H("span", new Props { ClassName = "dt-color-title" }, _.Text("Color")),
+            _.H(
+                "div",
+                new Props { ClassName = "dt-color-close", OnClick = () => CloseColorPicker(state) },
+                _.Text("\u00D7")));
+
+        var wheel = _.H(
+            "div",
+            new Props
+            {
+                ClassName = "dt-color-wheel",
+                Attributes = new Dictionary<string, string> { ["data-color"] = value },
+                OnPointerDown = (x, y) => UpdateColorWheel(state, ruleIndex, x, y),
+                OnPointerMove = (x, y) => UpdateColorWheel(state, ruleIndex, x, y),
+                OnPointerUp = (x, y) => UpdateColorWheel(state, ruleIndex, x, y)
+            });
+
+        var preview = _.H(
+            "div",
+            new Props
+            {
+                ClassName = "dt-swatch dt-color-preview",
                 Attributes = new Dictionary<string, string> { ["data-color"] = value }
             });
+
+        var hex = _.H(
+            "input",
+            new Props
+            {
+                ClassName = "dt-color-hex",
+                Type = "text",
+                Value = value,
+                OnInput = text => CommitColor(state, ruleIndex, text),
+                OnChange = text => CommitColor(state, ruleIndex, text)
+            });
+
+        var valueRow = _.H(
+            "div",
+            new Props { ClassName = "dt-color-value-row" },
+            preview,
+            hex);
+
+        var rows = new List<Node?>();
+
+        for (var start = 0; start < PresetColors.Length; start += 8)
+        {
+            var row = new List<Node?>();
+
+            for (var i = start; i < Math.Min(start + 8, PresetColors.Length); i++)
+            {
+                var color = PresetColors[i];
+                row.Add(BuildSwatch(color, () =>
+                {
+                    CommitColor(state, ruleIndex, color);
+                    CloseColorPicker(state);
+                }));
+            }
+
+            rows.Add(_.H(
+                "div",
+                new Props { ClassName = "dt-color-row" },
+                _.F(row.ToArray())));
+        }
+
+        var grid = _.H(
+            "div",
+            new Props { ClassName = "dt-color-grid" },
+            _.F(rows.ToArray()));
+
+        var popup = _.H(
+            "div",
+            new Props { ClassName = "dt-color-popup" },
+            header,
+            wheel,
+            valueRow,
+            grid);
+
+        return _.F(backdrop, popup);
+    }
+
+    private void UpdateColorWheel(DevToolsState state, int ruleIndex, float x, float y)
+    {
+        const float size = 110f;
+        const float center = size / 2f;
+        var dx = x - center;
+        var dy = y - center;
+        var distance = MathF.Sqrt(dx * dx + dy * dy);
+        var saturation = Math.Clamp(distance / (center - 4f), 0, 1);
+        var hue = MathF.Atan2(dy, dx) / (MathF.PI * 2f);
+
+        if (hue < 0)
+        {
+            hue += 1;
+        }
+
+        CommitColor(state, ruleIndex, ColorPreview.Format(
+            ColorPreview.FromHsv(hue, saturation, 1)));
+    }
+
+    private void OpenColorPicker(DevToolsState state, int ruleIndex, string value)
+    {
+        state.ColorPickerRuleIndex = ruleIndex;
+        state.ColorPickerValue = ColorPreview.TryParse(value, out var argb)
+            ? ColorPreview.Format(argb)
+            : value;
+        RequestUpdate();
+    }
+
+    private void CloseColorPicker(DevToolsState state)
+    {
+        state.ColorPickerRuleIndex = -1;
+        RequestUpdate();
+    }
+
+    private void CommitColor(DevToolsState state, int ruleIndex, string value)
+    {
+        if (state.Table is not { } table || !ColorPreview.IsColor(value))
+        {
+            return;
+        }
+
+        var text = value.Trim();
+        state.ColorPickerValue = text;
+        var valueId = InternTable.Intern(text);
+
+        state.QueueEdit(() =>
+        {
+            if (table.GetRule(ruleIndex).ValueId == valueId)
+            {
+                return;
+            }
+
+            table.SetRuleValue(ruleIndex, valueId);
+            state.NotifyStylesChanged();
+        });
     }
 
     private void BeginAdd(RuleGroup group)

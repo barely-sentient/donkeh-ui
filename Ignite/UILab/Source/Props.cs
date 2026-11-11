@@ -64,6 +64,12 @@ namespace Ignite.UILab
 
         public Action<string>? OnPaste { get; init; }
 
+        public Action<float, float>? OnPointerDown { get; init; }
+
+        public Action<float, float>? OnPointerMove { get; init; }
+
+        public Action<float, float>? OnPointerUp { get; init; }
+
         public Action<string>? OnInput { get; init; }
 
         public Action<string>? OnChange { get; init; }

@@ -61,6 +61,12 @@ public sealed class DevToolsState
     /// <summary>The node under the pointer in the DOM tree, highlighted in the app.</summary>
     public Node? Hovered { get; set; }
 
+    /// <summary>When true, the next app click selects an element instead of activating it.</summary>
+    public bool InspectMode { get; set; }
+
+    /// <summary>Requests that the DOM tree scroll the selected row into view.</summary>
+    public bool ScrollSelectedIntoView { get; set; }
+
     /// <summary>A CSS class to focus after the panel next renders, if any.</summary>
     public string? PendingFocusClass { get; set; }
 
@@ -69,6 +75,12 @@ public sealed class DevToolsState
     /// open a fresh "Add property" row instead of closing the current one.
     /// </summary>
     public bool AdvanceAfterCommit { get; set; }
+
+    /// <summary>The declaration whose colour swatch opened the picker, or -1.</summary>
+    public int ColorPickerRuleIndex { get; set; } = -1;
+
+    /// <summary>The current colour text shown in the picker.</summary>
+    public string ColorPickerValue { get; set; } = string.Empty;
 
     /// <summary>Logical nodes that are expanded in the tree.</summary>
     public HashSet<Node> Expanded { get; } = new(ReferenceEqualityComparer.Instance);

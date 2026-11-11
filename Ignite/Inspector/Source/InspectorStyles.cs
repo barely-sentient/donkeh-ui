@@ -432,6 +432,133 @@ public static class InspectorStyles
             cursor: pointer;
         }
 
+        #ignite-devtools .dt-color-backdrop {
+            position: absolute;
+            left: 0;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 20;
+        }
+
+        #ignite-devtools .dt-color-popup {
+            position: absolute;
+            top: 40px;
+            right: 12px;
+            width: 236px;
+            display: flex;
+            flex-direction: column;
+            background-color: #292a2d;
+            border-width: 1px;
+            border-style: solid;
+            border-color: #3c4043;
+            border-radius: 6px;
+            padding: 8px;
+            z-index: 30;
+        }
+
+        #ignite-devtools .dt-color-head {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 6px;
+        }
+
+        #ignite-devtools .dt-color-title {
+            color: #e8eaed;
+            font-weight: 600;
+        }
+
+        #ignite-devtools .dt-color-close {
+            color: #9aa0a6;
+            cursor: pointer;
+            padding-left: 4px;
+            padding-right: 4px;
+            font-size: 14px;
+        }
+
+        #ignite-devtools .dt-color-wheel {
+            width: 110px;
+            height: 110px;
+            min-width: 110px;
+            align-self: center;
+            box-sizing: border-box;
+            border-radius: 50%;
+            margin-bottom: 8px;
+        }
+
+        #ignite-devtools .dt-color-value-row {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+
+        #ignite-devtools .dt-color-preview {
+            display: block;
+            flex: 0 0 32px;
+            width: 32px;
+            height: 32px;
+            min-width: 32px;
+            margin: 0 6px 0 0;
+        }
+
+        #ignite-devtools .dt-color-hex {
+            flex: 1;
+            width: auto;
+            height: 24px;
+            min-height: 24px;
+            background-color: #1e1e1e;
+            border-width: 1px;
+            border-style: solid;
+            border-color: #3c4043;
+            border-radius: 3px;
+            color: #e8eaed;
+            padding: 0 6px;
+            margin: 0;
+            font-family: Consolas, "Courier New", monospace;
+            font-size: 12px;
+        }
+
+        #ignite-devtools .dt-color-grid {
+            display: flex;
+            flex-direction: column;
+            margin-top: 6px;
+        }
+
+        #ignite-devtools .dt-color-row {
+            display: flex;
+            flex-direction: row;
+        }
+
+        #ignite-devtools .dt-color-grid .dt-swatch {
+            display: block;
+            flex: 0 0 18px;
+            width: 18px;
+            height: 18px;
+            min-width: 18px;
+            margin: 2px;
+            cursor: pointer;
+        }
+
+        #ignite-devtools .dt-inspect-btn {
+            margin-left: 4px;
+        }
+
+        #ignite-devtools .dt-inspect-glyph {
+            font-size: 16px;
+            color: #9aa0a6;
+        }
+
+        #ignite-devtools .dt-inspect-active {
+            background-color: #0e3a5f;
+        }
+
+        #ignite-devtools .dt-inspect-active .dt-inspect-glyph {
+            color: #8ab4f8;
+        }
+
         #ignite-devtools .dt-computed-row {
             display: flex;
             flex-direction: row;

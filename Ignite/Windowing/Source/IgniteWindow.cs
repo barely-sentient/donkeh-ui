@@ -75,12 +75,19 @@ public sealed class IgniteWindow : IDisposable
     private int _cachedLayoutBoxCount;
     private int _cachedNodeCount;
 
+    /// <summary>
+    /// The shared inspector state when this window hosts a standalone panel.
+    /// </summary>
+    public DevToolsState? SharedDevToolsState { get; set; }
+
     private string? _screenshotPath;
 
     private readonly List<ElementNode> _hoverChain = [];
     private readonly List<ElementNode> _activeChain = [];
     private ElementNode? _hovered;
     private ElementNode? _pressed;
+    private ElementNode? _pointerTarget;
+    private bool _inspectPressed;
     private ElementNode? _focused;
     private string? _editText;
     private int _caretIndex;
@@ -153,6 +160,14 @@ public sealed class IgniteWindow : IDisposable
         }
 
         _devTools.Visible = !_devTools.Visible;
+
+        if (!_devTools.Visible)
+        {
+            _devTools.InspectMode = false;
+            _devTools.Hovered = null;
+            _devTools.ColorPickerRuleIndex = -1;
+        }
+
         _devTools.Refresh();
         _devToolsPanel?.Tick();
         _needsLayout = true;
@@ -176,6 +191,9 @@ public sealed class IgniteWindow : IDisposable
     public void HideDevTools()
     {
         _devTools.Visible = false;
+        _devTools.InspectMode = false;
+        _devTools.Hovered = null;
+        _devTools.ColorPickerRuleIndex = -1;
         _devTools.Refresh();
         _devToolsPanel?.Tick();
         _needsLayout = true;
@@ -453,6 +471,22 @@ public sealed class IgniteWindow : IDisposable
                 _devToolsLayout,
                 CreateLayoutOptions(width, height, dpi, _devToolsContext, isApp: false));
             _needsDevToolsPaint = false;
+        }
+
+        var sharedDevTools = SharedDevToolsState;
+        var shouldScrollSelection =
+            _devTools.Dock != DevToolsDock.Window && _devTools.ScrollSelectedIntoView
+            || sharedDevTools is not null && sharedDevTools.ScrollSelectedIntoView;
+
+        if (shouldScrollSelection)
+        {
+            ScrollDevToolsSelectionIntoView();
+            _devTools.ScrollSelectedIntoView = false;
+
+            if (sharedDevTools is not null)
+            {
+                sharedDevTools.ScrollSelectedIntoView = false;
+            }
         }
 
         _devToolsOverlay.Clear();
@@ -1648,7 +1682,18 @@ public sealed class IgniteWindow : IDisposable
         InstructionBuffer instructions,
         ConstantPool constants)
     {
-        if (box.Node is not ElementNode element || !element.HasClass("dt-swatch"))
+        if (box.Node is not ElementNode element)
+        {
+            return;
+        }
+
+        if (element.HasClass("dt-color-wheel"))
+        {
+            PaintColorWheel(box, instructions, element);
+            return;
+        }
+
+        if (!element.HasClass("dt-swatch"))
         {
             return;
         }
@@ -1678,6 +1723,101 @@ public sealed class IgniteWindow : IDisposable
         // A light base keeps translucent colours readable on the dark panel.
         instructions.AddDrawRoundedRect(inner, 0xFFFFFFFF, radius);
         instructions.AddDrawRoundedRect(inner, color, radius);
+    }
+
+    private static void PaintColorWheel(
+        LayoutBox box,
+        InstructionBuffer instructions,
+        ElementNode element)
+    {
+        var rect = PaintedBorderBox(box);
+
+        if (rect.Width <= 0 || rect.Height <= 0)
+        {
+            return;
+        }
+
+        var centerX = rect.X + rect.Width / 2f;
+        var centerY = rect.Y + rect.Height / 2f;
+        var radius = MathF.Min(rect.Width, rect.Height) / 2f - 2f;
+        const int angles = 96;
+        const int rings = 10;
+        var ring = radius / rings;
+        var size = ring * 1.3f;
+
+        for (var r = 1; r <= rings; r++)
+        {
+            var saturation = r / (float)rings;
+            var distance = ring * (r - 0.5f);
+
+            for (var a = 0; a < angles; a++)
+            {
+                var hue = a / (float)angles;
+                var angle = hue * MathF.PI * 2f;
+                var x = centerX + MathF.Cos(angle) * distance;
+                var y = centerY + MathF.Sin(angle) * distance;
+                var color = ColorPreview.FromHsv(hue, saturation, 1f);
+
+                instructions.Add(new Instruction(
+                    InstructionOpCode.DrawEllipse,
+                    x - size / 2f,
+                    y - size / 2f,
+                    size,
+                    size,
+                    unchecked((int)color)));
+            }
+        }
+
+        instructions.Add(new Instruction(
+            InstructionOpCode.DrawEllipse,
+            centerX - ring / 2f,
+            centerY - ring / 2f,
+            ring,
+            ring,
+            unchecked((int)0xFFFFFFFF)));
+
+        PaintColorWheelKnob(box, instructions, element);
+    }
+
+    private static void PaintColorWheelKnob(
+        LayoutBox box,
+        InstructionBuffer instructions,
+        ElementNode element)
+    {
+        if (!ColorPreview.TryParse(GetAttribute(element, "data-color"), out var color))
+        {
+            return;
+        }
+
+        var rect = PaintedBorderBox(box);
+
+        if (rect.Width <= 0 || rect.Height <= 0)
+        {
+            return;
+        }
+
+        var (hue, saturation, value) = ColorPreview.ToHsv(color);
+        var centerX = rect.X + rect.Width / 2f;
+        var centerY = rect.Y + rect.Height / 2f;
+        var radius = MathF.Min(rect.Width, rect.Height) / 2f - 9f;
+        var angle = hue * MathF.PI * 2f;
+        var x = centerX + MathF.Cos(angle) * radius * saturation;
+        var y = centerY + MathF.Sin(angle) * radius * saturation;
+
+        instructions.Add(new Instruction(
+            InstructionOpCode.DrawEllipse,
+            x - 6f,
+            y - 6f,
+            12f,
+            12f,
+            unchecked((int)0xFF202124)));
+        instructions.Add(new Instruction(
+            InstructionOpCode.DrawEllipse,
+            x - 4.5f,
+            y - 4.5f,
+            9f,
+            9f,
+            unchecked((int)0xFFFFFFFF)));
     }
 
     private void PaintElementContent(LayoutBox box, InstructionBuffer instructions, ConstantPool constants)
@@ -1887,6 +2027,12 @@ public sealed class IgniteWindow : IDisposable
             return;
         }
 
+        if (_pointerTarget is not null)
+        {
+            InvokePointer(_pointerTarget, "pointermove", x, y);
+            return;
+        }
+
         if (_openSelect is not null)
         {
             var overOption = TryHitSelectOption(_openSelect, x, y, out var optionIndex);
@@ -1900,32 +2046,47 @@ public sealed class IgniteWindow : IDisposable
         }
 
         var element = HitTest(x, y);
+
+        if (_devTools.InspectMode)
+        {
+            _devTools.Hovered = element is not null && !IsInDevToolsTree(element)
+                ? element
+                : null;
+        }
+
         SetHovered(element);
     }
 
     private void OnMouseDown(MouseButton button)
     {
+        if (_devTools.InspectMode)
+        {
+            var inspectHit = HitTest(_mouseX, _mouseY);
+
+            if (inspectHit is not null && !IsInDevToolsTree(inspectHit))
+            {
+                _inspectPressed = true;
+                return;
+            }
+        }
+
+        var pointerTarget = FindPointerTarget(HitTest(_mouseX, _mouseY), "pointerdown");
+
+        if (pointerTarget is not null)
+        {
+            _pointerTarget = pointerTarget;
+            _pressed = null;
+            SetActive(null);
+            InvokePointer(pointerTarget, "pointerdown", _mouseX, _mouseY);
+            return;
+        }
+
         if (TryBeginScrollbarInteraction(_mouseX, _mouseY))
         {
             return;
         }
 
         var element = HitTest(_mouseX, _mouseY);
-
-        if (Environment.GetEnvironmentVariable("IGNITE_STYLE_TRACE") == "1")
-        {
-            Console.WriteLine(
-                $"[down] {_mouseX:0},{_mouseY:0} {element?.Tag} " +
-                $"{string.Join('.', element?.ClassName ?? [])}");
-
-            if (_devToolsRoot is not null
-                && _devToolsLayout is not null
-                && FindByClass(_devToolsRoot, "dt-add") is { } addElement
-                && _devToolsLayout.TryGetBox(addElement, out var addBox))
-            {
-                Console.WriteLine($"[add] {addBox.BorderBox}");
-            }
-        }
 
         if (_openSelect is not null)
         {
@@ -1976,6 +2137,26 @@ public sealed class IgniteWindow : IDisposable
 
     private void OnMouseUp(MouseButton button)
     {
+        if (_inspectPressed)
+        {
+            _inspectPressed = false;
+            var inspectHit = HitTest(_mouseX, _mouseY);
+
+            if (inspectHit is not null && !IsInDevToolsTree(inspectHit))
+            {
+                SelectInspectElement(inspectHit);
+            }
+
+            return;
+        }
+
+        if (_pointerTarget is not null)
+        {
+            InvokePointer(_pointerTarget, "pointerup", _mouseX, _mouseY);
+            _pointerTarget = null;
+            return;
+        }
+
         if (_scrollDrag is not null)
         {
             _scrollDrag = null;
@@ -2907,6 +3088,104 @@ public sealed class IgniteWindow : IDisposable
         SetChainState(_activeChain, element, static node => node.IsActive = true,
             static node => node.IsActive = false);
         _needsLayout = true;
+    }
+
+    private static ElementNode? FindPointerTarget(ElementNode? element, string eventName)
+    {
+        for (var node = (IgniteSupportedDomNode?)element; node is not null; node = node.Parent)
+        {
+            if (node is ElementNode current
+                && current.TryGetEventHandler(eventName, out var handler)
+                && handler is Action<float, float>)
+            {
+                return current;
+            }
+        }
+
+        return null;
+    }
+
+    private void InvokePointer(ElementNode target, string eventName, float x, float y)
+    {
+        if (!target.TryGetEventHandler(eventName, out var handler)
+            || handler is not Action<float, float> action)
+        {
+            return;
+        }
+
+        var layout = LayoutFor(target);
+
+        if (layout is null || !layout.TryGetBox(target, out var box))
+        {
+            return;
+        }
+
+        var painted = PaintedBorderBox(box);
+        action(x - painted.X, y - painted.Y);
+    }
+
+    private void SelectInspectElement(ElementNode element)
+    {
+        _devTools.Selected = element;
+        _devTools.Hovered = null;
+        _devTools.InspectMode = false;
+
+        for (var node = (Node?)element; node is not null; node = node.Parent as Node)
+        {
+            _devTools.Expanded.Add(node);
+        }
+
+        _devTools.Refresh();
+        _lastDevToolsVersion = -1;
+        _needsLayout = true;
+        _devTools.ScrollSelectedIntoView = true;
+    }
+
+    private void ScrollDevToolsSelectionIntoView()
+    {
+        var root = _devToolsRoot ?? _root;
+        var layout = _devToolsLayout ?? _layoutResult;
+
+        if (root is null || layout is null)
+        {
+            return;
+        }
+
+        var row = FindByClass(root, "dt-tree-selected");
+
+        if (row is null || !layout.TryGetBox(row, out var rowBox))
+        {
+            return;
+        }
+
+        var pane = rowBox.Parent;
+
+        while (pane is not null
+            && !(pane.IsScrollContainer
+                && pane.Style.OverflowY is Overflow.Auto or Overflow.Scroll))
+        {
+            pane = pane.Parent;
+        }
+
+        if (pane is null)
+        {
+            return;
+        }
+
+        var max = MathF.Max(0, pane.ScrollHeight - pane.ClientHeight);
+        var target = rowBox.BorderBox.Y
+            - pane.ContentBox.Y
+            - (pane.ClientHeight - rowBox.BorderBox.Height) / 2f;
+        pane.Node.ScrollOffsetY = Math.Clamp(target, 0, max);
+
+        if (_devToolsLayout is not null)
+        {
+            _needsDevToolsPaint = true;
+        }
+        else
+        {
+            _needsPaint = true;
+        }
     }
 
     private static void SetChainState(
