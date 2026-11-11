@@ -11,7 +11,21 @@ public sealed partial class LayoutEngine
             _instructions.AddBeginFrame();
         }
 
+        _fixedBoxes.Clear();
+        _paintingFixed = false;
         PaintBox(root, 0, 0);
+
+        // Fixed boxes are positioned against the viewport and must not be
+        // clipped by an ancestor scroll container. Paint them after the normal
+        // tree so modals, offcanvas panels and tooltips sit above the page.
+        _paintingFixed = true;
+
+        for (var i = 0; i < _fixedBoxes.Count; i++)
+        {
+            PaintBox(_fixedBoxes[i], 0, 0);
+        }
+
+        _paintingFixed = false;
 
         if (_options.IncludeFrameMarkers)
         {
@@ -28,9 +42,15 @@ public sealed partial class LayoutEngine
 
         if (box.IsFixed)
         {
+            if (!_paintingFixed)
+            {
+                _fixedBoxes.Add(box);
+                return;
+            }
+
             // Fixed boxes are anchored to the viewport and ignore ancestor scroll
-            // translations. Ancestor clips are intentionally not cancelled here;
-            // a renderer that supports fixed stacking contexts can lift them.
+            // translations. They are painted in the fixed pass, outside ancestor
+            // clips, so a modal is never cut off by a scrolling page.
             tx = 0;
             ty = 0;
         }

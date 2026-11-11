@@ -1,4 +1,4 @@
-﻿using Ignite.Data.Dom;
+using Ignite.Data.Dom;
 using Ignite.Inspector;
 using Ignite.UILab;
 using Ignite.Windowing;

@@ -43,6 +43,9 @@ public sealed partial class LayoutEngine
     private InstructionBuffer _instructions = new();
     private ConstantPool _constants = new();
     private readonly AnimationRuntime _animations;
+    private readonly List<LayoutBox> _fixedBoxes = [];
+    private bool _paintingFixed;
+    private Rect _layoutViewport;
     private LayoutBox? _root;
     private int _maxDepth = 512;
 
@@ -84,6 +87,7 @@ public sealed partial class LayoutEngine
         _root = BuildBox(root, null, null, null, 0);
 
         var viewport = new Rect(0, 0, MathF.Max(0, _options.ViewportWidth), MathF.Max(0, _options.ViewportHeight));
+        _layoutViewport = viewport;
 
         if (_root is not null)
         {
@@ -136,6 +140,7 @@ public sealed partial class LayoutEngine
         _root = previous.Root;
 
         var viewport = new Rect(0, 0, MathF.Max(0, _options.ViewportWidth), MathF.Max(0, _options.ViewportHeight));
+        _layoutViewport = viewport;
 
         if (_root is not null)
         {
@@ -752,7 +757,12 @@ public sealed partial class LayoutEngine
                 continue;
             }
 
-            var containingBlock = box.ContainingBlock?.PaddingBox ?? viewport;
+            // A fixed box is always laid out against the window viewport,
+            // even when it is discovered while processing a nested absolute
+            // box whose containing block is a card or panel.
+            var containingBlock = box.IsFixed
+                ? _layoutViewport
+                : box.ContainingBlock?.PaddingBox ?? viewport;
             LayoutAbsoluteBox(box, containingBlock);
         }
     }
