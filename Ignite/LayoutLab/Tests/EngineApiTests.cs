@@ -234,4 +234,26 @@ public sealed class EngineApiTests
 
         Assert.Single(TestSupport.Instructions(result, InstructionOpCode.DrawRect));
     }
+
+    [Fact]
+    public void RepaintKeepsTheSharedNodeMapUsable()
+    {
+        var engine = new LayoutEngine(TestSupport.Build(
+            ".child { width: 10px; height: 10px; background: #ff0000; }"));
+        var root = TestSupport.Node("div", "root");
+        var child = TestSupport.Node("div", null, null, "child");
+        root.Children = [child];
+
+        var options = Options();
+        options.ReuseLayoutBoxes = true;
+        options.SnapshotResults = false;
+
+        var result = engine.Layout(root, options);
+        Assert.True(result.TryGetBox(child, out _));
+
+        var repainted = engine.Repaint(result, options);
+
+        Assert.True(repainted.TryGetBox(root, out _));
+        Assert.True(repainted.TryGetBox(child, out _));
+    }
 }

@@ -325,15 +325,15 @@ public sealed partial class LayoutEngine
 
     private ComputedStyle ResolveStyle(IgniteSupportedDomNode node, ComputedStyle? parent)
     {
-        // Animated parents keep a stable style object but their inherited
-        // values can still change each frame. Only pay for the hash when the
-        // parent is actually animated.
-        var parentInheritedHash = parent is { IsAnimated: true } ? InheritedHash(parent) : 0;
+        // Compare the inherited values rather than the parent object identity.
+        // Animation clones and other transient parent styles can be new objects
+        // while their inherited values are unchanged; keying on identity made
+        // every descendant re-resolve its whole style chain each frame.
+        var parentInheritedHash = parent is not null ? InheritedHash(parent) : 0;
         _styleCache.TryGetValue(node, out var entry);
 
         if (entry is not null
             && entry.Revision == node.Revision
-            && ReferenceEquals(entry.Parent, parent)
             && entry.ParentInheritedHash == parentInheritedHash
             && entry.Signature == _styleSignature
             && entry.ContextVersion == _contextVersion)
