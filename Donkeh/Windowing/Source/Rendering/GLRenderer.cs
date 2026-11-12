@@ -755,28 +755,40 @@ public sealed unsafe class GLRenderer : IDisposable
             return;
         }
 
+        // Side strips use the anti-aliased box mode rather than a plain quad.
+        // A one-pixel strip placed between device-pixel centres would otherwise
+        // receive no coverage at all, which made horizontal table borders vanish
+        // while the taller vertical strips stayed visible.
         if (topWidth > 0)
         {
-            AddRect(new Rect(rect.X, rect.Y, rect.Width, topWidth), top.Color);
+            AddRoundedRect(
+                new Rect(rect.X, rect.Y, rect.Width, topWidth),
+                top.Color,
+                CornerRadius.Zero);
         }
 
         if (bottomWidth > 0)
         {
-            AddRect(new Rect(rect.X, rect.Bottom - bottomWidth, rect.Width, bottomWidth), bottom.Color);
+            AddRoundedRect(
+                new Rect(rect.X, rect.Bottom - bottomWidth, rect.Width, bottomWidth),
+                bottom.Color,
+                CornerRadius.Zero);
         }
 
         if (leftWidth > 0)
         {
-            AddRect(
+            AddRoundedRect(
                 new Rect(rect.X, rect.Y + topWidth, leftWidth, MathF.Max(0, rect.Height - topWidth - bottomWidth)),
-                left.Color);
+                left.Color,
+                CornerRadius.Zero);
         }
 
         if (rightWidth > 0)
         {
-            AddRect(
+            AddRoundedRect(
                 new Rect(rect.Right - rightWidth, rect.Y + topWidth, rightWidth, MathF.Max(0, rect.Height - topWidth - bottomWidth)),
-                right.Color);
+                right.Color,
+                CornerRadius.Zero);
         }
     }
 
