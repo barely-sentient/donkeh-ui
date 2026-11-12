@@ -17,10 +17,11 @@ public sealed partial class LayoutEngine
     /// <returns>The used content height, including enclosed floats for a BFC root.</returns>
     /// <remarks>
     /// <para>
-    /// <see cref="IgniteSupportedDomNode.TextContent"/> is a shorthand for a
-    /// leading text run and is laid out before the child boxes. To interleave
-    /// text and elements, put text nodes in <see cref="LayoutBox.Children"/> by
-    /// setting <see cref="IgniteSupportedDomNode.IsTextNode"/>; text nodes then
+    /// <see cref="Donkeh.Data.Dom.IgniteSupportedDomNode.TextContent"/> is a
+    /// shorthand for a leading text run and is laid out before the child boxes.
+    /// To interleave text and elements, put text nodes in
+    /// <see cref="LayoutBox.Children"/> by setting
+    /// <see cref="Donkeh.Data.Dom.IgniteSupportedDomNode.IsTextNode"/>; text nodes then
     /// participate in document order with adjacent inline children, and each
     /// inline run occupies a line group whose height advances <c>flowY</c>.
     /// </para>
