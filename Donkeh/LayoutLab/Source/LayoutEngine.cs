@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text;
 using Donkeh.Data;
 using Donkeh.Data.Dom;
@@ -763,13 +762,6 @@ public sealed partial class LayoutEngine
         /// <summary>DOM revision of the node when the style was resolved.</summary>
         public int Revision;
 
-        /// <summary>
-        /// Parent style captured at resolution time. Validation uses
-        /// <see cref="ParentInheritedHash"/> rather than this reference, so the
-        /// field is not read by the cache.
-        /// </summary>
-        public ComputedStyle? Parent;
-
         /// <summary>Hash of the parent's inheritable values at resolution time.</summary>
         public long ParentInheritedHash;
 
@@ -837,7 +829,6 @@ public sealed partial class LayoutEngine
         {
             Style = style,
             Revision = node.Revision,
-            Parent = parent,
             ParentInheritedHash = parentInheritedHash,
             Signature = _styleSignature,
             ContextVersion = _contextVersion
@@ -1357,6 +1348,11 @@ public sealed partial class LayoutEngine
     /// Inline-level layout passes <see langword="false"/> because auto margins do
     /// not absorb space on an inline line.
     /// </param>
+    /// <param name="edgesPrepared">
+    /// <see langword="true"/> when the caller already resolved the box's
+    /// margin, border and padding for the same containing-block width, which
+    /// avoids resolving them a second time before placement.
+    /// </param>
     /// <returns>The used border-box width in CSS pixels.</returns>
     /// <remarks>
     /// <para>
@@ -1378,9 +1374,13 @@ public sealed partial class LayoutEngine
         float? forcedBorderWidth,
         bool fillWidth,
         bool shrinkToFit,
-        bool allowAutoMargins = true)
+        bool allowAutoMargins = true,
+        bool edgesPrepared = false)
     {
-        PrepareBox(box, cbWidth);
+        if (!edgesPrepared)
+        {
+            PrepareBox(box, cbWidth);
+        }
 
         var style = box.Style;
         var context = CreateContext(style);
@@ -2570,23 +2570,6 @@ public sealed partial class LayoutEngine
             || style.IsScrollContainer;
     }
 
-    /// <summary>Finds a child by reference rather than by value equality.</summary>
-    /// <param name="children">Sibling list to search.</param>
-    /// <param name="child">Child instance to locate.</param>
-    /// <returns>The zero-based index, or <c>-1</c> when the child is not present.</returns>
-    private static int IndexOfChild(List<LayoutBox> children, LayoutBox child)
-    {
-        for (var i = 0; i < children.Count; i++)
-        {
-            if (ReferenceEquals(children[i], child))
-            {
-                return i;
-            }
-        }
-
-        return -1;
-    }
-
     /// <summary>
     /// Stable <c>order</c> sort. <see cref="List{T}.Sort(Comparison{T})"/> is
     /// unstable, which would let equal-order siblings swap paint and layout
@@ -2618,15 +2601,4 @@ public sealed partial class LayoutEngine
         }
     }
 
-    /// <summary>Formats a float with at most three fractional digits for diagnostics.</summary>
-    /// <param name="value">Value to format.</param>
-    /// <returns>A culture-invariant string such as <c>12.5</c>.</returns>
-    /// <remarks>
-    /// Used where a compact, stable representation is needed; it is not suitable
-    /// for serializing full-precision geometry.
-    /// </remarks>
-    private static string FormatFloat(float value)
-    {
-        return value.ToString("0.###", CultureInfo.InvariantCulture);
-    }
 }

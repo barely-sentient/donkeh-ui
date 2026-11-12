@@ -97,7 +97,7 @@ public sealed partial class LayoutEngine
 
             if (child.Style.Float != Float.None)
             {
-                LayoutFloatChild(child, content, flowY, floatContext);
+                LayoutFloatChild(child, content, flowY, floatContext, definiteContentHeight);
                 hasFlow = true;
                 index++;
                 continue;
@@ -261,7 +261,8 @@ public sealed partial class LayoutEngine
             content.Width,
             forcedWidth,
             fillWidth: !child.IsContents && !bfc,
-            shrinkToFit: false);
+            shrinkToFit: false,
+            edgesPrepared: true);
 
         var left = bfc && !band.IsEmpty ? band.Left : content.X;
         var borderX = left + child.Margin.Left;
@@ -303,6 +304,10 @@ public sealed partial class LayoutEngine
     /// <param name="content">Content box of the containing block.</param>
     /// <param name="flowY">Current flow y position before float placement.</param>
     /// <param name="floats">Float context that receives the placed margin box.</param>
+    /// <param name="containingBlockHeight">
+    /// Parent content height used as the containing block for percentage
+    /// heights, or <see cref="float.NaN"/> when it is indefinite.
+    /// </param>
     /// <remarks>
     /// <para>
     /// The used width is shrink-to-fit against the containing block (not the
@@ -321,7 +326,8 @@ public sealed partial class LayoutEngine
         LayoutBox child,
         Rect content,
         float flowY,
-        FloatContext floats)
+        FloatContext floats,
+        float containingBlockHeight)
     {
         PrepareBox(child, content.Width);
 
@@ -373,7 +379,8 @@ public sealed partial class LayoutEngine
             content.Width,
             forcedBorderWidth: usedBorderWidth,
             fillWidth: false,
-            shrinkToFit: false);
+            shrinkToFit: false,
+            edgesPrepared: true);
 
         outerWidth = borderWidth + marginWidth;
         var marginX = child.Style.Float == Float.Left
@@ -388,7 +395,7 @@ public sealed partial class LayoutEngine
             borderX,
             borderY,
             content.Width,
-            _options.ViewportHeight,
+            containingBlockHeight,
             forcedBorderHeight: null,
             fillHeight: false,
             definiteContentHeight: null);
@@ -734,7 +741,8 @@ public sealed partial class LayoutEngine
                 forcedBorderWidth: width,
                 fillWidth: false,
                 shrinkToFit: false,
-                allowAutoMargins: false);
+                allowAutoMargins: false,
+                edgesPrepared: true);
 
             var borderX = lineX + child.Margin.Left;
             var borderY = lineY + child.Margin.Top;

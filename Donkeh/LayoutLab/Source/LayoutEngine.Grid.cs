@@ -177,7 +177,7 @@ public sealed partial class LayoutEngine
             var maxContent = MeasureMaxContentWidth(item);
             var width = MathF.Min(maxContent, available);
 
-            PrepareAndMeasureWidth(item, content.Width, width, false, false, false);
+            PrepareAndMeasureWidth(item, content.Width, width, false, false, false, edgesPrepared: true);
             LayoutPreparedBox(
                 item,
                 0,

@@ -64,10 +64,9 @@ public readonly record struct TextMetrics(float Width, float Ascent, float Desce
 /// zero base advance.
 /// </para>
 /// <para>
-/// The later branches for narrow punctuation (0.28 em) and wide letters
-/// (0.82 em) only apply to characters that did not match the earlier ASCII
-/// letter ranges, so in practice most punctuation uses 0.48 em and
-/// <c>m</c>/<c>w</c>/<c>M</c>/<c>W</c> use the normal letter widths.
+/// Narrow punctuation and <c>i</c>/<c>l</c>/<c>I</c> use 0.28 em, and
+/// <c>m</c>/<c>w</c>/<c>M</c>/<c>W</c> use 0.82 em. These exceptions are
+/// checked before the generic ASCII letter ranges.
 /// </para>
 /// <para>
 /// Each rune adds the style's letter spacing. Runs at font weight 600 or above
@@ -151,6 +150,18 @@ public sealed class SimpleTextMeasurer : ITextMeasurer
 
         if (value < 128)
         {
+            // Narrow and wide exceptions must be checked before the generic
+            // ASCII letter ranges, otherwise i/l/I and m/w/M/W never reach them.
+            if (value is '.' or ',' or ':' or ';' or '!' or '|' or 'i' or 'l' or 'I' or '\'')
+            {
+                return fontSize * 0.28f;
+            }
+
+            if (value is 'm' or 'w' or 'M' or 'W')
+            {
+                return fontSize * 0.82f;
+            }
+
             if (value is >= '0' and <= '9')
             {
                 return fontSize * 0.56f;
@@ -164,16 +175,6 @@ public sealed class SimpleTextMeasurer : ITextMeasurer
             if (value is >= 'a' and <= 'z')
             {
                 return fontSize * 0.51f;
-            }
-
-            if (value is '.' or ',' or ':' or ';' or '!' or '|' or 'i' or 'l' or 'I' or '\'')
-            {
-                return fontSize * 0.28f;
-            }
-
-            if (value is 'm' or 'w' or 'M' or 'W')
-            {
-                return fontSize * 0.82f;
             }
 
             return fontSize * 0.48f;

@@ -280,8 +280,6 @@ public sealed partial class LayoutEngine
         for (var i = 0; i < count; i++)
         {
             var item = items[i];
-            var align = EffectiveAlignSelf(item.Style, style);
-            var stretch = align == AlignItems.Stretch && IsCrossSizeAuto(item.Style, row);
 
             if (row)
             {
@@ -306,6 +304,8 @@ public sealed partial class LayoutEngine
             }
             else
             {
+                var align = EffectiveAlignSelf(item.Style, style);
+                var stretch = align == AlignItems.Stretch && IsCrossSizeAuto(item.Style, row);
                 var maxContent = MeasureMaxContentWidth(item);
                 var available = MathF.Max(0, content.Width - item.Margin.Horizontal);
                 var widthAuto = IsCrossSizeAuto(item.Style, row);
@@ -626,9 +626,12 @@ public sealed partial class LayoutEngine
     /// Translating the measured subtree preserves its internal layout. The
     /// border box is then reapplied at the destination so derived boxes reflect
     /// any auto margins changed during placement. This avoids a second recursive
-    /// layout for items whose cross size did not change.
+    /// layout for items whose cross size did not change. The measurement pass
+    /// already applied any relative or sticky offset and that offset was
+    /// subtracted by the translation, so it is reapplied here to match the
+    /// re-layout path.
     /// </remarks>
-    private static void MoveMeasuredItem(LayoutBox item, float borderX, float borderY)
+    private void MoveMeasuredItem(LayoutBox item, float borderX, float borderY)
     {
         var dx = borderX - item.BorderBox.X;
         var dy = borderY - item.BorderBox.Y;
@@ -642,6 +645,7 @@ public sealed partial class LayoutEngine
         // derived boxes at the final position instead of leaving a stale
         // margin box behind.
         item.ApplyBorderBox(borderX, borderY, item.BorderBox.Width, item.BorderBox.Height);
+        ApplyRelativeOffset(item);
     }
 
     /// <summary>Collects the boxes that participate in a flex or grid formatting context.</summary>

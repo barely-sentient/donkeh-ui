@@ -50,6 +50,20 @@ public class FlexLayoutTests
     }
 
     [Fact]
+    public void RelativeOffsetSurvivesTheMeasuredItemFastPath()
+    {
+        var (root, a, b, _) = Tree(2);
+        var result = Lay(
+            "#root { display: flex; }"
+            + " #a { width: 100px; height: 50px; position: relative; left: 20px; top: 10px; }"
+            + " #b { width: 100px; height: 50px; }",
+            root);
+
+        TestSupport.AssertRect(TestSupport.Box(result, a).BorderBox, 20, 10, 100, 50);
+        TestSupport.AssertRect(TestSupport.Box(result, b).BorderBox, 100, 0, 100, 50);
+    }
+
+    [Fact]
     public void FlexGrowSharesTheFreeSpace()
     {
         var (root, a, b, _) = Tree(2);

@@ -383,6 +383,23 @@ public class BlockLayoutTests
     }
 
     [Fact]
+    public void FloatPercentageHeightResolvesAgainstTheContainingBlock()
+    {
+        var root = TestSupport.Node("div", "root");
+        var floated = TestSupport.Node("div", "float");
+        root.Children = [floated];
+
+        var result = Lay(
+            "#root { height: 200px; }"
+            + " #float { float: left; width: 100px; height: 50%; }",
+            root);
+
+        // The float resolves 50% against the root's 200px content height, not
+        // against the 800px viewport.
+        TestSupport.AssertRect(TestSupport.Box(result, floated).BorderBox, 0, 0, 100, 100);
+    }
+
+    [Fact]
     public void FlowRootAvoidsAFloatAndShrinksToTheFreeBand()
     {
         var root = TestSupport.Node("div", "root");

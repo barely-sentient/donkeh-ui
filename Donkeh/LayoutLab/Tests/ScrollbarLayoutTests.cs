@@ -69,6 +69,37 @@ public sealed class ScrollbarLayoutTests
     }
 
     [Fact]
+    public void BothScrollbarsReserveTheBottomRightCorner()
+    {
+        var box = ScrollContainer(
+            "#root { overflow: auto; width: 100px; height: 100px; }"
+            + " #child { width: 300px; height: 300px; }",
+            out _);
+
+        Assert.True(ScrollbarLayout.TryGetVertical(box, out var vertical));
+        Assert.True(ScrollbarLayout.TryGetHorizontal(box, out var horizontal));
+
+        const float thickness = ScrollbarLayout.Thickness;
+        Assert.Equal(100 - thickness, vertical.TrackLength, 3);
+        Assert.Equal(100 - thickness, horizontal.TrackLength, 3);
+        Assert.Equal(horizontal.Track.Right, vertical.Track.X, 3);
+        Assert.Equal(0, horizontal.Track.Y - vertical.Track.Bottom, 3);
+    }
+
+    [Fact]
+    public void DraggingWithoutThumbTravelKeepsTheStartOffset()
+    {
+        var metrics = new ScrollbarMetrics(
+            Vertical: true,
+            Track: new Rect(0, 0, ScrollbarLayout.Thickness, 100),
+            ThumbOffset: 0,
+            ThumbLength: 100,
+            TrackLength: 100);
+
+        Assert.Equal(50, metrics.ScrollOffsetForDrag(50, 25, 200), 3);
+    }
+
+    [Fact]
     public void HorizontalScrollbarUsesTheBottomEdge()
     {
         var box = ScrollContainer(

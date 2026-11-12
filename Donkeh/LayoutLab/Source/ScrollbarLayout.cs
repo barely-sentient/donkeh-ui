@@ -67,16 +67,22 @@ public readonly record struct ScrollbarMetrics(
     /// <returns>The new scroll offset, clamped to the range 0 to <paramref name="maxScroll"/>.</returns>
     /// <remarks>
     /// The delta is scaled by <c>maxScroll / travel</c> so the thumb tracks the
-    /// pointer. Returns zero rather than <paramref name="startScroll"/> when
-    /// there is no travel or nothing to scroll.
+    /// pointer. When the thumb fills the track it cannot travel, so the drag
+    /// leaves <paramref name="startScroll"/> unchanged; when there is nothing to
+    /// scroll the result is zero.
     /// </remarks>
     public float ScrollOffsetForDrag(float startScroll, float pointerDelta, float maxScroll)
     {
-        var travel = MaxThumbOffset;
-
-        if (travel <= 0 || maxScroll <= 0)
+        if (maxScroll <= 0)
         {
             return 0;
+        }
+
+        var travel = MaxThumbOffset;
+
+        if (travel <= 0)
+        {
+            return Math.Clamp(startScroll, 0, maxScroll);
         }
 
         return Math.Clamp(startScroll + pointerDelta * (maxScroll / travel), 0, maxScroll);
@@ -111,22 +117,22 @@ public static class ScrollbarLayout
     /// <param name="metrics">Receives the geometry on success, otherwise the default value.</param>
     /// <returns><see langword="true"/> when a vertical scrollbar should be painted.</returns>
     /// <remarks>
-    /// The track spans the full padding-box height at the right edge. The thumb
-    /// is proportional to <c>clientHeight / scrollHeight</c> with a 12 px
-    /// minimum, and its offset maps the current scroll position onto the
-    /// available travel. The track does not reserve space for a horizontal
-    /// scrollbar.
+    /// The track spans the padding-box height at the right edge, shortened by
+    /// <see cref="Thickness"/> when a horizontal scrollbar is also present so
+    /// the two tracks do not overlap in the corner. The thumb is proportional to
+    /// <c>clientHeight / scrollHeight</c> with a 12 px minimum, and its offset
+    /// maps the current scroll position onto the available travel.
     /// </remarks>
     public static bool TryGetVertical(LayoutBox box, out ScrollbarMetrics metrics)
     {
-        if (box.ScrollHeight <= box.ClientHeight + OverflowEpsilon
-            || (!box.Style.ShowScrollbars && box.Style.OverflowY is not (Overflow.Scroll or Overflow.Auto)))
+        if (!HasVerticalScrollbar(box))
         {
             metrics = default;
             return false;
         }
 
-        var trackLength = MathF.Max(0, box.PaddingBox.Height);
+        var reserved = HasHorizontalScrollbar(box) ? Thickness : 0;
+        var trackLength = MathF.Max(0, box.PaddingBox.Height - reserved);
         var client = MathF.Max(1, box.ClientHeight);
         var thumbLength = MathF.Min(
             trackLength,
@@ -152,21 +158,21 @@ public static class ScrollbarLayout
     /// <param name="metrics">Receives the geometry on success, otherwise the default value.</param>
     /// <returns><see langword="true"/> when a horizontal scrollbar should be painted.</returns>
     /// <remarks>
-    /// The track spans the full padding-box width at the bottom edge. The thumb
-    /// uses the same 12 px minimum and proportional sizing as
-    /// <see cref="TryGetVertical"/>. The track is not shortened for a vertical
-    /// scrollbar, so the two tracks can overlap in the bottom-right corner.
+    /// The track spans the padding-box width at the bottom edge, shortened by
+    /// <see cref="Thickness"/> when a vertical scrollbar is also present so the
+    /// two tracks do not overlap in the corner. The thumb uses the same 12 px
+    /// minimum and proportional sizing as <see cref="TryGetVertical"/>.
     /// </remarks>
     public static bool TryGetHorizontal(LayoutBox box, out ScrollbarMetrics metrics)
     {
-        if (box.ScrollWidth <= box.ClientWidth + OverflowEpsilon
-            || (!box.Style.ShowScrollbars && box.Style.OverflowX is not (Overflow.Scroll or Overflow.Auto)))
+        if (!HasHorizontalScrollbar(box))
         {
             metrics = default;
             return false;
         }
 
-        var trackLength = MathF.Max(0, box.PaddingBox.Width);
+        var reserved = HasVerticalScrollbar(box) ? Thickness : 0;
+        var trackLength = MathF.Max(0, box.PaddingBox.Width - reserved);
         var client = MathF.Max(1, box.ClientWidth);
         var thumbLength = MathF.Min(
             trackLength,
@@ -185,5 +191,19 @@ public static class ScrollbarLayout
             ThumbLength: thumbLength,
             TrackLength: trackLength);
         return true;
+    }
+
+    private static bool HasVerticalScrollbar(LayoutBox box)
+    {
+        return box.ScrollHeight > box.ClientHeight + OverflowEpsilon
+            && (box.Style.ShowScrollbars
+                || box.Style.OverflowY is Overflow.Scroll or Overflow.Auto);
+    }
+
+    private static bool HasHorizontalScrollbar(LayoutBox box)
+    {
+        return box.ScrollWidth > box.ClientWidth + OverflowEpsilon
+            && (box.Style.ShowScrollbars
+                || box.Style.OverflowX is Overflow.Scroll or Overflow.Auto);
     }
 }
