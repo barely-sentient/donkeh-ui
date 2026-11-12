@@ -64,6 +64,19 @@ public class FlexLayoutTests
     }
 
     [Fact]
+    public void ColumnItemAspectRatioDeterminesItsMainSize()
+    {
+        var (root, a, _, _) = Tree(1);
+        var result = Lay(
+            "#root { display: flex; flex-direction: column; width: 320px; }"
+            + " #a { width: 100%; aspect-ratio: 16 / 9; }",
+            root);
+
+        Assert.Equal(180, TestSupport.Box(result, a).BorderBox.Height, 3);
+        Assert.Equal(180, TestSupport.Box(result, root).BorderBox.Height, 3);
+    }
+
+    [Fact]
     public void FlexGrowSharesTheFreeSpace()
     {
         var (root, a, b, _) = Tree(2);

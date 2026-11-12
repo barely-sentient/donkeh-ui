@@ -831,8 +831,9 @@ public sealed partial class LayoutEngine
     /// <returns>Max-content height including padding and border, in CSS pixels.</returns>
     /// <remarks>
     /// <para>
-    /// A definite style height short-circuits measurement. Otherwise the result
-    /// starts with the box's own text height and adds child contributions:
+    /// A definite style height short-circuits measurement. An auto height with
+    /// <c>aspect-ratio</c> derives the height from the used width. Otherwise the
+    /// result starts with the box's own text height and adds child contributions:
     /// a wrapping row sums its flex lines, a non-wrapping row or table row uses
     /// its tallest child, and a block or column container stacks children with
     /// the main-axis gap.
@@ -878,6 +879,23 @@ public sealed partial class LayoutEngine
                 : resolved + extra;
 
             return MathF.Max(minHeight, MathF.Min(definite, maxHeight));
+        }
+
+        // An auto height with an aspect ratio is fully determined by the width.
+        // Flex column items use this measurement as their main size, so ignoring
+        // it makes a ratio box collapse to its text and overlap the next row.
+        if (style.AspectRatio is { } ratio && ratio > 0)
+        {
+            var margin = style.Margin.Resolve(in context, cbWidth);
+            var specified = style.Width.ResolveOr(in context, cbWidth, float.NaN);
+            var borderWidth = float.IsFinite(specified)
+                ? (style.BoxSizing == BoxSizing.BorderBox
+                    ? specified
+                    : specified + padding.Horizontal + border.Horizontal)
+                : MathF.Max(1, cbWidth - margin.Horizontal);
+
+            var aspectHeight = MathF.Max(0, borderWidth) / ratio;
+            return MathF.Max(minHeight, MathF.Min(aspectHeight, maxHeight));
         }
 
         var content = 0f;
