@@ -17,9 +17,12 @@ public sealed partial class LayoutEngine
     /// <returns>The used content height, including enclosed floats for a BFC root.</returns>
     /// <remarks>
     /// <para>
-    /// The element's own text is laid out before its child boxes, followed by
-    /// runs of adjacent inline-level children. Each inline run occupies a line
-    /// group whose height advances <c>flowY</c>.
+    /// <see cref="IgniteSupportedDomNode.TextContent"/> is a shorthand for a
+    /// leading text run and is laid out before the child boxes. To interleave
+    /// text and elements, put text nodes in <see cref="LayoutBox.Children"/> by
+    /// setting <see cref="IgniteSupportedDomNode.IsTextNode"/>; text nodes then
+    /// participate in document order with adjacent inline children, and each
+    /// inline run occupies a line group whose height advances <c>flowY</c>.
     /// </para>
     /// <para>
     /// Out-of-flow children record a static position for later absolute layout,

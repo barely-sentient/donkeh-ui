@@ -707,6 +707,29 @@ public class BlockLayoutTests
     }
 
     [Fact]
+    public void TextNodesKeepTheirPositionBetweenChildElements()
+    {
+        var root = TestSupport.Node("div", "root");
+        var before = TestSupport.Node("span", "before", "ab");
+        before.IsTextNode = true;
+        var child = TestSupport.Node("span", "child");
+        var after = TestSupport.Node("span", "after", "cd");
+        after.IsTextNode = true;
+        root.Children = [before, child, after];
+
+        var result = Lay(
+            "#root { font-size: 10px; line-height: 20px; width: 200px; }"
+            + " #child { display: inline-block; width: 30px; height: 10px; }",
+            root);
+
+        // The leading text run advances the cursor, so the inline child starts
+        // after it; the trailing text node follows the child rather than being
+        // moved ahead of every element.
+        Assert.Equal(20, TestSupport.Box(result, child).BorderBox.X, 3);
+        Assert.Equal(20, TestSupport.Box(result, root).BorderBox.Height, 3);
+    }
+
+    [Fact]
     public void InlineChildWrapsInsteadOfBeingSqueezedIntoTheRemainder()
     {
         var root = TestSupport.Node("div", "root");
