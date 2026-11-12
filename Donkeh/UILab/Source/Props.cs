@@ -42,7 +42,7 @@ namespace Donkeh.UILab
     /// </example>
     /// <seealso cref="Attr"/>
     /// <seealso cref="ElementNode.WithAttribute(Attr)"/>
-    public sealed class Props
+    public class Props
     {
         /// <summary>Gets or sets the <c>id</c> attribute.</summary>
         public string? Id { get; init; }
@@ -232,5 +232,11 @@ namespace Donkeh.UILab
         /// Gets or sets the handler for the <c>blur</c> event.
         /// </summary>
         public Action? OnBlur { get; init; }
+
+        /// <summary>
+        /// Handler invoked by the host for a <c>canvas</c> element, receiving a
+        /// fresh Silk.NET OpenGL context scoped to that element's bounds.
+        /// </summary>
+        public Delegate? OnCanvasContext { get; init; }
     }
 }

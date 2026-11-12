@@ -202,6 +202,13 @@ namespace Donkeh.UILab
             InternedTagName = NameCache.Get(tagName);
         }
 
+        /// <summary>
+        /// Handler invoked by the host to let a <c>canvas</c> element render
+        /// into its own region using a Silk.NET GL context. <see langword="null"/>
+        /// for elements that are not canvases.
+        /// </summary>
+        public Delegate? CanvasContextHandler { get; set; }
+
         /// <summary>The tag name this element was created with.</summary>
         /// <value>
         /// The original case-preserved tag text, or an empty string when the
@@ -388,6 +395,11 @@ namespace Donkeh.UILab
             if (props.OnBlur is { } onBlur)
             {
                 On("blur", onBlur);
+            }
+
+            if (props.OnCanvasContext is { } canvasContext)
+            {
+                CanvasContextHandler = canvasContext;
             }
         }
 

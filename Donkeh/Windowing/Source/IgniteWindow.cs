@@ -893,7 +893,7 @@ public sealed partial class IgniteWindow : IDisposable
                 ContextProfile.Core,
                 ContextFlags.ForwardCompatible,
                 new APIVersion(3, 3)),
-            PreferredDepthBufferBits = null,
+            PreferredDepthBufferBits = 24,
             PreferredStencilBufferBits = 8
         };
 
@@ -995,6 +995,91 @@ public sealed partial class IgniteWindow : IDisposable
         catch
         {
             // Ignore icon loading failures.
+        }
+    }
+
+    /// <summary>
+    /// Walks the current layout tree and lets every <c>canvas</c> element render
+    /// into its own bounds using a fresh Silk.NET OpenGL context.
+    /// </summary>
+    private void DrawCanvasElements()
+    {
+        if (_layoutResult is null || _gl is null || _window is null)
+        {
+            return;
+        }
+
+        var framebuffer = _window.FramebufferSize;
+        var size = _window.Size;
+        var width = Math.Max(1, size.X);
+        var height = Math.Max(1, size.Y);
+        var dpi = framebuffer.X / (float)width;
+        if (dpi <= 0 || float.IsNaN(dpi))
+        {
+            dpi = 1;
+        }
+
+        foreach (var box in EnumerateLayoutBoxes(_layoutResult.Root))
+        {
+            if (box.Node is not ElementNode element
+                || !string.Equals(element.Tag, "canvas", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var handler = element.CanvasContextHandler as Action<GL>;
+            if (handler is null)
+            {
+                continue;
+            }
+
+            var rect = box.BorderBox;
+            var px = (int)(rect.X * dpi);
+            var py = (int)(framebuffer.Y - (rect.Y + rect.Height) * dpi);
+            var pw = (int)(rect.Width * dpi);
+            var ph = (int)(rect.Height * dpi);
+
+            if (pw <= 0 || ph <= 0)
+            {
+                continue;
+            }
+
+            _gl.Viewport(px, py, (uint)pw, (uint)ph);
+            _gl.Enable(EnableCap.ScissorTest);
+            _gl.Scissor(px, py, (uint)pw, (uint)ph);
+            _gl.Enable(EnableCap.DepthTest);
+
+            var silk = GL.GetApi(_window);
+            try { handler(silk); }
+            catch { }
+
+            _gl.Disable(EnableCap.ScissorTest);
+            _gl.Disable(EnableCap.DepthTest);
+        }
+
+        _gl.Viewport(0, 0, (uint)Math.Max(1, framebuffer.X), (uint)Math.Max(1, framebuffer.Y));
+    }
+
+    /// <summary>Depth-first enumeration of every box in a layout tree.</summary>
+    private static IEnumerable<LayoutBox> EnumerateLayoutBoxes(LayoutBox? root)
+    {
+        if (root is null)
+        {
+            yield break;
+        }
+
+        var stack = new Stack<LayoutBox>();
+        stack.Push(root);
+
+        while (stack.Count > 0)
+        {
+            var box = stack.Pop();
+            yield return box;
+
+            for (var i = box.Children.Count - 1; i >= 0; i--)
+            {
+                stack.Push(box.Children[i]);
+            }
         }
     }
 
@@ -1302,6 +1387,10 @@ public sealed partial class IgniteWindow : IDisposable
                 _renderer.Render(_layoutResult, _devToolsLayout);
             }
         }
+
+        // Canvas callbacks own their element's pixels, so run them after the
+        // regular display list (including the canvas background) has painted.
+        DrawCanvasElements();
 
         LastRenderMilliseconds = Stopwatch.GetElapsedTime(renderStart).TotalMilliseconds;
 
