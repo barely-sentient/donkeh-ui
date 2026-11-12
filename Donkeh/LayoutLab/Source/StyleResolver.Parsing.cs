@@ -2013,7 +2013,7 @@ public sealed partial class StyleResolver
                     operations.Add(new TransformOperation(
                         TransformKind.Scale,
                         CssValueParser.ParseLength(parts[0]),
-                        CssLength.Auto,
+                        CssLength.Number(1),
                         0,
                         Matrix3x2.Identity));
                     break;

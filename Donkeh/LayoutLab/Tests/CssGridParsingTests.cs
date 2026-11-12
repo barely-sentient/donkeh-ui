@@ -234,13 +234,45 @@ public class CssGridParsingTests
     }
 
     [Fact]
-    public void DotAndNoneCellsAreSkipped()
+    public void DotRunsAreNullCellsAndNoneIsAnAreaName()
     {
-        var areas = GridTemplateAreas.Parse("\". a\" \"none a\"");
+        var areas = GridTemplateAreas.Parse("\"... a\" \"none a\"");
 
         Assert.NotNull(areas);
-        Assert.Single(areas!.Areas);
+        Assert.Equal(2, areas!.Areas.Count);
         Assert.Equal(new GridAreaRect(0, 2, 1, 2), areas.Areas["a"]);
+        Assert.Equal(new GridAreaRect(1, 2, 0, 1), areas.Areas["none"]);
+    }
+
+    [Fact]
+    public void GridTrackListConstructorCreatesOneNameSlotPerLine()
+    {
+        var list = new GridTrackList([GridTrack.Fixed(CssLength.Px(10)), GridTrack.Auto]);
+
+        Assert.Equal(3, list.LineNames.Length);
+        Assert.All(list.LineNames, Assert.Empty);
+    }
+
+    [Fact]
+    public void MinMaxWithAnIntrinsicMaximumKeepsItsKind()
+    {
+        var auto = GridTrackList.Parse("minmax(10px, auto)").Tracks[0];
+        Assert.Equal(GridTrackKind.Auto, auto.Kind);
+        Assert.Equal(10, auto.Minimum.Resolve(new LengthContext()), 3);
+
+        var min = GridTrackList.Parse("minmax(10px, min-content)").Tracks[0];
+        Assert.Equal(GridTrackKind.MinContent, min.Kind);
+
+        var max = GridTrackList.Parse("minmax(10px, max-content)").Tracks[0];
+        Assert.Equal(GridTrackKind.MaxContent, max.Kind);
+    }
+
+    [Fact]
+    public void InvalidRepeatDoesNotProduceAZeroTrack()
+    {
+        var list = GridTrackList.Parse("repeat(0, 10px)");
+
+        Assert.Same(GridTrackList.Empty, list);
     }
 
     [Fact]

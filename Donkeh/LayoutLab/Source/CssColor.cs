@@ -356,12 +356,12 @@ public static class CssColor
     /// <param name="color">Receives the packed colour on success.</param>
     /// <returns><see langword="true"/> when the hue, saturation and lightness were valid.</returns>
     /// <remarks>
-    /// The hue may carry a <c>deg</c> suffix and wraps modulo 360. Saturation
-    /// and lightness are read as percentages (a trailing <c>%</c> is optional)
-    /// and clamped to 0–100. Conversion uses the standard HSL-to-RGB algorithm
-    /// with <c>q</c>/<c>p</c> helper values; the optional fourth component is
-    /// alpha. <c>rad</c>, <c>grad</c> and <c>turn</c> hue units are not
-    /// supported and fall back to the numeric prefix.
+    /// The hue may carry a <c>deg</c>, <c>rad</c>, <c>grad</c> or <c>turn</c>
+    /// suffix and wraps modulo 360. Saturation and lightness are read as
+    /// percentages (a trailing <c>%</c> is optional) and clamped to 0–100.
+    /// Conversion uses the standard HSL-to-RGB algorithm with <c>q</c>/<c>p</c>
+    /// helper values; the optional fourth component is alpha. Malformed
+    /// components are rejected rather than treated as zero.
     /// </remarks>
     private static bool TryParseHsl(string arguments, out uint color)
     {
@@ -377,12 +377,8 @@ public static class CssColor
             return false;
         }
 
-        var hueText = pieces[0];
-        var hue = hueText.EndsWith("deg", StringComparison.OrdinalIgnoreCase)
-            ? CssValueParser.ParseNumber(hueText[..^3])
-            : CssValueParser.ParseNumber(hueText);
-
-        if (!TryPercent(pieces[1], out var saturation)
+        if (!TryParseHue(pieces[0], out var hue)
+            || !TryPercent(pieces[1], out var saturation)
             || !TryPercent(pieces[2], out var lightness))
         {
             return false;
@@ -428,20 +424,27 @@ public static class CssColor
     /// <summary>Parses one <c>rgb()</c> channel, accepting a percentage or a number.</summary>
     /// <param name="text">Channel text, optionally suffixed with <c>%</c>.</param>
     /// <param name="value">Receives the channel in the range 0–255.</param>
-    /// <returns>Always <see langword="true"/>; invalid text is parsed as zero.</returns>
-    /// <remarks>
-    /// Percentages are multiplied by 2.55. The method is deliberately lenient
-    /// because the surrounding declaration is validated by the CSS parser.
-    /// </remarks>
+    /// <returns><see langword="true"/> when the text is a valid number or percentage.</returns>
+    /// <remarks>Percentages are multiplied by 2.55 and both forms are clamped to 0–255.</remarks>
     private static bool TryComponent(string text, out float value)
     {
         if (text.EndsWith('%'))
         {
-            value = Math.Clamp(CssValueParser.ParseNumber(text[..^1]) * 2.55f, 0, 255);
+            if (!TryNumber(text[..^1], out var percent))
+            {
+                value = 0;
+                return false;
+            }
+
+            value = Math.Clamp(percent * 2.55f, 0, 255);
             return true;
         }
 
-        value = CssValueParser.ParseNumber(text);
+        if (!TryNumber(text, out value))
+        {
+            return false;
+        }
+
         value = Math.Clamp(value, 0, 255);
         return true;
     }
@@ -449,34 +452,100 @@ public static class CssColor
     /// <summary>Parses an HSL saturation or lightness component.</summary>
     /// <param name="text">Component text, optionally suffixed with <c>%</c>.</param>
     /// <param name="value">Receives the percentage value, not normalised to 0–1.</param>
-    /// <returns>Always <see langword="true"/>; invalid text is parsed as zero.</returns>
+    /// <returns><see langword="true"/> when the text is a valid number or percentage.</returns>
     /// <remarks>Clamping happens later in <see cref="TryParseHsl(string, out uint)"/>.</remarks>
     private static bool TryPercent(string text, out float value)
     {
-        value = text.EndsWith('%')
-            ? CssValueParser.ParseNumber(text[..^1])
-            : CssValueParser.ParseNumber(text);
-
-        return true;
+        return TryNumber(text.EndsWith('%') ? text[..^1] : text, out value);
     }
 
     /// <summary>Parses an alpha component into the 0–255 range.</summary>
     /// <param name="text">Alpha text, optionally suffixed with <c>%</c>.</param>
     /// <param name="alpha">Receives the alpha scaled to 0–255.</param>
-    /// <returns>Always <see langword="true"/>; invalid text is parsed as zero.</returns>
+    /// <returns><see langword="true"/> when the text is a valid number or percentage.</returns>
     /// <remarks>
     /// A bare number is treated as a 0-1 fraction and multiplied by 255; a
-    /// percentage is scaled by 2.55. Invalid text falls back to an opaque
-    /// alpha because <see cref="CssValueParser.ParseNumber(string?, float)"/> is
-    /// called with a fallback of 1.
+    /// percentage is scaled by 2.55. Malformed text is rejected rather than
+    /// silently becoming opaque.
     /// </remarks>
     private static bool TryAlpha(string text, out float alpha)
     {
-        alpha = text.EndsWith('%')
-            ? CssValueParser.ParseNumber(text[..^1]) * 2.55f
-            : CssValueParser.ParseNumber(text, 1) * 255f;
+        var percent = text.EndsWith('%');
 
-        alpha = Math.Clamp(alpha, 0, 255);
+        if (!TryNumber(percent ? text[..^1] : text, out var value))
+        {
+            alpha = 0;
+            return false;
+        }
+
+        alpha = Math.Clamp(percent ? value * 2.55f : value * 255f, 0, 255);
+        return true;
+    }
+
+    /// <summary>Parses an HSL hue into degrees, accepting the four CSS angle units.</summary>
+    /// <param name="text">Hue text such as <c>120deg</c>, <c>2rad</c>, <c>100grad</c> or <c>0.5turn</c>.</param>
+    /// <param name="degrees">Receives the hue in degrees.</param>
+    /// <returns><see langword="true"/> when the text is a valid angle or bare number.</returns>
+    private static bool TryParseHue(string text, out float degrees)
+    {
+        float scale;
+
+        // "grad" must be tested before "rad": 100grad also ends with "rad".
+        if (text.EndsWith("grad", StringComparison.OrdinalIgnoreCase))
+        {
+            text = text[..^4];
+            scale = 0.9f;
+        }
+        else if (text.EndsWith("rad", StringComparison.OrdinalIgnoreCase))
+        {
+            text = text[..^3];
+            scale = 180f / MathF.PI;
+        }
+        else if (text.EndsWith("turn", StringComparison.OrdinalIgnoreCase))
+        {
+            text = text[..^4];
+            scale = 360f;
+        }
+        else if (text.EndsWith("deg", StringComparison.OrdinalIgnoreCase))
+        {
+            text = text[..^3];
+            scale = 1f;
+        }
+        else
+        {
+            scale = 1f;
+        }
+
+        if (!TryNumber(text, out var value))
+        {
+            degrees = 0;
+            return false;
+        }
+
+        degrees = value * scale;
+        return true;
+    }
+
+    /// <summary>Parses a single unitless number token.</summary>
+    /// <param name="text">Candidate text, which must contain exactly one number token.</param>
+    /// <param name="value">Receives the parsed number.</param>
+    /// <returns><see langword="true"/> when the text is exactly one unitless number.</returns>
+    /// <remarks>
+    /// Unlike <see cref="CssValueParser.ParseNumber(string?, float)"/>, this
+    /// rejects dimensions, percentages and trailing tokens so a malformed colour
+    /// component cannot silently become zero.
+    /// </remarks>
+    private static bool TryNumber(string text, out float value)
+    {
+        value = 0;
+        var tokens = CssValueTokenizer.Tokenize(text.Trim());
+
+        if (tokens.Length != 1 || tokens[0].Kind != CssValueTokenKind.Number)
+        {
+            return false;
+        }
+
+        value = tokens[0].Number;
         return true;
     }
 

@@ -121,7 +121,12 @@ public class CssColorTests
     [Theory]
     [InlineData("rgb(1, 2)")]
     [InlineData("rgb()")]
-    public void RgbWithTooFewComponentsIsRejected(string input)
+    [InlineData("rgb(nope, 0, 0)")]
+    [InlineData("rgb(10px, 0, 0)")]
+    [InlineData("rgb(0, 0, 0, nope)")]
+    [InlineData("hsl(nope, 100%, 50%)")]
+    [InlineData("hsl(0, 100%, 50%, nope)")]
+    public void MalformedColorComponentsAreRejected(string input)
     {
         Assert.False(CssColor.TryParse(input, CssColor.Black, out _));
     }
@@ -131,6 +136,8 @@ public class CssColorTests
     [InlineData("hsl(120 100% 50%)", 0xFF00FF00u)]
     [InlineData("hsl(240, 100%, 50%)", 0xFF0000FFu)]
     [InlineData("hsl(360deg 100% 50%)", 0xFFFF0000u)]
+    [InlineData("hsl(0.5turn 100% 50%)", 0xFF00FFFFu)]
+    [InlineData("hsl(200grad 100% 50%)", 0xFF00FFFFu)]
     [InlineData("hsl(-120, 100%, 50%)", 0xFF0000FFu)]
     [InlineData("hsla(240, 100%, 50%, 0.5)", 0x7F0000FFu)]
     [InlineData("hsl(0 0% 50%)", 0xFF808080u)]

@@ -167,6 +167,13 @@ public class CssValueParserTests
     }
 
     [Fact]
+    public void ParseLengthRejectsTrailingTokensAfterAFunction()
+    {
+        Assert.True(CssValueParser.ParseLength("calc(1px) garbage").IsAuto);
+        Assert.True(CssValueParser.ParseLength("min(1px, 2px) 3px").IsAuto);
+    }
+
+    [Fact]
     public void CalcCanMixPercentagesAndLengths()
     {
         var length = CssValueParser.ParseLength("calc(100% - 20px)");

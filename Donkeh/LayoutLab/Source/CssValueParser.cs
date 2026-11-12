@@ -95,6 +95,10 @@ public static class CssValueParser
             {
                 return new CssLength(0, LengthUnit.Number, expression);
             }
+
+            // A single length cannot be followed by more tokens. Returning Auto
+            // here avoids silently discarding trailing garbage after calc(...).
+            return CssLength.Auto;
         }
 
         return LengthFromToken(source, tokens, 0);

@@ -33,12 +33,7 @@ internal enum CssValueTokenKind : byte
     OpenParen,
     /// <summary>A <c>)</c>.</summary>
     CloseParen,
-    /// <summary>
-    /// A <c>:</c> token. Declared for completeness, but the tokenizer currently
-    /// emits <c>:</c> as a generic <see cref="Delimiter"/>.
-    /// </summary>
-    Colon,
-    /// <summary>Any other single character, including <c>!</c>, <c>;</c> and unhandled symbols.</summary>
+    /// <summary>Any other single character, including <c>:</c>, <c>!</c>, <c>;</c> and unhandled symbols.</summary>
     Delimiter
 }
 

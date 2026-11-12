@@ -125,7 +125,7 @@ public class CssTransformTests
     }
 
     [Fact]
-    public void OperationsAreAppliedInListOrder()
+    public void OperationsAreAppliedRightToLeft()
     {
         var spec = Spec(
             new TransformOperation(TransformKind.Translate, CssLength.Px(10), CssLength.Px(20), 0, Matrix3x2.Identity),
@@ -134,8 +134,21 @@ public class CssTransformTests
         var matrix = spec.Resolve(100, 100, Context);
         var transformed = Vector2.Transform(new Vector2(1, 1), matrix);
 
-        Assert.Equal(22, transformed.X, 3);
-        Assert.Equal(42, transformed.Y, 3);
+        // CSS applies the rightmost function first: scale (1,1) to (2,2),
+        // then translate by (10,20).
+        Assert.Equal(12, transformed.X, 3);
+        Assert.Equal(22, transformed.Y, 3);
+    }
+
+    [Fact]
+    public void ScaleXOnlyScalesTheHorizontalAxis()
+    {
+        var spec = TestSupport.Style("transform: scaleX(2)").Transform;
+
+        Assert.NotNull(spec);
+        var matrix = spec!.Resolve(100, 100, Context);
+        Assert.Equal(2, matrix.M11, 3);
+        Assert.Equal(1, matrix.M22, 3);
     }
 
     [Fact]

@@ -9,10 +9,10 @@ namespace Donkeh.LayoutLab;
 /// <remarks>
 /// <para>
 /// The operations are stored in source order.
-/// <see cref="Resolve(float, float, in LengthContext)"/> post-multiplies each
-/// operation's matrix onto the accumulated matrix, so with
-/// <see cref="System.Numerics"/>' row-vector convention the first function in
-/// the list is applied to a point first.
+/// <see cref="Resolve(float, float, in LengthContext)"/> pre-multiplies each
+/// operation's matrix onto the accumulated matrix, so under the row-vector
+/// convention the rightmost function in the list is applied to a point first,
+/// matching CSS.
 /// </para>
 /// <para>
 /// The class has no mutators, but <see cref="Operations"/> is exposed as a
@@ -66,7 +66,7 @@ public sealed class TransformSpec
 
         foreach (var operation in Operations)
         {
-            matrix *= operation.ToMatrix(width, height, in context);
+            matrix = operation.ToMatrix(width, height, in context) * matrix;
         }
 
         return matrix;
@@ -126,9 +126,9 @@ public readonly record struct TransformOperation(
     /// unchanged.
     /// </para>
     /// <para>
-    /// The parser also stores <c>scaleX()</c> with an auto Y, so it currently
-    /// resolves to a uniform scale on both axes rather than horizontal-only
-    /// scaling. <c>scaleY()</c> sets an explicit X of 1 and is unaffected.
+    /// <c>scaleX()</c> stores an explicit y factor of 1 and <c>scaleY()</c> an
+    /// explicit x factor of 1, so each scales a single axis. Only the
+    /// single-argument <c>scale()</c> form uses an auto y, which copies x.
     /// </para>
     /// <para>
     /// An unrecognised kind returns <see cref="Matrix3x2.Identity"/>. Invalid

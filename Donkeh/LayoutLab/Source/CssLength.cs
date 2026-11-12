@@ -357,8 +357,9 @@ public readonly struct CssLength
     /// Use this instead of testing <see cref="IsAuto"/> and then calling
     /// <see cref="Resolve(in LengthContext)"/>: it also covers <c>fr</c>, the
     /// intrinsic keywords and unresolved percentages. A sentinel unit returns
-    /// <paramref name="fallback"/> before any expression is evaluated; otherwise
-    /// the expression tree, when present, resolves normally.
+    /// <paramref name="fallback"/> before any expression is evaluated. When the
+    /// basis is not finite, an expression that contains a percentage also returns
+    /// the fallback instead of silently dropping the percentage term.
     /// </remarks>
     public float ResolveOr(in LengthContext context, float percentBasis, float fallback)
     {
@@ -368,8 +369,12 @@ public readonly struct CssLength
             return fallback;
         }
 
-        if (Unit == LengthUnit.Percent && !float.IsFinite(percentBasis))
+        if (!float.IsFinite(percentBasis)
+            && (Unit == LengthUnit.Percent || Expression?.HasPercent == true))
         {
+            // An expression such as calc(100% - 10px) is just as indefinite as
+            // a literal percentage when the basis is unknown; resolving it would
+            // silently drop the percentage term.
             return fallback;
         }
 
@@ -377,19 +382,13 @@ public readonly struct CssLength
     }
 
     /// <summary>Gets a value indicating whether this length resolves to a concrete pixel value.</summary>
-    /// <param name="context">Resolution context; reserved for future context-dependent units.</param>
     /// <param name="percentBasis">Basis in CSS pixels for a percentage length.</param>
     /// <returns>
     /// <see langword="false"/> for <c>auto</c>, <c>fr</c> and the intrinsic
-    /// keywords, and for a percentage when <paramref name="percentBasis"/> is
-    /// not finite; otherwise <see langword="true"/>.
+    /// keywords, and for a percentage (literal or inside an expression) when
+    /// <paramref name="percentBasis"/> is not finite; otherwise <see langword="true"/>.
     /// </returns>
-    /// <remarks>
-    /// The <paramref name="context"/> parameter is currently unused because
-    /// every supported unit other than percentages is unconditional, but it is
-    /// part of the signature so callers do not need a second overload later.
-    /// </remarks>
-    public bool IsDefinite(in LengthContext context, float percentBasis)
+    public bool IsDefinite(float percentBasis)
     {
         if (Unit is LengthUnit.Auto or LengthUnit.MinContent or LengthUnit.MaxContent
             or LengthUnit.FitContent or LengthUnit.Stretch or LengthUnit.Fr)
@@ -397,7 +396,8 @@ public readonly struct CssLength
             return false;
         }
 
-        return Unit != LengthUnit.Percent || float.IsFinite(percentBasis);
+        return float.IsFinite(percentBasis)
+            || (Unit != LengthUnit.Percent && Expression?.HasPercent != true);
     }
 
     /// <summary>Returns a short CSS-like textual form of this length, for diagnostics.</summary>
@@ -422,6 +422,10 @@ public readonly struct CssLength
             LengthUnit.Rem => $"{Value:0.##}rem",
             LengthUnit.Fr => $"{Value:0.##}fr",
             LengthUnit.Number => $"{Value:0.##}",
+            LengthUnit.MinContent => "min-content",
+            LengthUnit.MaxContent => "max-content",
+            LengthUnit.FitContent => "fit-content",
+            LengthUnit.Stretch => "stretch",
             _ => $"{Value:0.##}{Unit.ToString().ToLowerInvariant()}"
         };
     }
@@ -453,6 +457,13 @@ public abstract class CssExpression
     /// </param>
     /// <returns>The computed value in CSS pixels.</returns>
     public abstract float Resolve(in LengthContext context);
+
+    /// <summary>
+    /// Gets a value indicating whether the expression depends on a percentage
+    /// basis. Used by <see cref="CssLength.ResolveOr(in LengthContext, float, float)"/>
+    /// to return its fallback when the basis is indefinite.
+    /// </summary>
+    public abstract bool HasPercent { get; }
 }
 
 /// <summary>
@@ -469,6 +480,9 @@ internal sealed class CssLiteralExpression : CssExpression
 
     /// <inheritdoc/>
     public override float Resolve(in LengthContext context) => _length.Resolve(in context);
+
+    /// <inheritdoc/>
+    public override bool HasPercent => _length.Unit == LengthUnit.Percent;
 }
 
 /// <summary>
@@ -498,6 +512,9 @@ internal sealed class CssUnaryExpression : CssExpression
         var value = _operand.Resolve(in context);
         return _negate ? -value : value;
     }
+
+    /// <inheritdoc/>
+    public override bool HasPercent => _operand.HasPercent;
 }
 
 /// <summary>
@@ -541,6 +558,9 @@ internal sealed class CssBinaryExpression : CssExpression
             _ => 0
         };
     }
+
+    /// <inheritdoc/>
+    public override bool HasPercent => _left.HasPercent || _right.HasPercent;
 }
 
 /// <summary>Identifies which CSS sizing function an expression node represents.</summary>
@@ -586,6 +606,23 @@ internal sealed class CssFunctionExpression : CssExpression
             CssFunctionKind.Clamp => Clamp(in context),
             _ => 0
         };
+    }
+
+    /// <inheritdoc/>
+    public override bool HasPercent
+    {
+        get
+        {
+            for (var i = 0; i < _arguments.Length; i++)
+            {
+                if (_arguments[i].HasPercent)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
     }
 
     /// <summary>Resolves the smallest argument, or zero for an empty list.</summary>

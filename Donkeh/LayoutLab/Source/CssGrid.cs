@@ -159,10 +159,11 @@ public sealed class GridTemplateAreas
     /// </returns>
     /// <remarks>
     /// <para>
-    /// Each quoted string is one row and is split on whitespace. The token
-    /// <c>.</c> (a single dot) and <c>none</c> are placeholders and do not
-    /// create areas. Every other token is an area name; when a name occurs in
-    /// several cells its bounding box is the union of those cells.
+    /// Each quoted string is one row and is split on whitespace. A cell made
+    /// entirely of dots (for example <c>.</c> or <c>...</c>) is a null cell and
+    /// does not create an area. The keyword <c>none</c> is only special as the
+    /// whole-property value; inside a quoted row it is an area name. When a name
+    /// occurs in several cells its bounding box is the union of those cells.
     /// </para>
     /// <para>
     /// Rows may be ragged: the column count is the widest row and missing
@@ -174,7 +175,8 @@ public sealed class GridTemplateAreas
     /// </remarks>
     public static GridTemplateAreas? Parse(string? value)
     {
-        if (string.IsNullOrWhiteSpace(value))
+        if (string.IsNullOrWhiteSpace(value)
+            || value.Trim().Equals("none", StringComparison.OrdinalIgnoreCase))
         {
             return null;
         }
@@ -228,7 +230,10 @@ public sealed class GridTemplateAreas
             {
                 var name = row[c];
 
-                if (name is "." or "none" || name.Length == 0)
+                // A run of one or more dots is a null cell. The keyword none is
+                // only special as the whole-property value; inside a quoted row
+                // it is an ordinary area name.
+                if (name.Length == 0 || IsNullCell(name))
                 {
                     continue;
                 }
@@ -262,6 +267,20 @@ public sealed class GridTemplateAreas
 
         return new GridTemplateAreas(areas, rows.Count, Math.Max(1, columnCount));
     }
+
+    /// <summary>Returns whether a cell token is made entirely of dots.</summary>
+    private static bool IsNullCell(string name)
+    {
+        for (var i = 0; i < name.Length; i++)
+        {
+            if (name[i] != '.')
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 }
 
 /// <summary>A parsed <c>grid-template-*</c> or <c>grid-auto-*</c> track list.</summary>
@@ -276,8 +295,7 @@ public sealed class GridTemplateAreas
 /// Parsed lists expose <see cref="LineNames"/> with exactly
 /// <see cref="Count"/> + 1 entries; index <c>i</c> names the line before track
 /// <c>i</c> and the final entry names the line after the last track. The
-/// public constructor does not synthesise names, so instances built directly
-/// can have an empty name array.
+/// public constructor synthesises an empty name list for each line.
 /// </para>
 /// </remarks>
 public sealed class GridTrackList
@@ -288,13 +306,26 @@ public sealed class GridTrackList
     /// <summary>Initialises a track list with no auto-repeat placeholder.</summary>
     /// <param name="tracks">Expanded track sizes.</param>
     /// <remarks>
-    /// <see cref="LineNames"/> is empty for instances created with this
-    /// constructor because no line-name blocks are provided; use
-    /// <see cref="Parse(string?)"/> for a fully populated list.
+    /// No line names are provided, so <see cref="LineNames"/> contains
+    /// <c>tracks.Length + 1</c> empty slots. Use <see cref="Parse(string?)"/>
+    /// for a list with named lines.
     /// </remarks>
     public GridTrackList(GridTrack[] tracks)
-        : this(tracks, [], -1, [], [], false)
+        : this(tracks, CreateEmptyLineNames(tracks.Length), -1, [], [], false)
     {
+    }
+
+    /// <summary>Creates the <c>Count + 1</c> empty name slots required by the invariant.</summary>
+    private static string[][] CreateEmptyLineNames(int trackCount)
+    {
+        var names = new string[trackCount + 1][];
+
+        for (var i = 0; i < names.Length; i++)
+        {
+            names[i] = [];
+        }
+
+        return names;
     }
 
     /// <summary>Initialises a track list including auto-repeat metadata.</summary>
@@ -380,10 +411,10 @@ public sealed class GridTrackList
     /// </para>
     /// <para>
     /// A counted <c>repeat()</c> is expanded inline; a count outside 1–1024 is
-    /// not expanded. Only the first <c>auto-fill</c>/<c>auto-fit</c> repeat is
-    /// honoured, because CSS permits at most one; later ones fall through to
-    /// <see cref="ParseTrack(string)"/> and become a zero-valued fixed track.
-    /// <c>subgrid</c> is accepted as an empty list rather than implemented.
+    /// ignored. Only the first <c>auto-fill</c>/<c>auto-fit</c> repeat is
+    /// honoured, because CSS permits at most one; later or malformed repeats are
+    /// invalid and contribute no track. <c>subgrid</c> is accepted as an empty
+    /// list rather than implemented.
     /// </para>
     /// </remarks>
     public static GridTrackList Parse(string? value)
@@ -707,18 +738,31 @@ public sealed class GridTrackList
                 return new GridTrack(GridTrackKind.Fr, minimum, maximum, maximum.Value, 0);
             }
 
-            return new GridTrack(
-                maximum.IsPercent ? GridTrackKind.Percent : GridTrackKind.Fixed,
-                minimum,
-                maximum,
-                0,
-                0);
+            // Infer the kind from the maximum's unit so an intrinsic maximum
+            // does not decay into a fixed track and collapse to the minimum.
+            var kind = maximum.Unit switch
+            {
+                LengthUnit.Percent => GridTrackKind.Percent,
+                LengthUnit.MinContent => GridTrackKind.MinContent,
+                LengthUnit.MaxContent => GridTrackKind.MaxContent,
+                LengthUnit.Auto => GridTrackKind.Auto,
+                _ => GridTrackKind.Fixed
+            };
+
+            return new GridTrack(kind, minimum, maximum, 0, 0);
         }
 
         if (text.StartsWith("fit-content(", StringComparison.OrdinalIgnoreCase) && text.EndsWith(')'))
         {
             var limit = CssValueParser.ParseLength(text[12..^1].Trim());
             return new GridTrack(GridTrackKind.FitContent, CssLength.Auto, limit, 0, limit.Value);
+        }
+
+        // An unrecognised function (a malformed or second repeat(), for example)
+        // is invalid rather than a zero-length fixed track.
+        if (text.Contains('(') && text.EndsWith(')'))
+        {
+            return null;
         }
 
         var length = CssValueParser.ParseLength(text);

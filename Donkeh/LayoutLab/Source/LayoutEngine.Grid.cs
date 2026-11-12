@@ -58,11 +58,11 @@ public sealed partial class LayoutEngine
     /// axes before sizing.
     /// </para>
     /// <para>
-    /// Returns zero when there are no in-flow children, even if the template
-    /// declares explicit rows; a grid container with no items contributes no
-    /// height here. Children come from a per-depth pooled list that is released
-    /// in a <see langword="finally"/> block, so the method allocates only the
-    /// track and contribution arrays.
+    /// With no in-flow children the explicit row template is still sized, so a
+    /// grid that declares tracks contributes their height (plus gaps). Children
+    /// come from a per-depth pooled list that is released in a
+    /// <see langword="finally"/> block, so the method allocates only the track
+    /// and contribution arrays.
     /// </para>
     /// </remarks>
     private float LayoutGrid(LayoutBox box, Rect content, float? definiteContentHeight)
@@ -73,11 +73,6 @@ public sealed partial class LayoutEngine
         try
         {
         StableSortByOrder(items);
-
-        if (items.Count == 0)
-        {
-            return 0;
-        }
 
         var context = CreateContext(style);
         var columnGap = ResolveGap(style.ColumnGap, in context, content.Width);
@@ -96,6 +91,26 @@ public sealed partial class LayoutEngine
             rowGap,
             in context,
             items.Count);
+
+        if (items.Count == 0)
+        {
+            // Explicit rows still contribute height without in-flow items.
+            var emptyContributions = new float[rowExpansion.Tracks.Length];
+            var emptySizes = ResolveTrackSizes(
+                rowExpansion.Tracks,
+                definiteContentHeight ?? float.NaN,
+                emptyContributions,
+                rowGap,
+                in context);
+            var emptyHeight = rowGap * Math.Max(0, emptySizes.Length - 1);
+
+            for (var i = 0; i < emptySizes.Length; i++)
+            {
+                emptyHeight += emptySizes[i];
+            }
+
+            return MathF.Max(0, emptyHeight);
+        }
 
         var columnTracks = columnExpansion.Tracks;
         var rowTracks = rowExpansion.Tracks;
@@ -438,8 +453,8 @@ public sealed partial class LayoutEngine
         // fallback instead of only checking StartAuto.
         for (var i = 0; i < count; i++)
         {
-            var columnSpan = Math.Max(1, columns[i].Span);
-            var rowSpan = Math.Max(1, rows[i].Span);
+            var columnSpan = PlacementSpan(columns[i], columnCount);
+            var rowSpan = PlacementSpan(rows[i], rowCount);
             var column = ResolveGridLine(columns[i], columnSpan, columnCount, columns[i].StartAuto);
             var row = ResolveGridLine(rows[i], rowSpan, rowCount, rows[i].StartAuto);
 
@@ -461,15 +476,15 @@ public sealed partial class LayoutEngine
             if (placed[i]
                 || ResolveGridLine(
                     columns[i],
-                    Math.Max(1, columns[i].Span),
+                    PlacementSpan(columns[i], columnCount),
                     columnCount,
                     columns[i].StartAuto) >= 0)
             {
                 continue;
             }
 
-            var rowSpan = Math.Max(1, rows[i].Span);
-            var columnSpan = Math.Max(1, columns[i].Span);
+            var rowSpan = PlacementSpan(rows[i], rowCount);
+            var columnSpan = PlacementSpan(columns[i], columnCount);
             var row = ResolveGridLine(rows[i], rowSpan, rowCount, rows[i].StartAuto);
 
             if (row < 0)
@@ -502,8 +517,8 @@ public sealed partial class LayoutEngine
                 continue;
             }
 
-            var rowSpan = Math.Max(1, rows[i].Span);
-            var columnSpan = Math.Max(1, columns[i].Span);
+            var rowSpan = PlacementSpan(rows[i], rowCount);
+            var columnSpan = PlacementSpan(columns[i], columnCount);
             var definiteColumn = ResolveGridLine(
                 columns[i],
                 columnSpan,
@@ -633,20 +648,32 @@ public sealed partial class LayoutEngine
             {
                 var areaStart = columnAxis ? startArea.ColumnStart : startArea.RowStart;
                 var areaEnd = columnAxis ? startArea.ColumnEnd : startArea.RowEnd;
-                return new GridPlacement(
-                    areaStart + 1,
-                    areaEnd + 1,
-                    false,
-                    false,
-                    Math.Max(1, areaEnd - areaStart));
-            }
-
-            var index = FindLine(lineNames, startName, 0);
-
-            if (index >= 0)
-            {
-                startLine = index + 1;
+                startLine = areaStart + 1;
                 startFound = true;
+
+                // The area supplies both bounds only when the end side is auto
+                // and no span was requested. An explicit end line (or an end
+                // name resolved below) must not be discarded.
+                if (placement.EndAuto && placement.End == 0 && placement.SpanCount == 0
+                    && placement.EndName is not { Length: > 0 })
+                {
+                    return new GridPlacement(
+                        areaStart + 1,
+                        areaEnd + 1,
+                        false,
+                        false,
+                        Math.Max(1, areaEnd - areaStart));
+                }
+            }
+            else
+            {
+                var index = FindLine(lineNames, startName, 0);
+
+                if (index >= 0)
+                {
+                    startLine = index + 1;
+                    startFound = true;
+                }
             }
         }
 
@@ -789,6 +816,31 @@ public sealed partial class LayoutEngine
         return NormalizeGridLine(placement.Start, trackCount);
     }
 
+    /// <summary>Resolves how many tracks a placement covers, including negative end lines.</summary>
+    /// <param name="placement">Placement for one axis.</param>
+    /// <param name="trackCount">Current track count, used to normalise negative lines.</param>
+    /// <returns>The span in tracks, at least one.</returns>
+    /// <remarks>
+    /// Raw line numbers cannot be subtracted before normalisation: <c>1 / -1</c>
+    /// would otherwise produce a negative distance and collapse to one track.
+    /// </remarks>
+    private static int PlacementSpan(GridPlacement placement, int trackCount)
+    {
+        if (placement.SpanCount > 0 && (placement.StartAuto || placement.EndAuto))
+        {
+            return Math.Max(1, placement.SpanCount);
+        }
+
+        if (placement.StartAuto || placement.EndAuto)
+        {
+            return 1;
+        }
+
+        var start = NormalizeGridLine(placement.Start, trackCount);
+        var end = NormalizeGridLine(placement.End, trackCount);
+        return Math.Max(1, end - start);
+    }
+
     /// <summary>Converts a CSS grid line number to a zero-based track index.</summary>
     /// <param name="line">
     /// 1-based line number; negative counts backwards from the end; 0 means auto.
@@ -800,10 +852,9 @@ public sealed partial class LayoutEngine
     /// </returns>
     /// <remarks>
     /// Line 1 maps to track 0 and line <c>trackCount + 1</c> maps to the implicit
-    /// track one past the end. A negative line counts backwards using
-    /// <c>trackCount + line</c>, so -1 maps to the last explicit track
-    /// (<c>trackCount - 1</c>); in CSS -1 is the grid's end line, which would be
-    /// index <c>trackCount</c>.
+    /// track one past the end. Negative lines count backwards from the end line:
+    /// -1 is the line after the last explicit track (index <c>trackCount</c>),
+    /// -2 is the last track's start line, and so on.
     /// </remarks>
     private static int NormalizeGridLine(int line, int trackCount)
     {
@@ -812,7 +863,7 @@ public sealed partial class LayoutEngine
             return -1;
         }
 
-        return line > 0 ? line - 1 : Math.Max(0, trackCount + line);
+        return line > 0 ? line - 1 : Math.Max(0, trackCount + line + 1);
     }
 
     /// <summary>Grows the occupancy grid so it covers at least the requested extents.</summary>
@@ -1260,9 +1311,8 @@ public sealed partial class LayoutEngine
     /// A pattern containing <c>auto</c>, an intrinsic minimum, or an <c>fr</c>
     /// track with an intrinsic minimum falls back to a single copy, because the
     /// repeat size then depends on content that is not known yet. A
-    /// <c>fit-content()</c> track resolves its stored minimum, which is
-    /// <c>auto</c>, to the fallback zero, so such a pattern measures smaller than
-    /// its real limit. The 1024 cap matches the parser's accepted repeat range
+    /// <c>fit-content()</c> track uses its stored limit (the maximum side), not
+    /// its auto minimum. The 1024 cap matches the parser's accepted repeat range
     /// and bounds the expanded track array.
     /// </para>
     /// </remarks>
@@ -1288,8 +1338,13 @@ public sealed partial class LayoutEngine
             {
                 case GridTrackKind.Fixed:
                 case GridTrackKind.Percent:
-                case GridTrackKind.FitContent:
                     size = track.Minimum.ResolveOr(in context, available, 0);
+                    break;
+
+                case GridTrackKind.FitContent:
+                    // fit-content() stores its limit as the maximum; its
+                    // minimum is auto and would resolve to the fallback zero.
+                    size = track.Maximum.ResolveOr(in context, available, 0);
                     break;
 
                 case GridTrackKind.Fr when !track.Minimum.IsAuto && !track.Minimum.IsIntrinsic:
@@ -1383,13 +1438,14 @@ public sealed partial class LayoutEngine
     /// <remarks>
     /// <para>
     /// Sizing order. Fixed and percentage tracks resolve their minimum against
-    /// <paramref name="available"/>; <c>fit-content()</c> tracks take
-    /// <c>min(limit, contribution)</c>; auto, min-content and max-content tracks
-    /// take their contribution. The caller supplies one contribution per track,
-    /// so <c>min-content</c> and <c>max-content</c> tracks currently receive the
-    /// same max-content-based size. Flexible tracks start at zero and accumulate
-    /// their <c>fr</c> total. The running total includes one gap between each
-    /// pair of tracks.
+    /// <paramref name="available"/> and grow toward the content contribution up
+    /// to the <see cref="GridTrack.Maximum"/> limit; <c>fit-content()</c> tracks
+    /// take <c>min(limit, contribution)</c>; auto, min-content and max-content
+    /// tracks take at least their minimum and then their contribution.
+    /// The caller supplies one max-content-based contribution per track, so
+    /// <c>min-content</c> and <c>max-content</c> tracks still receive the same
+    /// size. Flexible tracks start at the larger of their explicit minimum and
+    /// their contribution, then share free space.
     /// </para>
     /// <para>
     /// On a definite axis, positive free space (<c>available - total</c>) goes to
@@ -1398,19 +1454,12 @@ public sealed partial class LayoutEngine
     /// (which can include flexible tracks with a zero fraction) instead; this
     /// implements <c>align-content/justify-content: stretch</c> for auto tracks.
     /// Negative free space is ignored: no track is shrunk, so overflowing
-    /// content overflows the container. The maximum side of <c>minmax()</c> and
-    /// the <see cref="GridTrack.Maximum"/> field are not applied beyond the
-    /// cases above.
+    /// content overflows the container.
     /// </para>
     /// <para>
     /// On an indefinite axis there is no free space to distribute. <c>fr</c>
-    /// tracks fall back to their contributions and behave like auto tracks.
-    /// </para>
-    /// <para>
-    /// A flexible track's intrinsic contribution is ignored whenever at least
-    /// one <c>fr</c> track has a positive fraction, because the free-space
-    /// branch runs first; this differs from the CSS min-content floor for
-    /// <c>1fr</c> tracks.
+    /// tracks fall back to the larger of their minimum and contribution and
+    /// behave like auto tracks.
     /// </para>
     /// </remarks>
     private float[] ResolveTrackSizes(
@@ -1433,22 +1482,46 @@ public sealed partial class LayoutEngine
             {
                 case GridTrackKind.Fixed:
                 case GridTrackKind.Percent:
-                    sizes[i] = MathF.Max(0, track.Minimum.ResolveOr(in context, available, 0));
+                {
+                    var minimum = MathF.Max(0, track.Minimum.ResolveOr(in context, available, 0));
+                    var maximum = track.Maximum.ResolveOr(in context, available, minimum);
+
+                    // Honour the minmax() maximum: grow from the minimum toward
+                    // the content contribution without exceeding the limit.
+                    if (float.IsFinite(maximum) && maximum > 0)
+                    {
+                        maximum = MathF.Max(minimum, maximum);
+                        sizes[i] = Math.Clamp(MathF.Max(0, contributions[i]), minimum, maximum);
+                    }
+                    else
+                    {
+                        sizes[i] = minimum;
+                    }
+
                     break;
+                }
 
                 case GridTrackKind.Fr:
                     frTotal += MathF.Max(0, track.Fr);
+                    sizes[i] = MathF.Max(0, track.Minimum.ResolveOr(in context, available, 0));
+                    sizes[i] = MathF.Max(sizes[i], MathF.Max(0, contributions[i]));
                     autoTracks.Add(i);
                     break;
 
                 case GridTrackKind.FitContent:
-                    sizes[i] = MathF.Min(
-                        MathF.Max(0, track.FitContentLimit),
-                        MathF.Max(0, contributions[i]));
+                {
+                    var limit = track.Maximum.ResolveOr(
+                        in context,
+                        available,
+                        MathF.Max(0, track.FitContentLimit));
+                    sizes[i] = Math.Clamp(MathF.Max(0, contributions[i]), 0, MathF.Max(0, limit));
                     break;
+                }
 
                 default:
-                    sizes[i] = MathF.Max(0, contributions[i]);
+                {
+                    var minimum = MathF.Max(0, track.Minimum.ResolveOr(in context, available, 0));
+                    sizes[i] = MathF.Max(minimum, MathF.Max(0, contributions[i]));
 
                     if (track.Kind == GridTrackKind.Auto)
                     {
@@ -1456,6 +1529,7 @@ public sealed partial class LayoutEngine
                     }
 
                     break;
+                }
             }
 
             total += sizes[i];
@@ -1488,12 +1562,14 @@ public sealed partial class LayoutEngine
         else if (frTotal > 0)
         {
             // An indefinite axis has no free space to distribute; fr tracks
-            // behave like auto tracks and keep their intrinsic contribution.
+            // behave like auto tracks and keep their intrinsic contribution,
+            // but never fall below an explicit minimum.
             for (var i = 0; i < tracks.Length; i++)
             {
                 if (tracks[i].Kind == GridTrackKind.Fr)
                 {
-                    sizes[i] = MathF.Max(0, contributions[i]);
+                    var minimum = MathF.Max(0, tracks[i].Minimum.ResolveOr(in context, available, 0));
+                    sizes[i] = MathF.Max(minimum, MathF.Max(0, contributions[i]));
                 }
             }
         }

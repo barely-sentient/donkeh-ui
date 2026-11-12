@@ -209,6 +209,32 @@ public class GridLayoutTests
         Assert.Equal(110, TestSupport.Box(result, root).BorderBox.Height, 3);
     }
 
+    [Fact]
+    public void EmptyGridStillSizesItsExplicitRows()
+    {
+        var root = TestSupport.Node("div", "root");
+        var result = Lay(
+            "#root { display: grid; grid-template-rows: 40px 20px; row-gap: 10px; }",
+            root);
+
+        Assert.Equal(70, TestSupport.Box(result, root).BorderBox.Height, 3);
+    }
+
+    [Fact]
+    public void FrTracksKeepTheirMinimumContribution()
+    {
+        var (root, a, b, _) = Tree(2);
+        var result = Lay(
+            "#root { display: grid; grid-template-columns: 1fr 1fr;"
+            + " grid-template-rows: 30px; }"
+            + " #a { width: 300px; height: 30px; }"
+            + " #b { height: 30px; }",
+            root);
+
+        // A's content floor is 300px; the remaining 700px is split equally.
+        Assert.Equal(650, TestSupport.Box(result, b).BorderBox.X, 3);
+    }
+
     // ------------------------------------------------------------ placement
 
     [Fact]
@@ -264,6 +290,32 @@ public class GridLayoutTests
             root);
 
         TestSupport.AssertRect(TestSupport.Box(result, a).BorderBox, 100, 0, 100, 50);
+    }
+
+    [Fact]
+    public void NegativeLineMinusOneEndsAtTheGridEnd()
+    {
+        var (root, a, _, _) = Tree(1);
+        var result = Lay(
+            "#root { display: grid; grid-template-columns: 100px 100px 100px;"
+            + " grid-template-rows: 50px; }"
+            + " #a { grid-column: 1 / -1; height: 50px; }",
+            root);
+
+        TestSupport.AssertRect(TestSupport.Box(result, a).BorderBox, 0, 0, 300, 50);
+    }
+
+    [Fact]
+    public void NamedAreaStartKeepsAnExplicitEndLine()
+    {
+        var (root, a, _, _) = Tree(1);
+        var result = Lay(
+            "#root { display: grid; grid-template-areas: 'a b c';"
+            + " grid-template-columns: 100px 100px 100px; grid-template-rows: 50px; }"
+            + " #a { grid-column: a / 3; height: 50px; }",
+            root);
+
+        TestSupport.AssertRect(TestSupport.Box(result, a).BorderBox, 0, 0, 200, 50);
     }
 
     [Fact]

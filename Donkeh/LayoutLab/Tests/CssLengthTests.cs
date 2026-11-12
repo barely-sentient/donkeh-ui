@@ -56,6 +56,9 @@ public class CssLengthTests
         Assert.Equal(7, CssLength.Fr(1).ResolveOr(Context, 200, 7));
         Assert.Equal(7, CssLength.Percent(10).ResolveOr(new LengthContext(), float.NaN, 7));
         Assert.Equal(20, CssLength.Percent(10).ResolveOr(Context, 200, 7), 3);
+        Assert.Equal(
+            7,
+            CssValueParser.ParseLength("calc(100% - 10px)").ResolveOr(Context, float.NaN, 7));
     }
 
     [Theory]
@@ -69,15 +72,19 @@ public class CssLengthTests
     [InlineData("fit-content", false)]
     public void IsDefiniteRequiresAValueTheAxisCanResolve(string css, bool expected)
     {
-        Assert.Equal(expected, CssValueParser.ParseLength(css).IsDefinite(Context, 100));
+        Assert.Equal(expected, CssValueParser.ParseLength(css).IsDefinite(100));
     }
 
     [Fact]
     public void PercentIsOnlyDefiniteWhenABasisExists()
     {
         var length = CssLength.Percent(10);
-        Assert.True(length.IsDefinite(Context, 100));
-        Assert.False(length.IsDefinite(Context, float.NaN));
+        Assert.True(length.IsDefinite(100));
+        Assert.False(length.IsDefinite(float.NaN));
+
+        var expression = CssValueParser.ParseLength("calc(100% - 10px)");
+        Assert.True(expression.IsDefinite(100));
+        Assert.False(expression.IsDefinite(float.NaN));
     }
 
     [Fact]
@@ -118,6 +125,9 @@ public class CssLengthTests
     [InlineData("2rem", "2rem")]
     [InlineData("3fr", "3fr")]
     [InlineData("4", "4")]
+    [InlineData("min-content", "min-content")]
+    [InlineData("max-content", "max-content")]
+    [InlineData("fit-content", "fit-content")]
     [InlineData("calc(1px + 2px)", "calc(...)")]
     public void ToStringUsesCssSyntax(string input, string expected)
     {
