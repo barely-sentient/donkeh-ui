@@ -325,7 +325,9 @@ public sealed class LayoutBox
 
             child.StaticPosition = child.StaticPosition.Translate(dx, dy);
 
-            if (!child.IsFixed && ReferenceEquals(child.ContainingBlock, this))
+            // A fixed child contained by a transformed/filtered ancestor moves
+            // with that ancestor; one anchored to the viewport does not.
+            if (ReferenceEquals(child.ContainingBlock, this))
             {
                 child.Translate(dx, dy);
             }

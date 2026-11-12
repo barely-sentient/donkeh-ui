@@ -361,7 +361,7 @@ public sealed partial class LayoutEngine
         {
             LayoutRootBox(_root, viewport);
             ProcessAbsoluteBoxes(viewport);
-            BuildDisplayList(_root, viewport);
+            BuildDisplayList(_root);
         }
 
         var frame = _options.Optimise
@@ -448,7 +448,7 @@ public sealed partial class LayoutEngine
         {
             ApplyRootScrollBehavior(_root);
             RefreshScrollMetrics(_root);
-            BuildDisplayList(_root, viewport);
+            BuildDisplayList(_root);
         }
 
         var frame = _options.Optimise
@@ -536,7 +536,7 @@ public sealed partial class LayoutEngine
 
         if (_root is not null)
         {
-            BuildDisplayList(_root, viewport);
+            BuildDisplayList(_root);
         }
 
         var frame = _options.Optimise
@@ -1017,7 +1017,9 @@ public sealed partial class LayoutEngine
 
         if (style.IsAbsolutelyPositioned)
         {
-            box.ContainingBlock = style.Position == Position.Fixed ? null : positionedAncestor;
+            box.ContainingBlock = style.Position == Position.Fixed
+                ? FindFixedContainingAncestor(parentBox)
+                : positionedAncestor;
             _absolutes.Add(box);
         }
 
@@ -1174,7 +1176,9 @@ public sealed partial class LayoutEngine
 
         if (style.IsAbsolutelyPositioned)
         {
-            box.ContainingBlock = style.Position == Position.Fixed ? null : positionedAncestor;
+            box.ContainingBlock = style.Position == Position.Fixed
+                ? FindFixedContainingAncestor(parentBox)
+                : positionedAncestor;
             _absolutes.Add(box);
         }
 
@@ -1192,7 +1196,35 @@ public sealed partial class LayoutEngine
     /// </returns>
     private static bool CreatesContainingBlock(ComputedStyle style)
     {
-        return style.Position is not Position.Static || style.Transform is not null;
+        return style.Position is not Position.Static
+            || style.Transform is not null
+            || style.Filter is not null
+            || style.BackdropFilter is not null;
+    }
+
+    /// <summary>Finds the nearest ancestor that establishes a fixed containing block.</summary>
+    /// <param name="parent">Parent box to start from, or <see langword="null"/>.</param>
+    /// <returns>
+    /// The nearest ancestor with a transform or filter, or <see langword="null"/>
+    /// when fixed positioning should use the viewport.
+    /// </returns>
+    /// <remarks>
+    /// Positioned ancestors alone do not contain fixed boxes. Opacity is not
+    /// included because it creates a stacking context but not a containing block.
+    /// </remarks>
+    private static LayoutBox? FindFixedContainingAncestor(LayoutBox? parent)
+    {
+        for (var box = parent; box is not null; box = box.Parent)
+        {
+            if (box.Style.Transform is not null
+                || box.Style.Filter is not null
+                || box.Style.BackdropFilter is not null)
+            {
+                return box;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>Lays out the root box against the viewport containing block.</summary>
@@ -1892,10 +1924,10 @@ public sealed partial class LayoutEngine
     /// </param>
     /// <remarks>
     /// <para>
-    /// Fixed boxes always use <see cref="_layoutViewport"/>; absolute boxes use
-    /// the nearest positioned ancestor's padding box, or the viewport when there
-    /// is none. Insets and sizes are resolved by
-    /// <see cref="LayoutAbsoluteBox"/>.
+    /// Fixed boxes use the viewport unless an ancestor has a transform or filter,
+    /// which makes that ancestor their containing block. Absolute boxes use the
+    /// nearest positioned ancestor's padding box, or the viewport when there is
+    /// none. Insets and sizes are resolved by <see cref="LayoutAbsoluteBox"/>.
     /// </para>
     /// <para>
     /// The method is re-entrant because laying out an absolute box can discover
@@ -1915,12 +1947,9 @@ public sealed partial class LayoutEngine
                 continue;
             }
 
-            // A fixed box is always laid out against the window viewport,
-            // even when it is discovered while processing a nested absolute
-            // box whose containing block is a card or panel.
-            var containingBlock = box.IsFixed
-                ? _layoutViewport
-                : box.ContainingBlock?.PaddingBox ?? viewport;
+            // A fixed box uses the viewport unless a transformed/filtered
+            // ancestor was recorded as its containing block at build time.
+            var containingBlock = box.ContainingBlock?.PaddingBox ?? viewport;
             LayoutAbsoluteBox(box, containingBlock);
         }
     }

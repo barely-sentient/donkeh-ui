@@ -93,13 +93,11 @@ public static class Optimiser
 
     /// <summary>Bookkeeping for one open push/pop scope.</summary>
     /// <param name="Kind">The scope family, used to match pops.</param>
-    /// <param name="Pop">The pop opcode that closes the scope; informational.</param>
     /// <param name="Emit">Whether the matching push and pop survive in the output.</param>
     /// <param name="PreviousClip">The clip in effect before a clip push.</param>
     /// <param name="ClipEmpty">Whether a clip push produced an empty intersection.</param>
     private readonly record struct Scope(
         ScopeKind Kind,
-        InstructionOpCode Pop,
         bool Emit,
         Rect PreviousClip,
         bool ClipEmpty);
@@ -110,9 +108,9 @@ public static class Optimiser
     /// <param name="viewport">The viewport rectangle in CSS pixels, used as the initial clip.</param>
     /// <param name="options">The flags controlling each pass.</param>
     /// <param name="outputBuffer">
-    /// An optional buffer to clear and fill. It must not be the same instance as
-    /// <paramref name="source"/>, because the output is cleared before the input
-    /// is read.
+    /// An optional buffer to clear and fill. It may be the same instance as
+    /// <paramref name="source"/>; the input span is captured before the buffer is
+    /// cleared.
     /// </param>
     /// <returns>The output buffer, the (possibly rebuilt) pool and the statistics.</returns>
     /// <remarks>
@@ -213,7 +211,7 @@ public static class Optimiser
                         scopesRemoved++;
                     }
 
-                    scopes.Add(new Scope(ScopeKind.Clip, InstructionOpCode.PopClip, emit, previous, empty));
+                    scopes.Add(new Scope(ScopeKind.Clip, emit, previous, empty));
                     clip = empty ? Rect.Empty : next;
                     clipVersion++;
 
@@ -248,7 +246,7 @@ public static class Optimiser
                         scopesRemoved++;
                     }
 
-                    scopes.Add(new Scope(ScopeKind.Opacity, InstructionOpCode.PopOpacity, visible, clip, false));
+                    scopes.Add(new Scope(ScopeKind.Opacity, visible, clip, false));
 
                     if (visible)
                     {
@@ -272,7 +270,7 @@ public static class Optimiser
 
                 case InstructionOpCode.PushTransform:
                     transformDepth++;
-                    scopes.Add(new Scope(ScopeKind.Transform, InstructionOpCode.PopTransform, true, clip, false));
+                    scopes.Add(new Scope(ScopeKind.Transform, true, clip, false));
                     output.Add(instruction);
                     continue;
 
@@ -290,7 +288,7 @@ public static class Optimiser
                 }
 
                 case InstructionOpCode.PushLayer:
-                    scopes.Add(new Scope(ScopeKind.Layer, InstructionOpCode.PopLayer, true, clip, false));
+                    scopes.Add(new Scope(ScopeKind.Layer, true, clip, false));
                     output.Add(instruction);
                     continue;
 
@@ -312,7 +310,7 @@ public static class Optimiser
 
                 case InstructionOpCode.PushFilter:
                     filterDepth++;
-                    scopes.Add(new Scope(ScopeKind.Filter, InstructionOpCode.PopFilter, true, clip, false));
+                    scopes.Add(new Scope(ScopeKind.Filter, true, clip, false));
                     output.Add(instruction);
                     continue;
 
@@ -333,7 +331,6 @@ public static class Optimiser
                     filterDepth++;
                     scopes.Add(new Scope(
                         ScopeKind.BackdropFilter,
-                        InstructionOpCode.PopBackdropFilter,
                         true,
                         clip,
                         false));
@@ -355,7 +352,7 @@ public static class Optimiser
                 }
 
                 case InstructionOpCode.PushClipPath:
-                    scopes.Add(new Scope(ScopeKind.ClipPath, InstructionOpCode.PopClipPath, true, clip, false));
+                    scopes.Add(new Scope(ScopeKind.ClipPath, true, clip, false));
                     output.Add(instruction);
                     continue;
 
@@ -372,7 +369,7 @@ public static class Optimiser
                 }
 
                 case InstructionOpCode.PushMask:
-                    scopes.Add(new Scope(ScopeKind.Mask, InstructionOpCode.PopMask, true, clip, false));
+                    scopes.Add(new Scope(ScopeKind.Mask, true, clip, false));
                     output.Add(instruction);
                     continue;
 
@@ -389,7 +386,7 @@ public static class Optimiser
                 }
 
                 case InstructionOpCode.PushBlendMode:
-                    scopes.Add(new Scope(ScopeKind.Blend, InstructionOpCode.PopBlendMode, true, clip, false));
+                    scopes.Add(new Scope(ScopeKind.Blend, true, clip, false));
                     output.Add(instruction);
                     continue;
 
@@ -406,7 +403,7 @@ public static class Optimiser
                 }
             }
 
-            if (!instruction.IsDraw)
+            if (!instruction.HasBounds)
             {
                 output.Add(instruction);
                 continue;
@@ -520,7 +517,7 @@ public static class Optimiser
 
         // An unmatched pop is a no-op: keeping the current clip avoids turning a
         // malformed stream into a fully clipped (blank) frame.
-        return new Scope(expected, InstructionOpCode.Nop, false, currentClip, false);
+        return new Scope(expected, false, currentClip, false);
     }
 
     /// <summary>Attempts to fuse a rectangle into the previous output rectangle.</summary>

@@ -218,8 +218,9 @@ public readonly struct Instruction
     /// paint bounds.
     /// </summary>
     /// <remarks>
-    /// Currently equivalent to <see cref="IsDraw"/>. Scoped pushes such as
-    /// <see cref="InstructionOpCode.PushFilter"/> also carry an element rect,
+    /// Equivalent to <see cref="IsDraw"/>; the optimiser uses it to decide which
+    /// instructions are candidates for culling and merging. Scoped pushes such
+    /// as <see cref="InstructionOpCode.PushFilter"/> also carry an element rect,
     /// but it describes the effect region rather than painted pixels, so it is
     /// not reported as paint bounds.
     /// </remarks>
@@ -233,12 +234,19 @@ public readonly struct Instruction
     /// Only <see cref="X"/> and <see cref="Y"/> change; <see cref="Z"/>,
     /// <see cref="W"/> and <see cref="Payload"/> are copied unchanged. Use this
     /// to move a pre-built instruction stream, for example when a layout box is
-    /// re-offset without re-emitting its contents. Do not use it on
-    /// <see cref="InstructionOpCode.PushOpacity"/>, where <see cref="X"/> is an
-    /// opacity multiplier.
+    /// re-offset without re-emitting its contents. Instructions whose floats are
+    /// scalars rather than geometry (<see cref="InstructionOpCode.PushOpacity"/>
+    /// stores opacity in <see cref="X"/> and
+    /// <see cref="InstructionOpCode.SetScrollOffset"/> stores offsets in both)
+    /// are returned unchanged.
     /// </remarks>
     public Instruction Translate(float dx, float dy)
     {
+        if (OpCode is InstructionOpCode.PushOpacity or InstructionOpCode.SetScrollOffset)
+        {
+            return this;
+        }
+
         return new Instruction(OpCode, X + dx, Y + dy, Z, W, Payload, Aux, Flags);
     }
 
@@ -679,17 +687,30 @@ public sealed class InstructionBuffer
     public ReadOnlySpan<Instruction> Span => _items.AsSpan(0, _count);
 
     /// <summary>Gets a mutable reference to the instruction at <paramref name="index"/>.</summary>
-    /// <param name="index">Zero-based index; only the array bounds are checked.</param>
+    /// <param name="index">Zero-based index below <see cref="Count"/>.</param>
     /// <value>A writable reference into the backing array.</value>
     /// <remarks>
-    /// The indexer intentionally does not check against <see cref="Count"/>, so
-    /// it can address stale capacity slots. The optimiser uses it to rewrite
-    /// instructions in place after constants are compacted.
+    /// The optimiser uses the indexer to rewrite instructions in place after
+    /// constants are compacted. Stale capacity slots beyond <see cref="Count"/>
+    /// are not addressable, so a bug cannot silently read or write last frame's
+    /// data.
     /// </remarks>
     /// <exception cref="IndexOutOfRangeException">
-    /// <paramref name="index"/> is outside the current array capacity.
+    /// <paramref name="index"/> is negative or at least <see cref="Count"/>.
     /// </exception>
-    public ref Instruction this[int index] => ref _items[index];
+    public ref Instruction this[int index]
+    {
+        get
+        {
+            if ((uint)index >= (uint)_count)
+            {
+                throw new IndexOutOfRangeException(
+                    $"Instruction index {index} is outside the valid range 0..{_count - 1}.");
+            }
+
+            return ref _items[index];
+        }
+    }
 
     /// <summary>Removes all instructions without releasing the backing array.</summary>
     /// <remarks>

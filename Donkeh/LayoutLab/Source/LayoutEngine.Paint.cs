@@ -9,18 +9,16 @@ public sealed partial class LayoutEngine
     /// deferred fixed-position pass.
     /// </summary>
     /// <param name="root">Root of the laid-out box tree.</param>
-    /// <param name="viewport">
-    /// Viewport rectangle in CSS pixels. Currently unused: fixed boxes are
-    /// anchored by their already-computed layout positions, which are
-    /// viewport-relative.
-    /// </param>
     /// <remarks>
     /// <para>
-    /// The normal tree is painted first. Boxes with <c>position: fixed</c> are
-    /// collected instead of painted, then painted in a second pass with zero
-    /// ancestor translation and outside ancestor scopes, so an ancestor's scroll
-    /// offset, clip, opacity, transform and filters cannot affect them. This is
-    /// what keeps modals, offcanvas panels and tooltips above a scrolling page.
+    /// The normal tree is painted first. Boxes with <c>position: fixed</c> that
+    /// are anchored to the viewport are collected instead of painted, then
+    /// painted in a second pass with zero ancestor translation and outside
+    /// ancestor scopes, so an ancestor's scroll offset, clip and effects cannot
+    /// affect them. A fixed box whose ancestor has a transform or filter remains
+    /// inside that ancestor's scope, because the ancestor is its containing
+    /// block. This keeps ordinary modals and offcanvas panels above a scrolling
+    /// page without letting them escape a transformed container.
     /// </para>
     /// <para>
     /// If <see cref="LayoutOptions.IncludeFrameMarkers"/> is set, the stream is
@@ -34,7 +32,7 @@ public sealed partial class LayoutEngine
     /// <see cref="_paintingFixed"/> are shared per-frame state.
     /// </para>
     /// </remarks>
-    private void BuildDisplayList(LayoutBox root, Rect viewport)
+    private void BuildDisplayList(LayoutBox root)
     {
         if (_options.IncludeFrameMarkers)
         {
@@ -105,11 +103,12 @@ public sealed partial class LayoutEngine
     /// visibility.
     /// </para>
     /// <para>
-    /// Fixed boxes are deferred to <see cref="BuildDisplayList"/>'s second pass.
-    /// During that pass their <paramref name="tx"/> and <paramref name="ty"/> are
-    /// reset to zero and no ancestor scope is active, so they ignore ancestor
-    /// scroll, clips, opacity, transforms and filters while keeping the position
-    /// computed by layout.
+    /// Viewport-anchored fixed boxes are deferred to
+    /// <see cref="BuildDisplayList"/>'s second pass. During that pass their
+    /// <paramref name="tx"/> and <paramref name="ty"/> are reset to zero and no
+    /// ancestor scope is active, so they ignore ancestor scroll and clips while
+    /// keeping the position computed by layout. A fixed box contained by a
+    /// transformed or filtered ancestor is painted inside that ancestor's scope.
     /// </para>
     /// <para>
     /// Paint order: outer shadows, background, border, inset shadows, outline,
@@ -141,17 +140,24 @@ public sealed partial class LayoutEngine
 
         if (box.IsFixed)
         {
-            if (!_paintingFixed)
+            // A transformed or filtered ancestor becomes the containing block,
+            // so the box must be painted inside that ancestor's scope instead of
+            // escaping to the viewport pass.
+            if (box.ContainingBlock is null)
             {
-                _fixedBoxes.Add(box);
-                return;
-            }
+                if (!_paintingFixed)
+                {
+                    _fixedBoxes.Add(box);
+                    return;
+                }
 
-            // Fixed boxes are anchored to the viewport and ignore ancestor scroll
-            // translations. They are painted in the fixed pass, outside ancestor
-            // clips, so a modal is never cut off by a scrolling page.
-            tx = 0;
-            ty = 0;
+                // Fixed boxes are anchored to the viewport and ignore ancestor
+                // scroll translations. They are painted in the fixed pass,
+                // outside ancestor clips, so a modal is never cut off by a
+                // scrolling page.
+                tx = 0;
+                ty = 0;
+            }
         }
 
         if (!_paintingOverlays

@@ -194,6 +194,25 @@ public class InstructionTests
     }
 
     [Fact]
+    public void BufferIndexerRejectsStaleCapacitySlots()
+    {
+        var buffer = new InstructionBuffer(8);
+        buffer.Add(Instruction.DrawRect(new Rect(0, 0, 1, 1), CssColor.Black));
+        buffer.Clear();
+
+        Assert.Throws<IndexOutOfRangeException>(() => _ = buffer[0]);
+    }
+
+    [Fact]
+    public void TranslateLeavesScalarInstructionsUnchanged()
+    {
+        var opacity = Instruction.PushOpacity(0.5f);
+
+        Assert.Equal(0.5f, opacity.Translate(10, 20).X);
+        Assert.Equal(0, opacity.Translate(10, 20).Y);
+    }
+
+    [Fact]
     public void BufferGrowsAndCopiesRanges()
     {
         var buffer = new InstructionBuffer(4);

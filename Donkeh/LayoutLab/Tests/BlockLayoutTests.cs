@@ -435,6 +435,24 @@ public class BlockLayoutTests
     }
 
     [Fact]
+    public void FixedBoxUsesATransformedAncestorAsItsContainingBlock()
+    {
+        var root = TestSupport.Node("div", "root");
+        var parent = TestSupport.Node("div", "parent");
+        var fixedBox = TestSupport.Node("div", "fixed");
+        root.Children = [parent];
+        parent.Children = [fixedBox];
+
+        var result = Lay(
+            "#parent { margin-left: 100px; margin-top: 50px; width: 300px; height: 200px;"
+            + " transform: translate(0, 0); }"
+            + " #fixed { position: fixed; left: 0; top: 0; width: 10px; height: 10px; }",
+            root);
+
+        TestSupport.AssertRect(TestSupport.Box(result, fixedBox).BorderBox, 100, 50, 10, 10);
+    }
+
+    [Fact]
     public void AbsoluteBoxUsesThePositionedAncestorPaddingBox()
     {
         var root = TestSupport.Node("div", "root");
