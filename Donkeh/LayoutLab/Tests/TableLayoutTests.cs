@@ -86,6 +86,27 @@ public class TableLayoutTests
     }
 
     [Fact]
+    public void SpareWidthIsSharedInProportionToContent()
+    {
+        var root = TestSupport.Node("div", "root");
+        var a = Cell("a");
+        var b = Cell("b");
+        root.Children = [Row(a, b)];
+
+        var result = Lay(
+            TableCss
+            + " #a { width: 50px; height: 20px; }"
+            + " #b { width: 150px; height: 20px; }",
+            root);
+
+        // 200px of content in a 300px table leaves 100px spare; the columns grow
+        // by 25 and 75 rather than 50 each.
+        Assert.Equal(75, TestSupport.Box(result, a).BorderBox.Width, 3);
+        Assert.Equal(75, TestSupport.Box(result, b).BorderBox.X, 3);
+        Assert.Equal(225, TestSupport.Box(result, b).BorderBox.Width, 3);
+    }
+
+    [Fact]
     public void BorderSpacingSeparatesRowsAndColumns()
     {
         var root = TestSupport.Node("div", "root");

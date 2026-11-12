@@ -153,11 +153,32 @@ public sealed partial class LayoutEngine
         }
         else if (total < availableWidth)
         {
-            var extra = (availableWidth - total) / columnCount;
+            // Auto table layout hands spare width to columns in proportion to
+            // their content, so a narrow "#" column stays narrow while long text
+            // columns absorb most of the extra space.
+            var extra = availableWidth - total;
+            var weight = 0f;
 
             for (var c = 0; c < columnCount; c++)
             {
-                widths[c] += extra;
+                weight += widths[c];
+            }
+
+            if (weight > 0)
+            {
+                for (var c = 0; c < columnCount; c++)
+                {
+                    widths[c] += extra * (widths[c] / weight);
+                }
+            }
+            else
+            {
+                var share = extra / columnCount;
+
+                for (var c = 0; c < columnCount; c++)
+                {
+                    widths[c] += share;
+                }
             }
         }
         else if (total > availableWidth)
@@ -230,6 +251,14 @@ public sealed partial class LayoutEngine
             {
                 rowHeights[placement.Row + placement.RowSpan - 1] += natural - available;
             }
+        }
+
+        // Snap row heights up to whole pixels. Fractional row boundaries place
+        // 1px borders between device-pixel centres, where they can disappear
+        // entirely in the renderer.
+        for (var r = 0; r < rowHeights.Length; r++)
+        {
+            rowHeights[r] = MathF.Ceiling(rowHeights[r] - 0.001f);
         }
 
         // Final pass: force the complete row span onto every cell.
