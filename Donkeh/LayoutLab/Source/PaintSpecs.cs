@@ -524,6 +524,90 @@ public sealed class ConstantPool
         _backgrounds.Clear();
     }
 
+    /// <summary>Creates an independent copy of the pool.</summary>
+    /// <returns>
+    /// A pool with the same ids and values that keeps working after this pool is
+    /// cleared or reused for another frame.
+    /// </returns>
+    /// <remarks>
+    /// Typed lists and interning maps are copied so the snapshot has no shared
+    /// mutable state with the original. Reference-typed constants are still
+    /// shared by reference and remain immutable.
+    /// </remarks>
+    internal ConstantPool Snapshot()
+    {
+        var copy = new ConstantPool();
+        copy._items.AddRange(_items);
+        copy._textItems.AddRange(_textItems);
+        copy._borderItems.AddRange(_borderItems);
+        copy._shadowItems.AddRange(_shadowItems);
+        copy._backgroundItems.AddRange(_backgroundItems);
+        copy._imageItems.AddRange(_imageItems);
+        copy._scrollbarItems.AddRange(_scrollbarItems);
+        copy._radiusItems.AddRange(_radiusItems);
+        copy._transformItems.AddRange(_transformItems);
+        copy._filterItems.AddRange(_filterItems);
+        copy._clipPathItems.AddRange(_clipPathItems);
+        copy._maskItems.AddRange(_maskItems);
+
+        foreach (var pair in _texts)
+        {
+            copy._texts[pair.Key] = pair.Value;
+        }
+
+        foreach (var pair in _radii)
+        {
+            copy._radii[pair.Key] = pair.Value;
+        }
+
+        foreach (var pair in _transforms)
+        {
+            copy._transforms[pair.Key] = pair.Value;
+        }
+
+        foreach (var pair in _filters)
+        {
+            copy._filters[pair.Key] = pair.Value;
+        }
+
+        foreach (var pair in _clipPaths)
+        {
+            copy._clipPaths[pair.Key] = pair.Value;
+        }
+
+        foreach (var pair in _masks)
+        {
+            copy._masks[pair.Key] = pair.Value;
+        }
+
+        foreach (var pair in _borders)
+        {
+            copy._borders[pair.Key] = pair.Value;
+        }
+
+        foreach (var pair in _shadows)
+        {
+            copy._shadows[pair.Key] = pair.Value;
+        }
+
+        foreach (var pair in _images)
+        {
+            copy._images[pair.Key] = pair.Value;
+        }
+
+        foreach (var pair in _scrollbars)
+        {
+            copy._scrollbars[pair.Key] = pair.Value;
+        }
+
+        foreach (var pair in _backgrounds)
+        {
+            copy._backgrounds[pair.Key] = pair.Value;
+        }
+
+        return copy;
+    }
+
     /// <summary>Gets a constant by id, boxed as <see cref="object"/>.</summary>
     /// <param name="id">A constant id previously returned by one of the <c>Add</c> methods.</param>
     /// <returns>The stored value, boxed for value-typed constants.</returns>
@@ -535,87 +619,133 @@ public sealed class ConstantPool
     /// Prefer the typed getters: this overload allocates a box for every
     /// value-typed constant and is intended for diagnostics and tooling.
     /// </remarks>
-    public object Get(int id) => _items[id].Kind switch
+    public object Get(int id)
     {
-        ConstantKind.Text => _textItems[_items[id].Index],
-        ConstantKind.Border => _borderItems[_items[id].Index],
-        ConstantKind.Shadow => _shadowItems[_items[id].Index],
-        ConstantKind.Background => _backgroundItems[_items[id].Index],
-        ConstantKind.Image => _imageItems[_items[id].Index],
-        ConstantKind.Scrollbar => _scrollbarItems[_items[id].Index],
-        ConstantKind.Radius => _radiusItems[_items[id].Index],
-        ConstantKind.Transform => _transformItems[_items[id].Index],
-        ConstantKind.Filter => _filterItems[_items[id].Index],
-        ConstantKind.ClipPath => _clipPathItems[_items[id].Index],
-        ConstantKind.Mask => _maskItems[_items[id].Index],
-        _ => throw new ArgumentOutOfRangeException(nameof(id))
-    };
+        if ((uint)id >= (uint)_items.Count)
+        {
+            throw new ArgumentOutOfRangeException(nameof(id));
+        }
+
+        var reference = _items[id];
+        return reference.Kind switch
+        {
+            ConstantKind.Text => _textItems[reference.Index],
+            ConstantKind.Border => _borderItems[reference.Index],
+            ConstantKind.Shadow => _shadowItems[reference.Index],
+            ConstantKind.Background => _backgroundItems[reference.Index],
+            ConstantKind.Image => _imageItems[reference.Index],
+            ConstantKind.Scrollbar => _scrollbarItems[reference.Index],
+            ConstantKind.Radius => _radiusItems[reference.Index],
+            ConstantKind.Transform => _transformItems[reference.Index],
+            ConstantKind.Filter => _filterItems[reference.Index],
+            ConstantKind.ClipPath => _clipPathItems[reference.Index],
+            ConstantKind.Mask => _maskItems[reference.Index],
+            _ => throw new ArgumentOutOfRangeException(nameof(id))
+        };
+    }
 
     /// <summary>Gets a text command by id.</summary>
     /// <param name="id">An id returned by <see cref="AddText"/>.</param>
     /// <returns>The interned text and style.</returns>
-    /// <remarks>The pool does not verify that the id belongs to a text constant; pass matching ids only.</remarks>
-    public TextCommand GetText(int id) => _textItems[_items[id].Index];
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="id"/> is outside the pool.</exception>
+    /// <exception cref="ArgumentException"><paramref name="id"/> is not a text constant.</exception>
+    public TextCommand GetText(int id) => GetConstant(id, ConstantKind.Text, _textItems);
 
     /// <summary>Gets a border specification by id.</summary>
     /// <param name="id">An id returned by <see cref="AddBorder"/>.</param>
     /// <returns>The interned border specification.</returns>
-    /// <remarks>The pool does not verify that the id belongs to a border constant; pass matching ids only.</remarks>
-    public BorderSpec GetBorder(int id) => _borderItems[_items[id].Index];
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="id"/> is outside the pool.</exception>
+    /// <exception cref="ArgumentException"><paramref name="id"/> is not a border constant.</exception>
+    public BorderSpec GetBorder(int id) => GetConstant(id, ConstantKind.Border, _borderItems);
 
     /// <summary>Gets a box-shadow specification by id.</summary>
     /// <param name="id">An id returned by <see cref="AddShadow"/>.</param>
     /// <returns>The interned shadow specification.</returns>
-    /// <remarks>The pool does not verify that the id belongs to a shadow constant; pass matching ids only.</remarks>
-    public ShadowSpec GetShadow(int id) => _shadowItems[_items[id].Index];
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="id"/> is outside the pool.</exception>
+    /// <exception cref="ArgumentException"><paramref name="id"/> is not a shadow constant.</exception>
+    public ShadowSpec GetShadow(int id) => GetConstant(id, ConstantKind.Shadow, _shadowItems);
 
     /// <summary>Gets a background layer by id.</summary>
     /// <param name="id">An id returned by <see cref="AddBackground"/>.</param>
     /// <returns>The interned background layer instance.</returns>
-    /// <remarks>The pool does not verify that the id belongs to a background constant; pass matching ids only.</remarks>
-    public BackgroundImageSpec GetBackground(int id) => _backgroundItems[_items[id].Index];
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="id"/> is outside the pool.</exception>
+    /// <exception cref="ArgumentException"><paramref name="id"/> is not a background constant.</exception>
+    public BackgroundImageSpec GetBackground(int id) => GetConstant(id, ConstantKind.Background, _backgroundItems);
 
     /// <summary>Gets an image specification by id.</summary>
     /// <param name="id">An id returned by <see cref="AddImage"/>.</param>
     /// <returns>The interned image specification.</returns>
-    /// <remarks>The pool does not verify that the id belongs to an image constant; pass matching ids only.</remarks>
-    public ImageSpec GetImage(int id) => _imageItems[_items[id].Index];
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="id"/> is outside the pool.</exception>
+    /// <exception cref="ArgumentException"><paramref name="id"/> is not an image constant.</exception>
+    public ImageSpec GetImage(int id) => GetConstant(id, ConstantKind.Image, _imageItems);
 
     /// <summary>Gets a scrollbar specification by id.</summary>
     /// <param name="id">An id returned by <see cref="AddScrollbar"/>.</param>
     /// <returns>The interned scrollbar specification.</returns>
-    /// <remarks>The pool does not verify that the id belongs to a scrollbar constant; pass matching ids only.</remarks>
-    public ScrollbarSpec GetScrollbar(int id) => _scrollbarItems[_items[id].Index];
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="id"/> is outside the pool.</exception>
+    /// <exception cref="ArgumentException"><paramref name="id"/> is not a scrollbar constant.</exception>
+    public ScrollbarSpec GetScrollbar(int id) => GetConstant(id, ConstantKind.Scrollbar, _scrollbarItems);
 
     /// <summary>Gets corner radii by id.</summary>
     /// <param name="id">An id returned by <see cref="AddRadius"/>.</param>
     /// <returns>The interned radii in CSS pixels.</returns>
-    /// <remarks>The pool does not verify that the id belongs to a radius constant; pass matching ids only.</remarks>
-    public CornerRadius GetRadius(int id) => _radiusItems[_items[id].Index];
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="id"/> is outside the pool.</exception>
+    /// <exception cref="ArgumentException"><paramref name="id"/> is not a radius constant.</exception>
+    public CornerRadius GetRadius(int id) => GetConstant(id, ConstantKind.Radius, _radiusItems);
 
     /// <summary>Gets a transform matrix by id.</summary>
     /// <param name="id">An id returned by <see cref="AddTransform"/>.</param>
     /// <returns>The interned transform matrix.</returns>
-    /// <remarks>The pool does not verify that the id belongs to a transform constant; pass matching ids only.</remarks>
-    public Matrix3x2 GetTransform(int id) => _transformItems[_items[id].Index];
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="id"/> is outside the pool.</exception>
+    /// <exception cref="ArgumentException"><paramref name="id"/> is not a transform constant.</exception>
+    public Matrix3x2 GetTransform(int id) => GetConstant(id, ConstantKind.Transform, _transformItems);
 
     /// <summary>Gets a filter chain by id.</summary>
     /// <param name="id">An id returned by <see cref="AddFilter"/>.</param>
     /// <returns>The interned filter chain instance.</returns>
-    /// <remarks>The pool does not verify that the id belongs to a filter constant; pass matching ids only.</remarks>
-    public FilterSpec GetFilter(int id) => _filterItems[_items[id].Index];
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="id"/> is outside the pool.</exception>
+    /// <exception cref="ArgumentException"><paramref name="id"/> is not a filter constant.</exception>
+    public FilterSpec GetFilter(int id) => GetConstant(id, ConstantKind.Filter, _filterItems);
 
     /// <summary>Gets a clip path by id.</summary>
     /// <param name="id">An id returned by <see cref="AddClipPath"/>.</param>
     /// <returns>The interned clip path instance.</returns>
-    /// <remarks>The pool does not verify that the id belongs to a clip-path constant; pass matching ids only.</remarks>
-    public ClipPathSpec GetClipPath(int id) => _clipPathItems[_items[id].Index];
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="id"/> is outside the pool.</exception>
+    /// <exception cref="ArgumentException"><paramref name="id"/> is not a clip-path constant.</exception>
+    public ClipPathSpec GetClipPath(int id) => GetConstant(id, ConstantKind.ClipPath, _clipPathItems);
 
     /// <summary>Gets a mask by id.</summary>
     /// <param name="id">An id returned by <see cref="AddMask"/>.</param>
     /// <returns>The interned mask instance.</returns>
-    /// <remarks>The pool does not verify that the id belongs to a mask constant; pass matching ids only.</remarks>
-    public MaskSpec GetMask(int id) => _maskItems[_items[id].Index];
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="id"/> is outside the pool.</exception>
+    /// <exception cref="ArgumentException"><paramref name="id"/> is not a mask constant.</exception>
+    public MaskSpec GetMask(int id) => GetConstant(id, ConstantKind.Mask, _maskItems);
+
+    /// <summary>Returns a typed constant, validating both the id and its storage kind.</summary>
+    /// <param name="id">Constant id to resolve.</param>
+    /// <param name="kind">Storage family the id must belong to.</param>
+    /// <param name="items">Typed list for that family.</param>
+    /// <returns>The stored value.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="id"/> is outside the pool.</exception>
+    /// <exception cref="ArgumentException"><paramref name="id"/> belongs to a different family.</exception>
+    private T GetConstant<T>(int id, ConstantKind kind, List<T> items)
+    {
+        if ((uint)id >= (uint)_items.Count)
+        {
+            throw new ArgumentOutOfRangeException(nameof(id));
+        }
+
+        var reference = _items[id];
+
+        if (reference.Kind != kind)
+        {
+            throw new ArgumentException(
+                $"Constant {id} is a {reference.Kind} constant, not {kind}.",
+                nameof(id));
+        }
+
+        return items[reference.Index];
+    }
 
     /// <summary>Interns a text run and its style.</summary>
     /// <param name="text">The exact text of the run.</param>

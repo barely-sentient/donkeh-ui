@@ -377,6 +377,42 @@ public sealed class LayoutCachingTests
     }
 
     [Fact]
+    public void EnableCachingFalseDoesNotReuseStyles()
+    {
+        var engine = Engine("#root { color: #ff0000; }");
+        var root = TestSupport.Node("div", "root");
+        var options = Options();
+        options.EnableCaching = false;
+
+        var first = engine.Layout(root, options);
+        var second = engine.Layout(root, options);
+
+        Assert.NotSame(
+            TestSupport.Box(first, root).Style,
+            TestSupport.Box(second, root).Style);
+        Assert.Equal(0xFFFF0000u, TestSupport.Box(second, root).Style.Color);
+    }
+
+    [Fact]
+    public void SnapshotConstantsSurviveTheNextLayout()
+    {
+        var engine = Engine("#root { color: #000000; }");
+        var root = TestSupport.Node("div", "root", "hello");
+        var options = Options();
+
+        var first = engine.Layout(root, options);
+        var firstDraw = TestSupport.Single(first, InstructionOpCode.DrawText);
+        Assert.Equal("hello", first.Constants.GetText(firstDraw.Payload).Text);
+
+        // A second frame clears the engine's pool; the first result's snapshot
+        // must still own its constants.
+        var second = engine.Layout(root, options);
+
+        Assert.NotSame(first.Constants, second.Constants);
+        Assert.Equal("hello", first.Constants.GetText(firstDraw.Payload).Text);
+    }
+
+    [Fact]
     public void EnableCachingFalseStillProducesTheSameGeometry()
     {
         const string css =

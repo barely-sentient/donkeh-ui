@@ -75,6 +75,34 @@ public sealed class OptimiserTests
     }
 
     [Fact]
+    public void OptimisingInPlaceDoesNotEraseTheInput()
+    {
+        var buffer = new InstructionBuffer();
+        buffer.Add(new Instruction(InstructionOpCode.Nop));
+        buffer.AddDrawRect(new Rect(10, 10, 10, 10), Red);
+
+        var result = Optimiser.Run(buffer, new ConstantPool(), Viewport, Options(), buffer);
+
+        Assert.Equal([InstructionOpCode.DrawRect], Codes(result.Instructions));
+        Assert.Equal(2, result.Stats.InputInstructions);
+        Assert.Equal(1, result.Stats.OutputInstructions);
+    }
+
+    [Fact]
+    public void TypedGettersRejectConstantKindMismatches()
+    {
+        var pool = new ConstantPool();
+        var text = pool.AddText("hello", TextStyle.Default);
+        var side = new BorderSide(1, BorderStyle.Solid, Red);
+        var border = pool.AddBorder(new BorderSpec(side, side, side, side, CornerRadius.Zero));
+
+        Assert.Throws<ArgumentException>(() => pool.GetBorder(text));
+        Assert.Equal("hello", pool.GetText(text).Text);
+        Assert.Equal(Red, pool.GetBorder(border).Top.Color);
+        Assert.Throws<ArgumentOutOfRangeException>(() => pool.GetText(99));
+    }
+
+    [Fact]
     public void NopsAreRemoved()
     {
         var buffer = new InstructionBuffer();

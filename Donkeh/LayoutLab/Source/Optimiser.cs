@@ -156,6 +156,12 @@ public static class Optimiser
             ? viewport
             : new Rect(-1e7f, -1e7f, 2e7f, 2e7f);
 
+        // Capture the input before clearing: outputBuffer may alias source, and
+        // clearing first would otherwise make the frame disappear. The captured
+        // span is over the same backing array; because the output is pre-sized
+        // to at least the source count it cannot grow while it is being read.
+        var input = source.Span;
+
         var output = outputBuffer ?? new InstructionBuffer(Math.Max(8, source.Count));
         output.Clear();
         var scopes = new List<Scope>(8);
@@ -167,8 +173,6 @@ public static class Optimiser
         var culled = 0;
         var merged = 0;
         var scopesRemoved = 0;
-
-        var input = source.Span;
 
         for (var i = 0; i < input.Length; i++)
         {
@@ -442,7 +446,7 @@ public static class Optimiser
         }
 
         var stats = new OptimisationStats(
-            source.Count,
+            input.Length,
             output.Count,
             culled,
             merged,

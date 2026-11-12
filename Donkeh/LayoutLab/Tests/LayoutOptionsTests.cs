@@ -196,6 +196,20 @@ public class LayoutOptionsTests
     }
 
     [Fact]
+    public void FrameSignatureChangesWithProvidersAndOutputFlags()
+    {
+        var baseline = new LayoutOptions();
+        var signature = baseline.FrameSignature();
+
+        Assert.NotEqual(signature, new LayoutOptions { TextMeasurer = TestSupport.FixedMeasurer.Instance }.FrameSignature());
+        Assert.NotEqual(signature, new LayoutOptions { TextProvider = _ => "x" }.FrameSignature());
+        Assert.NotEqual(signature, new LayoutOptions { Optimise = false }.FrameSignature());
+        Assert.NotEqual(signature, new LayoutOptions { CompactConstants = true }.FrameSignature());
+        Assert.NotEqual(signature, new LayoutOptions { EnableCaching = false }.FrameSignature());
+        Assert.NotEqual(signature, new LayoutOptions { MaxLayoutDepth = 2 }.FrameSignature());
+    }
+
+    [Fact]
     public void FrameSignatureAccountsForScrollOverrides()
     {
         var node = new IgniteSupportedDomNode();

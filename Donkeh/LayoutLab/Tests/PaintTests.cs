@@ -163,6 +163,35 @@ public class PaintTests
         Assert.Equal(2, result.Constants.Count);
     }
 
+    [Fact]
+    public void BackgroundSpecsAreRebuiltWhenLayerPropertiesChange()
+    {
+        var engine = new LayoutEngine(TestSupport.Build(
+            "#root { width: 100px; height: 50px;"
+            + " background-image: linear-gradient(red, blue);"
+            + " background-repeat: repeat; }"));
+        var root = TestSupport.Node("div", "root");
+        var options = TestSupport.Options(optimise: false);
+        options.TextMeasurer = TestSupport.FixedMeasurer.Instance;
+
+        var first = engine.Layout(root, options);
+        var style = TestSupport.Box(first, root).Style;
+
+        var firstDraw = TestSupport.Single(first, InstructionOpCode.DrawBackgroundImage);
+        Assert.Equal(
+            BackgroundRepeat.Repeat,
+            first.Constants.GetBackground(firstDraw.Payload).Repeat);
+
+        // Mutating the live style in place must invalidate the cached specs.
+        style.BackgroundRepeat = BackgroundRepeat.NoRepeat;
+        var second = engine.Repaint(first, options);
+
+        var secondDraw = TestSupport.Single(second, InstructionOpCode.DrawBackgroundImage);
+        Assert.Equal(
+            BackgroundRepeat.NoRepeat,
+            second.Constants.GetBackground(secondDraw.Payload).Repeat);
+    }
+
     // -------------------------------------------------------------- borders
 
     [Fact]

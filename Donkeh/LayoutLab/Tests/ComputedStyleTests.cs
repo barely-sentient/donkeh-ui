@@ -286,6 +286,7 @@ public class ComputedStyleTests
             LetterSpacing = CssLength.Px(2),
             TextAlign = TextAlign.Center,
             WhiteSpace = WhiteSpace.Pre,
+            OverflowWrap = OverflowWrap.Anywhere,
             TextOverflow = TextOverflow.Ellipsis,
             TextTransform = TextTransform.Uppercase,
             Direction = Direction.RightToLeft,
@@ -311,6 +312,7 @@ public class ComputedStyleTests
         Assert.Equal(CssLength.Px(2), child.LetterSpacing);
         Assert.Equal(TextAlign.Center, child.TextAlign);
         Assert.Equal(WhiteSpace.Pre, child.WhiteSpace);
+        Assert.Equal(OverflowWrap.Anywhere, child.OverflowWrap);
         Assert.Equal(TextOverflow.Ellipsis, child.TextOverflow);
         Assert.Equal(TextTransform.Uppercase, child.TextTransform);
         Assert.Equal(Direction.RightToLeft, child.Direction);
@@ -318,9 +320,9 @@ public class ComputedStyleTests
         Assert.Equal(Visibility.Hidden, child.Visibility);
         Assert.Equal(BorderCollapse.Collapse, child.BorderCollapse);
         Assert.Equal(CssLength.Px(9), child.BorderSpacing);
-        Assert.Equal(ObjectFit.Cover, child.ObjectFit);
 
         // Non-inherited values stay with the child.
+        Assert.Equal(ObjectFit.Fill, child.ObjectFit);
         Assert.Equal(Display.Inline, child.Display);
         Assert.Equal(CssLength.Px(1), child.Width);
         Assert.Equal(CssLength4.Zero, child.Margin);

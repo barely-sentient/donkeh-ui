@@ -486,9 +486,10 @@ public sealed partial class LayoutEngine
     /// <para>
     /// Background images reuse <see cref="ComputedStyle.CachedBackgroundSpecs"/>,
     /// which merges the parsed image list with the container-level repeat, clip,
-    /// origin and attachment properties. The specs are built once per style and
-    /// cached, so later frames only re-intern the resulting ids. Gradient draws
-    /// are marked <see cref="InstructionFlags.Repeatable"/>; URL images are not.
+    /// origin and attachment properties. The cache records its inputs and is
+    /// rebuilt when any of them changes, so later frames only re-intern the
+    /// resulting ids. Gradient draws are marked
+    /// <see cref="InstructionFlags.Repeatable"/>; URL images are not.
     /// </para>
     /// </remarks>
     private void PaintBackground(LayoutBox box, in Rect rect)
@@ -517,16 +518,16 @@ public sealed partial class LayoutEngine
             return;
         }
 
-        var specs = style.CachedBackgroundSpecs;
+        var cache = style.CachedBackgroundSpecs;
 
-        if (specs is null)
+        if (cache is null || !cache.Matches(style))
         {
-            specs = new BackgroundImageSpec[images.Length];
+            var builtSpecs = new BackgroundImageSpec[images.Length];
 
             for (var i = 0; i < images.Length; i++)
             {
                 var source = images[i];
-                specs[i] = new BackgroundImageSpec
+                builtSpecs[i] = new BackgroundImageSpec
                 {
                     Kind = source.Kind,
                     Url = source.Url,
@@ -542,9 +543,17 @@ public sealed partial class LayoutEngine
                 };
             }
 
-            style.CachedBackgroundSpecs = specs;
+            cache = new BackgroundSpecCache(
+                images,
+                style.BackgroundRepeat,
+                style.BackgroundClip,
+                style.BackgroundOrigin,
+                style.BackgroundFixed,
+                builtSpecs);
+            style.CachedBackgroundSpecs = cache;
         }
 
+        var specs = cache.Specs;
         var imageContext = CreateContext(style);
 
         for (var i = 0; i < specs.Length; i++)

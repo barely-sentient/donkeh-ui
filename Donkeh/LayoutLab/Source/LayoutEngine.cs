@@ -575,7 +575,8 @@ public sealed partial class LayoutEngine
             return;
         }
 
-        var baseStyle = _styleCache.TryGetValue(box.Node, out var entry)
+        var baseStyle = _options.EnableCaching
+            && _styleCache.TryGetValue(box.Node, out var entry)
             ? entry.Style
             : box.Style;
         var style = _animations.Apply(
@@ -738,6 +739,7 @@ public sealed partial class LayoutEngine
         hash.Add(style.LetterSpacing);
         hash.Add(style.TextAlign);
         hash.Add(style.WhiteSpace);
+        hash.Add(style.OverflowWrap);
         hash.Add(style.TextOverflow);
         hash.Add(style.TextTransform);
         hash.Add(style.Direction);
@@ -745,7 +747,6 @@ public sealed partial class LayoutEngine
         hash.Add(style.Visibility);
         hash.Add(style.BorderCollapse);
         hash.Add(style.BorderSpacing);
-        hash.Add(style.ObjectFit);
         return hash.ToHashCode();
     }
 
@@ -804,15 +805,21 @@ public sealed partial class LayoutEngine
         // while their inherited values are unchanged; keying on identity made
         // every descendant re-resolve its whole style chain each frame.
         var parentInheritedHash = parent is not null ? InheritedHash(parent) : 0;
-        _styleCache.TryGetValue(node, out var entry);
+        var useCache = _options.EnableCaching;
+        StyleCacheEntry? entry = null;
 
-        if (entry is not null
-            && entry.Revision == node.Revision
-            && entry.ParentInheritedHash == parentInheritedHash
-            && entry.Signature == _styleSignature
-            && entry.ContextVersion == _contextVersion)
+        if (useCache)
         {
-            return entry.Style;
+            _styleCache.TryGetValue(node, out entry);
+
+            if (entry is not null
+                && entry.Revision == node.Revision
+                && entry.ParentInheritedHash == parentInheritedHash
+                && entry.Signature == _styleSignature
+                && entry.ContextVersion == _contextVersion)
+            {
+                return entry.Style;
+            }
         }
 
         var count = _table.MatchRules(node, _rendererContext, _matchBuffer);
@@ -825,14 +832,17 @@ public sealed partial class LayoutEngine
 
         var style = _resolver.Resolve(node, parent, _matchBuffer.AsSpan(0, count));
 
-        _styleCache[node] = new StyleCacheEntry
+        if (useCache)
         {
-            Style = style,
-            Revision = node.Revision,
-            ParentInheritedHash = parentInheritedHash,
-            Signature = _styleSignature,
-            ContextVersion = _contextVersion
-        };
+            _styleCache[node] = new StyleCacheEntry
+            {
+                Style = style,
+                Revision = node.Revision,
+                ParentInheritedHash = parentInheritedHash,
+                Signature = _styleSignature,
+                ContextVersion = _contextVersion
+            };
+        }
 
         return style;
     }
@@ -2291,7 +2301,7 @@ public sealed partial class LayoutEngine
             style.WebkitLineClamp,
             style.TextOverflow);
 
-        var cacheText = _options.CacheTextLayouts;
+        var cacheText = _options.EnableCaching && _options.CacheTextLayouts;
 
         if (cacheText)
         {

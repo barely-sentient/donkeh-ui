@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Donkeh.Data;
 using Donkeh.Data.Dom;
 
@@ -96,11 +97,13 @@ public sealed class LayoutOptions
     /// <summary>Gets or sets whether <c>BeginFrame</c> and <c>EndFrame</c> markers survive optimisation.</summary>
     public bool IncludeFrameMarkers { get; set; }
 
-    /// <summary>Gets or sets the master caching switch used by host integrations and benchmarks.</summary>
+    /// <summary>Gets or sets the master switch for the engine's style and text layout caches.</summary>
     /// <remarks>
-    /// The current <see cref="LayoutEngine"/> retains its style and text caches
-    /// regardless of this value; disabling it is intended for measuring
-    /// uncached cost and does not change layout geometry.
+    /// When disabled the engine neither reads nor writes its style cache or text
+    /// layout cache, which makes it useful for measuring uncached cost.
+    /// Geometry is unchanged; <see cref="CacheTextLayouts"/> is ignored while
+    /// this is off. Parsed-value caching in <see cref="StyleValueCache"/> is not
+    /// affected.
     /// </remarks>
     public bool EnableCaching { get; set; } = true;
 
@@ -125,8 +128,9 @@ public sealed class LayoutOptions
     /// copying the instruction stream and node map every frame.
     /// </summary>
     /// <remarks>
-    /// The constant pool and the box tree are always shared with the engine, so
-    /// they are only valid until the next layout regardless of this setting.
+    /// With snapshotting enabled the instruction stream, constant pool and node
+    /// map belong to the result. The box tree is still owned by the engine and
+    /// may be mutated by a later layout, so treat it as read-only.
     /// </remarks>
     public bool SnapshotResults { get; set; } = true;
 
@@ -307,15 +311,23 @@ public sealed class LayoutOptions
         return context;
     }
 
-    /// <summary>Everything that changes layout but is not encoded in the DOM.</summary>
-    /// <returns>A process-local hash of the layout-relevant option values.</returns>
+    /// <summary>Everything that changes frame output but is not encoded in the DOM.</summary>
+    /// <returns>A process-local hash of the output-relevant option values.</returns>
     /// <remarks>
-    /// The hash covers the viewport size, orientation, root and default font
-    /// sizes, device pixel ratio, <see cref="ApplyScrollOffsets"/> and every
-    /// scroll override. It deliberately ignores the text measurer, provider
-    /// delegates, animation clock and the optimisation flags; extend it before
-    /// using it as a cache key for those inputs. The value is stable only within
-    /// one process.
+    /// <para>
+    /// The hash covers the viewport size, orientation, fonts, device pixel ratio,
+    /// scroll settings and overrides, layout depth, the provider and painter
+    /// delegates (by identity), the animation-enable flag and every
+    /// display-list and caching flag. This makes it safe as a frame cache key:
+    /// changing any input that can change geometry or instructions changes the
+    /// result.
+    /// </para>
+    /// <para>
+    /// <see cref="AnimationTimeSeconds"/> and the mutable state reached through
+    /// delegates are intentionally not hashed; advance the clock or change the
+    /// DOM between frames and key those changes separately. The value is stable
+    /// only within one process.
+    /// </para>
     /// </remarks>
     /// <example>
     /// <code>
@@ -335,6 +347,8 @@ public sealed class LayoutOptions
         hash.Add(DefaultFontSize);
         hash.Add(DevicePixelRatio);
         hash.Add(ApplyScrollOffsets);
+        hash.Add(MaxLayoutDepth);
+        hash.Add(AnimationsEnabled);
 
         if (ScrollOffsets is not null)
         {
@@ -344,6 +358,26 @@ public sealed class LayoutOptions
                 hash.Add(pair.Value);
             }
         }
+
+        // Delegates are compared by identity: a different provider can produce
+        // different text, intrinsic sizes or paint output even for the same DOM.
+        hash.Add(TextMeasurer is null ? 0 : RuntimeHelpers.GetHashCode(TextMeasurer));
+        hash.Add(TextProvider is null ? 0 : RuntimeHelpers.GetHashCode(TextProvider));
+        hash.Add(TextColorProvider is null ? 0 : RuntimeHelpers.GetHashCode(TextColorProvider));
+        hash.Add(IntrinsicSizeProvider is null ? 0 : RuntimeHelpers.GetHashCode(IntrinsicSizeProvider));
+        hash.Add(ImageProvider is null ? 0 : RuntimeHelpers.GetHashCode(ImageProvider));
+        hash.Add(CustomPainter is null ? 0 : RuntimeHelpers.GetHashCode(CustomPainter));
+
+        hash.Add(Optimise);
+        hash.Add(ClipToViewport);
+        hash.Add(CullOffscreen);
+        hash.Add(MergeDraws);
+        hash.Add(CompactConstants);
+        hash.Add(IncludeFrameMarkers);
+        hash.Add(EnableCaching);
+        hash.Add(CacheTextLayouts);
+        hash.Add(ReuseLayoutBoxes);
+        hash.Add(SnapshotResults);
 
         return hash.ToHashCode();
     }

@@ -48,10 +48,11 @@ public sealed class ComputedStyle
     /// <see cref="BackgroundImages"/> with the layer-independent
     /// <see cref="BackgroundRepeat"/>, <see cref="BackgroundClip"/>,
     /// <see cref="BackgroundOrigin"/> and <see cref="BackgroundFixed"/> values.
-    /// The cache is not invalidated automatically when those properties change,
-    /// so mutating them requires clearing this field.
+    /// The saved inputs are revalidated on every use, so mutating any of those
+    /// properties (or replacing <see cref="BackgroundImages"/>) rebuilds the
+    /// specs instead of painting stale layer settings.
     /// </remarks>
-    internal BackgroundImageSpec[]? CachedBackgroundSpecs;
+    internal BackgroundSpecCache? CachedBackgroundSpecs;
 
     /// <summary>
     /// Gets or sets generated content for a pseudo-element, or
@@ -675,8 +676,8 @@ public sealed class ComputedStyle
     /// <summary>Copies the inherited scalar properties from <paramref name="parent"/>.</summary>
     /// <param name="parent">The parent style to inherit from.</param>
     /// <remarks>
-    /// <see cref="OverflowWrap"/> is absent from this list even though CSS
-    /// makes <c>overflow-wrap</c> inherited.
+    /// The list follows CSS inheritance: <c>overflow-wrap</c> is inherited while
+    /// <c>object-fit</c> is not.
     /// </remarks>
     private void CopyInheritedScalarsFrom(ComputedStyle parent)
     {
@@ -689,6 +690,7 @@ public sealed class ComputedStyle
         LetterSpacing = parent.LetterSpacing;
         TextAlign = parent.TextAlign;
         WhiteSpace = parent.WhiteSpace;
+        OverflowWrap = parent.OverflowWrap;
         TextOverflow = parent.TextOverflow;
         TextTransform = parent.TextTransform;
         Direction = parent.Direction;
@@ -696,7 +698,6 @@ public sealed class ComputedStyle
         Visibility = parent.Visibility;
         BorderCollapse = parent.BorderCollapse;
         BorderSpacing = parent.BorderSpacing;
-        ObjectFit = parent.ObjectFit;
     }
 
     /// <summary>Resolves <see cref="FontSize"/> to CSS pixels.</summary>
@@ -825,7 +826,8 @@ public sealed class ComputedStyle
     /// <see cref="CustomProperties"/>, <see cref="UnsupportedProperties"/>,
     /// <see cref="Animations"/>, <see cref="BackgroundImages"/>,
     /// <see cref="BoxShadows"/> and the parsed paint specs end up shared.
-    /// <see cref="CachedBackgroundSpecs"/> is deliberately not copied.
+    /// <see cref="CachedBackgroundSpecs"/> is copied by reference; its validation
+    /// compares the copied background inputs, so a later mutation rebuilds it.
     /// </remarks>
     public void CopyAllFrom(ComputedStyle source)
     {
@@ -948,6 +950,41 @@ public sealed class ComputedStyle
         Animations = source.Animations;
         IsAnimated = source.IsAnimated;
         UsesViewportHeight = source.UsesViewportHeight;
+        CachedBackgroundSpecs = source.CachedBackgroundSpecs;
+    }
+}
+
+/// <summary>
+/// The merged background paint specs plus the inputs they were derived from.
+/// </summary>
+/// <remarks>
+/// <see cref="Matches"/> compares the image array by reference and the
+/// layer-independent values by value. The array contents are expected to be
+/// immutable once published; replacing <see cref="ComputedStyle.BackgroundImages"/>
+/// is detected, mutating its elements in place is not.
+/// </remarks>
+internal sealed class BackgroundSpecCache(
+    BackgroundImageSpec[] images,
+    BackgroundRepeat repeat,
+    BackgroundBox clip,
+    BackgroundBox origin,
+    bool @fixed,
+    BackgroundImageSpec[] specs)
+{
+    /// <summary>The source layers captured when the cache was built.</summary>
+    public BackgroundImageSpec[] Images { get; } = images;
+
+    /// <summary>The resolved per-layer paint specs.</summary>
+    public BackgroundImageSpec[] Specs { get; } = specs;
+
+    /// <summary>Returns whether <paramref name="style"/> still has the inputs this cache was built from.</summary>
+    public bool Matches(ComputedStyle style)
+    {
+        return ReferenceEquals(style.BackgroundImages, Images)
+            && style.BackgroundRepeat == repeat
+            && style.BackgroundClip == clip
+            && style.BackgroundOrigin == origin
+            && style.BackgroundFixed == @fixed;
     }
 }
 

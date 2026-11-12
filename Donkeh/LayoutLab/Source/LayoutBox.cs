@@ -381,14 +381,16 @@ public sealed class LayoutBox
 /// <remarks>
 /// <para>
 /// <see cref="Root"/> and the box tree are owned by the engine. Instruction
-/// snapshots and the node map are copied only when
+/// snapshots, the constant pool and the node map are copied only when
 /// <see cref="LayoutOptions.SnapshotResults"/> is enabled; otherwise all views
 /// alias engine storage that is cleared at the start of the next layout.
 /// </para>
 /// <para>
-/// <see cref="Constants"/> is always the engine's pool and is cleared at the
-/// start of the next layout regardless of snapshotting, so a result must be
-/// consumed before the next call to <see cref="LayoutEngine.Layout(IgniteSupportedDomNode, LayoutOptions)"/>.
+/// A snapshot owns an independent copy of the constants, so ids embedded in the
+/// copied instructions stay valid after the engine clears its pool for the next
+/// layout. With snapshotting disabled the pool is the engine's and is only
+/// valid until the next call to
+/// <see cref="LayoutEngine.Layout(IgniteSupportedDomNode, LayoutOptions)"/>.
 /// </para>
 /// </remarks>
 public sealed class LayoutResult
@@ -398,16 +400,16 @@ public sealed class LayoutResult
     /// <summary>Creates a frame result, optionally copying the instruction stream and node map.</summary>
     /// <param name="root">The root box, or <see langword="null"/> when the document produced no box.</param>
     /// <param name="instructions">The display list to expose.</param>
-    /// <param name="constants">The constant pool referenced by the instructions; always shared.</param>
+    /// <param name="constants">The constant pool referenced by the instructions; copied when <paramref name="snapshot"/> is <see langword="true"/>.</param>
     /// <param name="byNode">The node-to-box map; copied when <paramref name="snapshot"/> is <see langword="true"/>.</param>
     /// <param name="stats">The optimiser statistics for this frame.</param>
     /// <param name="hasAnimations">Whether any box had a running animation.</param>
     /// <param name="snapshot">Whether to copy the instruction stream and node map.</param>
     /// <param name="hasLayoutAnimations">Whether an active animation can change geometry.</param>
     /// <remarks>
-    /// The instruction copy pre-sizes its buffer to the source count; the node
-    /// map copy is a shallow dictionary clone. Neither copy includes the boxes
-    /// or constants they reference.
+    /// The instruction copy pre-sizes its buffer to the source count; the
+    /// constant pool and node map are shallow copies. The box tree is always
+    /// shared, so box geometry is only immutable when boxes are not reused.
     /// </remarks>
     public LayoutResult(
         LayoutBox? root,
@@ -421,7 +423,7 @@ public sealed class LayoutResult
     {
         Root = root;
         Instructions = snapshot ? Snapshot(instructions) : instructions;
-        Constants = constants;
+        Constants = snapshot ? constants.Snapshot() : constants;
         _byNode = snapshot
             ? new Dictionary<IgniteSupportedDomNode, LayoutBox>(byNode)
             : byNode;
@@ -448,7 +450,11 @@ public sealed class LayoutResult
     public InstructionBuffer Instructions { get; }
 
     /// <summary>Gets the constant pool referenced by <see cref="Instructions"/>.</summary>
-    /// <remarks>Always the engine's pool; it is cleared at the start of the next layout.</remarks>
+    /// <remarks>
+    /// An independent snapshot when <see cref="LayoutOptions.SnapshotResults"/>
+    /// is enabled; otherwise the engine's pool, which is cleared at the start of
+    /// the next layout.
+    /// </remarks>
     public ConstantPool Constants { get; }
 
     /// <summary>Gets the optimiser statistics for this frame.</summary>
