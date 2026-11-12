@@ -529,6 +529,7 @@ offers components, hooks, context and stylesheet attachment.
 | Type | Purpose |
 | --- | --- |
 | `_` | Static DSL: `H`, `C`, `F`, `Text`, `Show`, `Each`, `Provider`, `Key`. |
+| `HtmlHelper` | Typed HTML element factories (`Div`, `Span`, `Canvas`, `Video`, `Audio`, ...). |
 | `Props` | Strongly typed attributes and event handlers. |
 | `Node` / `ElementNode` / `TextNode` / `FragmentNode` / `ComponentNode` | Virtual and live tree nodes. |
 | `Component` / `Component<TProps>` | Lifecycle and typed props. |
@@ -552,6 +553,34 @@ Node root = renderer.Mount(
 // Later, from a frame loop:
 renderer.Flush();
 ```
+
+Typed HTML helpers are an alternative to raw `H("tag", ...)` calls. `HtmlHelper`
+has one method per HTML element, so the tag name is checked at the call site and
+discoverable through IntelliSense:
+
+Add `using static Donkeh.UILab.HtmlHelper;` alongside the existing DSL import.
+The static import drops the `HtmlHelper.` prefix and makes the helpers read like
+ordinary markup:
+
+```csharp
+using Donkeh.UILab;
+using static Donkeh.UILab._;
+using static Donkeh.UILab.HtmlHelper;
+
+Node root = Main(new Props { ClassName = "page" },
+    H1(new Props(), Text("Ignite")),
+    P(new Props(), Text("Drawn with typed HTML helpers.")),
+    Button(new Props
+    {
+        ClassName = "primary",
+        OnClick = () => { }
+    }, Text("Click me")));
+```
+
+Media elements keep their typed props, for example
+`Canvas(new CanvasProps { OnContext = gl => { ... } })`,
+`Audio(new AudioProps { Src = "track.mp3", Controls = true })` and
+`Video(new VideoProps { Src = "movie.mp4", Controls = true })`.
 
 Components:
 
