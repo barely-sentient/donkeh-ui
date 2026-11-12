@@ -121,7 +121,7 @@ public static class HtmlDefaults
 
         button { cursor: pointer; font-weight: 600; }
         input { min-height: 32px; }
-        textarea { min-height: 72px; }
+        textarea { width: 120px; min-height: 72px; white-space: pre-wrap; }
         select { min-height: 32px; }
         select option { display: none; }
         input[type="checkbox"], input[type="radio"] { min-height: 0; padding: 0; }

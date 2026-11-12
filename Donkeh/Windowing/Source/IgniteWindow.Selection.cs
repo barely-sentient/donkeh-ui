@@ -106,6 +106,15 @@ public sealed partial class IgniteWindow
     /// </summary>
     private ElementNode? _lastClickElement;
 
+    /// <summary>Edit-buffer string that produced the cached control line starts.</summary>
+    private string? _controlLineStartsText;
+
+    /// <summary>Lay-out line array that produced the cached control line starts.</summary>
+    private TextLine[]? _controlLineStartsLines;
+
+    /// <summary>Cached buffer offset for each control visual line.</summary>
+    private int[]? _controlLineStarts;
+
     /// <summary>
     /// Consecutive click count for the current element and position, in the
     /// range 1 to 3. A fourth rapid click stays at three.
@@ -685,26 +694,41 @@ public sealed partial class IgniteWindow
     /// </remarks>
     private static int NearestLine(TextLine[] lines, float y)
     {
-        var best = 0;
-        var bestDistance = float.MaxValue;
+        // Lines are laid out top-to-bottom without overlap, so the answer is one
+        // of the two lines around the insertion point.
+        var low = 0;
+        var high = lines.Length;
 
-        for (var i = 0; i < lines.Length; i++)
+        while (low < high)
         {
-            var line = lines[i];
-            var distance = y < line.Y
-                ? line.Y - y
-                : y > line.Y + line.Height
-                    ? y - (line.Y + line.Height)
-                    : 0;
+            var middle = low + (high - low) / 2;
 
-            if (distance < bestDistance)
+            if (lines[middle].Y + lines[middle].Height < y)
             {
-                bestDistance = distance;
-                best = i;
+                low = middle + 1;
+            }
+            else
+            {
+                high = middle;
             }
         }
 
-        return best;
+        if (low <= 0)
+        {
+            return 0;
+        }
+
+        if (low >= lines.Length)
+        {
+            return lines.Length - 1;
+        }
+
+        var previous = lines[low - 1];
+        var next = lines[low];
+        var previousDistance = y - (previous.Y + previous.Height);
+        var nextDistance = next.Y - y;
+
+        return nextDistance < previousDistance ? low : low - 1;
     }
 
     /// <summary>
@@ -726,26 +750,56 @@ public sealed partial class IgniteWindow
     /// </remarks>
     private int OffsetInLine(string text, float x, in TextStyle style)
     {
-        var target = MathF.Max(0, x);
-        var best = 0;
-        var bestDistance = MathF.Abs(target);
-
-        for (var i = 0; i < text.Length;)
+        if (text.Length == 0)
         {
-            var next = NextTextElement(text, i);
-            var width = MeasurePrefix(text, next, in style);
-            var distance = MathF.Abs(width - target);
-
-            if (distance < bestDistance)
-            {
-                bestDistance = distance;
-                best = next;
-            }
-
-            i = next;
+            return 0;
         }
 
-        return best;
+        var target = MathF.Max(0, x);
+
+        if (target <= 0)
+        {
+            return 0;
+        }
+
+        if (MeasurePrefix(text, text.Length, in style) <= target)
+        {
+            return text.Length;
+        }
+
+        // Prefix widths are monotonic for normal text, so binary search finds
+        // the boundary without measuring every prefix from the start.
+        var low = 0;
+        var high = text.Length;
+
+        while (low < high)
+        {
+            var middle = low + (high - low) / 2;
+
+            if (MeasurePrefix(text, middle, in style) < target)
+            {
+                low = middle + 1;
+            }
+            else
+            {
+                high = middle;
+            }
+        }
+
+        var lower = low;
+
+        if (lower > 0 && lower < text.Length && char.IsLowSurrogate(text[lower]))
+        {
+            lower--;
+        }
+
+        var upper = lower < text.Length ? NextTextElement(text, lower) : text.Length;
+        var lowerWidth = MeasurePrefix(text, lower, in style);
+        var upperWidth = MeasurePrefix(text, upper, in style);
+
+        return MathF.Abs(lowerWidth - target) <= MathF.Abs(upperWidth - target)
+            ? lower
+            : upper;
     }
 
     /// <summary>
@@ -1438,8 +1492,19 @@ public sealed partial class IgniteWindow
             ? box.ContentBox.Translate(-scrollX, -scrollY)
             : SelectionClipRect(box);
         var style = text.Style;
+        var firstLine = 0;
+        var lastLine = lines.Length;
 
-        for (var i = 0; i < lines.Length; i++)
+        // Only touch lines that can contribute to the painted clip. This keeps
+        // selecting a very large textarea proportional to what is visible
+        // instead of the whole buffer.
+        if (clipRect is { } visible)
+        {
+            firstLine = FirstLineAtOrAfter(lines, visible.Y);
+            lastLine = FirstLineAfter(lines, visible.Bottom);
+        }
+
+        for (var i = firstLine; i < lastLine; i++)
         {
             var line = lines[i];
             var lineStart = starts[i];
@@ -1472,6 +1537,53 @@ public sealed partial class IgniteWindow
 
             instructions.AddDrawRect(rect, SelectionColor);
         }
+    }
+
+    /// <summary>Finds the first line whose bottom edge reaches a Y coordinate.</summary>
+    private static int FirstLineAtOrAfter(TextLine[] lines, float y)
+    {
+        var low = 0;
+        var high = lines.Length;
+
+        while (low < high)
+        {
+            var middle = low + (high - low) / 2;
+            var line = lines[middle];
+
+            if (line.Y + line.Height < y)
+            {
+                low = middle + 1;
+            }
+            else
+            {
+                high = middle;
+            }
+        }
+
+        return low;
+    }
+
+    /// <summary>Finds the first line whose top edge is below a Y coordinate.</summary>
+    private static int FirstLineAfter(TextLine[] lines, float y)
+    {
+        var low = 0;
+        var high = lines.Length;
+
+        while (low < high)
+        {
+            var middle = low + (high - low) / 2;
+
+            if (lines[middle].Y <= y)
+            {
+                low = middle + 1;
+            }
+            else
+            {
+                high = middle;
+            }
+        }
+
+        return low;
     }
 
     /// <summary>
@@ -1518,8 +1630,15 @@ public sealed partial class IgniteWindow
     /// layout trimmed or transformed it, the current position is used so offsets
     /// stay monotonic instead of failing.
     /// </remarks>
-    private static int[] LineStarts(string text, TextLine[] lines)
+    private int[] LineStarts(string text, TextLine[] lines)
     {
+        if (ReferenceEquals(_controlLineStartsText, text)
+            && ReferenceEquals(_controlLineStartsLines, lines)
+            && _controlLineStarts is not null)
+        {
+            return _controlLineStarts;
+        }
+
         var starts = new int[lines.Length];
         var search = 0;
 
@@ -1544,6 +1663,9 @@ public sealed partial class IgniteWindow
             search = Math.Min(text.Length, index + lineText.Length);
         }
 
+        _controlLineStartsText = text;
+        _controlLineStartsLines = lines;
+        _controlLineStarts = starts;
         return starts;
     }
 
