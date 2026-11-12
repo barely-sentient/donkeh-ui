@@ -386,6 +386,12 @@ public sealed partial class IgniteWindow : IDisposable
     /// <summary>The element the last press landed on; drives the click on release.</summary>
     private ElementNode? _pressed;
 
+    /// <summary>Pointer position where the current press started.</summary>
+    private float _pressX;
+
+    /// <summary>Pointer position where the current press started.</summary>
+    private float _pressY;
+
     /// <summary>
     /// The element that captured the pointer (a <c>pointerdown</c> handler target).
     /// </summary>
@@ -4384,6 +4390,8 @@ public sealed partial class IgniteWindow : IDisposable
         }
 
         var element = HitTest(_mouseX, _mouseY);
+        _pressX = _mouseX;
+        _pressY = _mouseY;
 
         if (element is not null
             && (element.Tag == "audio" || element.Tag == "video")
@@ -4600,20 +4608,28 @@ public sealed partial class IgniteWindow : IDisposable
         SetActive(null);
         Invoke(_pressed, "mouseup");
 
-        if (ReferenceEquals(element, _pressed)
-            && element is not null
-            && !element.TryGetAttribute("disabled", out var ignoredDisabled))
+        // Focus and :focus/:active styles can relayout between press and
+        // release, which moves a button under the pointer. As long as the
+        // pointer did not actually drag, the press target remains the click
+        // target, matching what the user sees and expects.
+        var nearPress = _pressed is not null
+            && MathF.Abs(_mouseX - _pressX) < 4
+            && MathF.Abs(_mouseY - _pressY) < 4;
+
+        if ((ReferenceEquals(element, _pressed) || nearPress)
+            && _pressed is not null
+            && !_pressed.TryGetAttribute("disabled", out var ignoredDisabled))
         {
-            if (element.Tag == "input")
+            if (_pressed.Tag == "input")
             {
-                ToggleInput(element);
+                ToggleInput(_pressed);
             }
 
-            Invoke(element, "click");
+            Invoke(_pressed, "click");
 
-            if (element.Tag is "input" or "textarea" or "select")
+            if (_pressed.Tag is "input" or "textarea" or "select")
             {
-                Focus(element);
+                Focus(_pressed);
             }
         }
 
@@ -6377,12 +6393,12 @@ public sealed partial class IgniteWindow : IDisposable
         // border box or the children can never be hit.
         var isContents = box.IsContents || box.Style.Display == Display.Contents;
 
-        if (!isContents && !painted.Contains(x, y))
-        {
-            return null;
-        }
-
-        if (box.IsScrollContainer && !isContents)
+        // Clipping containers reject points outside their padding box before
+        // their subtree is considered. Everything else keeps descending even
+        // when the point lies outside the box: an absolutely positioned
+        // dropdown menu, for example, paints outside the cell that placed it
+        // and must still receive pointer input.
+        if (!isContents && box.IsScrollContainer)
         {
             var clip = box.PaddingBox.Translate(-scrollX, -scrollY);
 
@@ -6395,6 +6411,8 @@ public sealed partial class IgniteWindow : IDisposable
             scrollY += box.ScrollOffsetY;
         }
 
+        var inside = isContents || painted.Contains(x, y);
+
         for (var i = box.Children.Count - 1; i >= 0; i--)
         {
             var hit = HitTestBox(box.Children[i], x, y, scrollX, scrollY, skipFixed);
@@ -6405,10 +6423,11 @@ public sealed partial class IgniteWindow : IDisposable
             }
         }
 
-        // A contents box has no geometry of its own. Returning it would make
-        // it swallow points that belong to a later sibling (for example the
-        // disclosure triangle next to a tree row's content fragment).
-        return isContents ? null : box;
+        // Only the box's own border box makes the box itself a hit. A contents
+        // box has no geometry of its own. Returning it would make it swallow
+        // points that belong to a later sibling (for example the disclosure
+        // triangle next to a tree row's content fragment).
+        return inside && !isContents ? box : null;
     }
 
     /// <summary>Climbs from a node to the nearest element ancestor, including itself.</summary>

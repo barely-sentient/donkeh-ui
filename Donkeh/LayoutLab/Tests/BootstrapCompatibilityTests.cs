@@ -83,6 +83,109 @@ public sealed class BootstrapCompatibilityTests
     }
 
     [Fact]
+    public void StructuralPseudoClassesInsideNotAreEvaluated()
+    {
+        const string css = """
+            .item { border-radius: 6px; }
+            .group > .item:not(:last-child) { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+            .group > .item:last-child { border-top-right-radius: 10px; }
+            """;
+
+        var group = TestSupport.Node("div", classes: "group");
+        var first = TestSupport.Node("button", classes: "item");
+        var last = TestSupport.Node("button", classes: "item");
+        group.Children = [first, last];
+
+        var result = TestSupport.Layout(css, group);
+        var firstStyle = TestSupport.Box(result, first).Style;
+        var lastStyle = TestSupport.Box(result, last).Style;
+
+        // The first item is not the last child, so the negation applies.
+        Assert.Equal(0, firstStyle.BorderRadius.TopLeft.Value, 3);
+
+        // The last item must not match :not(:last-child); it keeps the base
+        // radius and gains the last-child corner.
+        Assert.Equal(6, lastStyle.BorderRadius.TopLeft.Value, 3);
+        Assert.Equal(10, lastStyle.BorderRadius.TopRight.Value, 3);
+        Assert.Equal(6, lastStyle.BorderRadius.BottomRight.Value, 3);
+    }
+
+    [Fact]
+    public void SplitButtonKeepsOuterCornerRadius()
+    {
+        // The Bootstrap group rules that square inner corners explicitly skip
+        // the dropdown toggle, so a split button keeps its right-side radius
+        // even though the hidden menu is the last child of the group.
+        const string css = """
+            .btn { border-radius: 6px; }
+            .btn-group > .btn:not(:last-child):not(.dropdown-toggle) { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+            .btn-group > :not(.btn-check) + .btn { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+            """;
+
+        var group = TestSupport.Node("div", classes: "btn-group");
+        var primary = TestSupport.Node("button", classes: ["btn", "btn-primary"]);
+        var toggle = TestSupport.Node("button", classes: ["btn", "btn-primary", "dropdown-toggle", "dropdown-toggle-split"]);
+        var menu = TestSupport.Node("div", classes: "dropdown-menu");
+        group.Children = [primary, toggle, menu];
+
+        var result = TestSupport.Layout(css, group);
+        var primaryStyle = TestSupport.Box(result, primary).Style;
+        var toggleStyle = TestSupport.Box(result, toggle).Style;
+
+        Assert.Equal(0, toggleStyle.BorderRadius.TopLeft.Value, 3);
+        Assert.Equal(6, toggleStyle.BorderRadius.TopRight.Value, 3);
+        Assert.Equal(6, toggleStyle.BorderRadius.BottomRight.Value, 3);
+
+        Assert.Equal(0, primaryStyle.BorderRadius.TopRight.Value, 3);
+    }
+
+    [Fact]
+    public void SuppressedSiblingsAreIgnoredByStructuralSelectors()
+    {
+        // A closed dropdown menu is still in the host tree but generates no box.
+        // The split toggle must be treated as the last rendered child so the
+        // outer right corner keeps its radius.
+        const string css = """
+            .btn { border-radius: 6px; }
+            .split > .btn { border-radius: 0; }
+            .split > .btn:last-child { border-top-right-radius: 6px; border-bottom-right-radius: 6px; }
+            .menu { display: none; }
+            """;
+
+        var group = TestSupport.Node("div", classes: "split");
+        var primary = TestSupport.Node("button", classes: "btn");
+        var toggle = TestSupport.Node("button", classes: "btn");
+        var menu = TestSupport.Node("div", classes: "menu");
+        group.Children = [primary, toggle, menu];
+
+        var result = TestSupport.Layout(css, group);
+        var toggleStyle = TestSupport.Box(result, toggle).Style;
+
+        Assert.Equal(6, toggleStyle.BorderRadius.TopRight.Value, 3);
+        Assert.Equal(6, toggleStyle.BorderRadius.BottomRight.Value, 3);
+        Assert.Equal(0, toggleStyle.BorderRadius.TopLeft.Value, 3);
+    }
+
+    [Fact]
+    public void DisplayedSiblingsStillCountForLastChild()
+    {
+        const string css = """
+            .item { border-top-right-radius: 6px; }
+            .item:last-child { border-top-right-radius: 0; }
+            """;
+
+        var group = TestSupport.Node("div");
+        var first = TestSupport.Node("button", classes: "item");
+        var last = TestSupport.Node("button", classes: "item");
+        group.Children = [first, last];
+
+        var result = TestSupport.Layout(css, group);
+
+        Assert.Equal(6, TestSupport.Box(result, first).Style.BorderRadius.TopRight.Value, 3);
+        Assert.Equal(0, TestSupport.Box(result, last).Style.BorderRadius.TopRight.Value, 3);
+    }
+
+    [Fact]
     public void NestedRgbVariablesResolve()
     {
         const string css = """

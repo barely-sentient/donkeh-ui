@@ -42,12 +42,29 @@ public sealed partial class LayoutEngine
         }
 
         _fixedBoxes.Clear();
+        _overlayBoxes.Clear();
         _paintingFixed = false;
+        _paintingOverlays = false;
         PaintBox(root, 0, 0);
+
+        // Positioned boxes with a positive z-index (dropdown menus, popovers,
+        // tooltips) paint above later normal-flow siblings. Without this pass a
+        // menu opened inside an earlier grid cell is covered by the next cell.
+        _paintingOverlays = true;
+        _overlayBoxes.Sort(static (a, b) => a.Box.EffectiveZIndex.CompareTo(b.Box.EffectiveZIndex));
+
+        for (var i = 0; i < _overlayBoxes.Count; i++)
+        {
+            var overlay = _overlayBoxes[i];
+            PaintBox(overlay.Box, overlay.Tx, overlay.Ty);
+        }
+
+        _paintingOverlays = false;
 
         // Fixed boxes are positioned against the viewport and must not be
         // clipped by an ancestor scroll container. Paint them after the normal
-        // tree so modals, offcanvas panels and tooltips sit above the page.
+        // tree and overlays so modals, offcanvas panels and tooltips sit above
+        // the page.
         _paintingFixed = true;
 
         for (var i = 0; i < _fixedBoxes.Count; i++)
@@ -135,6 +152,15 @@ public sealed partial class LayoutEngine
             // clips, so a modal is never cut off by a scrolling page.
             tx = 0;
             ty = 0;
+        }
+
+        if (!_paintingOverlays
+            && !_paintingFixed
+            && box.Style.HasZIndex
+            && box.Style.ZIndex > 0)
+        {
+            _overlayBoxes.Add((box, tx, ty));
+            return;
         }
 
         if (box.IsContents)
@@ -519,6 +545,8 @@ public sealed partial class LayoutEngine
             style.CachedBackgroundSpecs = specs;
         }
 
+        var imageContext = CreateContext(style);
+
         for (var i = 0; i < specs.Length; i++)
         {
             var source = images[i];
@@ -529,13 +557,38 @@ public sealed partial class LayoutEngine
                 continue;
             }
 
+            // background-size controls the image's own draw rect. The renderer
+            // draws a texture over the instruction rectangle, so resolving the
+            // size here keeps a 1em icon from being stretched across the whole
+            // element (Bootstrap's .btn-close and .accordion-button::after both
+            // rely on this).
+            var drawArea = area;
+
+            if (style.BackgroundSizeMode == BackgroundSizeMode.Explicit)
+            {
+                var width = style.BackgroundWidth.IsAuto
+                    ? area.Width
+                    : style.BackgroundWidth.ResolveOr(in imageContext, area.Width, area.Width);
+                var height = style.BackgroundHeight.IsAuto
+                    ? width
+                    : style.BackgroundHeight.ResolveOr(in imageContext, area.Height, width);
+
+                width = MathF.Min(width, area.Width);
+                height = MathF.Min(height, area.Height);
+                drawArea = new Rect(
+                    area.X + (area.Width - width) / 2,
+                    area.Y + (area.Height - height) / 2,
+                    width,
+                    height);
+            }
+
             var id = _constants.AddBackground(spec);
             _instructions.Add(new Instruction(
                 InstructionOpCode.DrawBackgroundImage,
-                area.X,
-                area.Y,
-                area.Width,
-                area.Height,
+                drawArea.X,
+                drawArea.Y,
+                drawArea.Width,
+                drawArea.Height,
                 id,
                 flags: source.Kind == ImageKind.Url ? InstructionFlags.None : InstructionFlags.Repeatable));
         }
@@ -631,6 +684,11 @@ public sealed partial class LayoutEngine
         var context = CreateContext(style);
         var widths = style.BorderWidth.Resolve(in context, rect.Width);
 
+        if (TryPaintBorderTriangle(box, rect, style, widths))
+        {
+            return;
+        }
+
         var spec = new BorderSpec(
             new BorderSide(
                 style.BorderStyleTop is BorderStyle.None or BorderStyle.Hidden ? 0 : widths.Top,
@@ -657,6 +715,136 @@ public sealed partial class LayoutEngine
 
         var id = _constants.AddBorder(spec);
         _instructions.Add(Instruction.DrawBorder(rect, id));
+    }
+
+    /// <summary>
+    /// Paints the zero-content border triangle used for CSS carets, such as
+    /// Bootstrap's <c>.dropdown-toggle::after</c>.
+    /// </summary>
+    /// <param name="box">Box whose border is being painted.</param>
+    /// <param name="rect">Border box in paint coordinates.</param>
+    /// <param name="style">Computed style with the four border colours.</param>
+    /// <param name="widths">Resolved border widths.</param>
+    /// <returns>
+    /// <see langword="true"/> when the border was a degenerate triangle and has
+    /// been emitted; otherwise <see langword="false"/>.
+    /// </returns>
+    /// <remarks>
+    /// A zero-content element with one coloured border and two transparent
+    /// side borders is the standard CSS triangle idiom. The regular border
+    /// path would paint the visible side as a rectangle, so it is rasterised
+    /// into thin horizontal or vertical slices that taper to the opposite edge.
+    /// </remarks>
+    private bool TryPaintBorderTriangle(
+        LayoutBox box,
+        in Rect rect,
+        ComputedStyle style,
+        in Thickness widths)
+    {
+        if (rect.Width <= 0 || rect.Height <= 0)
+        {
+            return false;
+        }
+
+        var top = ResolveColor(style, style.BorderColorTop);
+        var right = ResolveColor(style, style.BorderColorRight);
+        var bottom = ResolveColor(style, style.BorderColorBottom);
+        var left = ResolveColor(style, style.BorderColorLeft);
+
+        var topWidth = style.BorderStyleTop is BorderStyle.None or BorderStyle.Hidden ? 0 : widths.Top;
+        var rightWidth = style.BorderStyleRight is BorderStyle.None or BorderStyle.Hidden ? 0 : widths.Right;
+        var bottomWidth = style.BorderStyleBottom is BorderStyle.None or BorderStyle.Hidden ? 0 : widths.Bottom;
+        var leftWidth = style.BorderStyleLeft is BorderStyle.None or BorderStyle.Hidden ? 0 : widths.Left;
+
+        // Down-pointing triangle: coloured top, transparent sides, no bottom.
+        if ((top & 0xFF000000) != 0
+            && (right & 0xFF000000) == 0
+            && (left & 0xFF000000) == 0
+            && topWidth > 0
+            && rect.Height <= topWidth + 0.75f)
+        {
+            PaintTriangleSlices(rect, top, vertical: true, pointsDown: true);
+            return true;
+        }
+
+        // Up-pointing triangle.
+        if ((bottom & 0xFF000000) != 0
+            && (right & 0xFF000000) == 0
+            && (left & 0xFF000000) == 0
+            && bottomWidth > 0
+            && rect.Height <= bottomWidth + 0.75f)
+        {
+            PaintTriangleSlices(rect, bottom, vertical: true, pointsDown: false);
+            return true;
+        }
+
+        // Right-pointing triangle (coloured left border).
+        if ((left & 0xFF000000) != 0
+            && (top & 0xFF000000) == 0
+            && (bottom & 0xFF000000) == 0
+            && leftWidth > 0
+            && rect.Width <= leftWidth + 0.75f)
+        {
+            PaintTriangleSlices(rect, left, vertical: false, pointsDown: true);
+            return true;
+        }
+
+        // Left-pointing triangle (coloured right border).
+        if ((right & 0xFF000000) != 0
+            && (top & 0xFF000000) == 0
+            && (bottom & 0xFF000000) == 0
+            && rightWidth > 0
+            && rect.Width <= rightWidth + 0.75f)
+        {
+            PaintTriangleSlices(rect, right, vertical: false, pointsDown: false);
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>Rasterises a triangle into thin solid slices.</summary>
+    /// <param name="rect">Triangle bounds.</param>
+    /// <param name="color">Packed ARGB fill colour.</param>
+    /// <param name="vertical">
+    /// <see langword="true"/> to slice horizontally (pointing up/down), otherwise
+    /// vertically (pointing left/right).
+    /// </param>
+    /// <param name="pointsDown">
+    /// For horizontal slices, true points down; for vertical slices, true points
+    /// right.
+    /// </param>
+    private void PaintTriangleSlices(in Rect rect, uint color, bool vertical, bool pointsDown)
+    {
+        var length = vertical ? rect.Height : rect.Width;
+        var cross = vertical ? rect.Width : rect.Height;
+        var slices = Math.Clamp((int) MathF.Ceiling(length), 1, 64);
+        var slice = length / slices;
+
+        for (var i = 0; i < slices; i++)
+        {
+            var t = (i + 0.5f) / slices;
+            var taper = pointsDown ? 1 - t : t;
+            var run = MathF.Max(0, cross * taper);
+
+            if (run <= 0)
+            {
+                continue;
+            }
+
+            if (vertical)
+            {
+                _instructions.AddDrawRect(
+                    new Rect(rect.X + (rect.Width - run) * 0.5f, rect.Y + i * slice, run, slice + 0.25f),
+                    color);
+            }
+            else
+            {
+                _instructions.AddDrawRect(
+                    new Rect(rect.X + i * slice, rect.Y + (rect.Height - run) * 0.5f, slice + 0.25f, run),
+                    color);
+            }
+        }
     }
 
     /// <summary>Emits the outline drawn just outside the border box.</summary>

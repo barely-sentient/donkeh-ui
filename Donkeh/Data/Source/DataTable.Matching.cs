@@ -87,6 +87,11 @@ namespace Donkeh.Data
         /// When supplied, rules whose condition does not match are dropped. When
         /// omitted, conditions are not evaluated.
         /// </param>
+        /// <param name="pseudoElement">
+        /// Which generated pseudo-element to match. The default
+        /// <see cref="PseudoElementKind.None"/> matches only rules for the element
+        /// itself.
+        /// </param>
         /// <returns>
         /// A new array of the matching rules, sorted weakest first. The array is a
         /// copy, so it stays valid after the next call.
@@ -97,14 +102,17 @@ namespace Donkeh.Data
         /// <remarks>
         /// Text nodes and fragments never match and return an empty array. This
         /// overload allocates; use
-        /// <see cref="MatchRules(IgniteSupportedDomNode, RendererContext, Span{MatchedRule})"/>
+        /// <see cref="MatchRules(IgniteSupportedDomNode, RendererContext, Span{MatchedRule}, PseudoElementKind)"/>
         /// on hot paths.
         /// </remarks>
-        public MatchedRule[] MatchRules(IgniteSupportedDomNode node, RendererContext? context = null)
+        public MatchedRule[] MatchRules(
+            IgniteSupportedDomNode node,
+            RendererContext? context = null,
+            PseudoElementKind pseudoElement = PseudoElementKind.None)
         {
             ArgumentNullException.ThrowIfNull(node);
 
-            var count = MatchCore(node, context);
+            var count = MatchCore(node, context, pseudoElement);
             return _matchBuffer.AsSpan(0, count).ToArray();
         }
 
@@ -120,6 +128,11 @@ namespace Donkeh.Data
         /// omitted, conditions are not evaluated.
         /// </param>
         /// <param name="destination">The buffer that receives the weakest matches first.</param>
+        /// <param name="pseudoElement">
+        /// Which generated pseudo-element to match. The default
+        /// <see cref="PseudoElementKind.None"/> matches only rules for the element
+        /// itself.
+        /// </param>
         /// <returns>
         /// The total number of matching rules, which may exceed
         /// <c>destination.Length</c>.
@@ -134,11 +147,12 @@ namespace Donkeh.Data
         public int MatchRules(
             IgniteSupportedDomNode node,
             RendererContext? context,
-            Span<MatchedRule> destination)
+            Span<MatchedRule> destination,
+            PseudoElementKind pseudoElement = PseudoElementKind.None)
         {
             ArgumentNullException.ThrowIfNull(node);
 
-            var count = MatchCore(node, context);
+            var count = MatchCore(node, context, pseudoElement);
             _matchBuffer.AsSpan(0, Math.Min(count, destination.Length)).CopyTo(destination);
             return count;
         }
@@ -150,8 +164,12 @@ namespace Donkeh.Data
         /// </summary>
         /// <param name="node">The element to match.</param>
         /// <param name="context">The environment for condition filtering, or null.</param>
+        /// <param name="pseudoElement">Generated pseudo-element to match.</param>
         /// <returns>The number of entries written to the match buffer.</returns>
-        private int MatchCore(IgniteSupportedDomNode node, RendererContext? context)
+        private int MatchCore(
+            IgniteSupportedDomNode node,
+            RendererContext? context,
+            PseudoElementKind pseudoElement)
         {
             // Text nodes and fragments are not elements and never match selectors.
             // They inherit their style from the element that owns them.
@@ -170,7 +188,9 @@ namespace Donkeh.Data
                 var selectorId = _candidateSelectors[i];
                 var record = _selectors[selectorId];
 
-                if (!record.IsMatchable || !MatchesSelector(selectorId, in record, node))
+                if (!record.IsMatchable
+                    || record.PseudoElement != pseudoElement
+                    || !MatchesSelector(selectorId, in record, node))
                 {
                     continue;
                 }
@@ -451,6 +471,12 @@ namespace Donkeh.Data
 
                         break;
 
+                    case TokenKind.PseudoElement:
+                        // The pseudo-element itself is selected by the caller
+                        // through MatchRules(..., PseudoElementKind). The tokens
+                        // before it still describe the originating element.
+                        break;
+
                     case TokenKind.LeftSquareBracket:
                         if (filterIndex >= filters.Length
                             || !MatchesAttribute(filters[filterIndex++], node))
@@ -467,7 +493,7 @@ namespace Donkeh.Data
 
                     case TokenKind.PseudoClass:
                         if (pseudoIndex >= pseudos.Length
-                            || !MatchesPseudo(pseudos[pseudoIndex++], node))
+                            || !MatchesPseudo(pseudos[pseudoIndex++], tokens, node))
                         {
                             return false;
                         }
@@ -489,19 +515,123 @@ namespace Donkeh.Data
         }
 
         /// <summary>
+        /// Evaluates a simple compound used by a logical pseudo class such as
+        /// <c>:not(.show)</c>.
+        /// </summary>
+        /// <param name="tokens">The argument tokens, without parentheses.</param>
+        /// <param name="node">The node to test.</param>
+        /// <returns><see langword="true"/> when every token in the compound matches.</returns>
+        /// <remarks>
+        /// This deliberately supports only a simple compound. Analysis rejects
+        /// selector lists and combinators inside the argument, so the matcher has
+        /// no backtracking to do and cannot mis-handle a complex negation.
+        /// </remarks>
+        private static bool MatchesSimpleCompound(
+            ReadOnlySpan<Token> tokens,
+            IgniteSupportedDomNode node)
+        {
+            var classDelimiterId = SelectorAnalysis.ClassDelimiterId;
+
+            for (var i = 0; i < tokens.Length; i++)
+            {
+                var token = tokens[i];
+
+                switch (token.Kind)
+                {
+                    case TokenKind.Asterisk:
+                        break;
+
+                    case TokenKind.Identifier:
+                    case TokenKind.PropertyName:
+                        if (i > 0 && tokens[i - 1].Kind == TokenKind.Delimiter
+                            && tokens[i - 1].InternedId == classDelimiterId)
+                        {
+                            if (!node.HasInternedClass(token.InternedId))
+                            {
+                                return false;
+                            }
+                        }
+                        else if (token.InternedId != node.InternedTagName)
+                        {
+                            return false;
+                        }
+
+                        break;
+
+                    case TokenKind.Hash:
+                        if (token.InternedId != node.InternedId)
+                        {
+                            return false;
+                        }
+
+                        break;
+
+                    case TokenKind.Delimiter:
+                        if (token.InternedId != classDelimiterId)
+                        {
+                            return false;
+                        }
+
+                        break;
+
+                    case TokenKind.LeftSquareBracket:
+                        // Attribute arguments are not used by the built-in
+                        // components and would need the full filter parser.
+                        return false;
+
+                    case TokenKind.PseudoClass:
+                        // Pseudo classes inside a :not() argument still have to
+                        // be evaluated: Bootstrap writes structural negations
+                        // such as :not(:last-child) and :not(:disabled) on every
+                        // button in a group. Returning false here made the
+                        // negation always true, which stripped the outer corner
+                        // radii from the last button in a group.
+                        if (!SelectorAnalysis.TryParsePseudoClass(
+                                tokens,
+                                i,
+                                tokens.Length,
+                                compoundStart: 0,
+                                out var inner,
+                                out var next)
+                            || !MatchesPseudo(inner, tokens, node))
+                        {
+                            return false;
+                        }
+
+                        i = next;
+                        break;
+
+                    default:
+                        return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
         /// Evaluates a parsed pseudo class against a node and its sibling positions.
         /// </summary>
         /// <param name="pseudo">The pseudo class and its optional <c>An+B</c> terms.</param>
+        /// <param name="selectorTokens">The compound's tokens, used by <c>:not()</c>.</param>
         /// <param name="node">The node to test.</param>
         /// <returns><see langword="true"/> when the pseudo class matches.</returns>
         /// <remarks>
         /// Unknown kinds return <see langword="false"/>; they should never be stored
         /// because analysis marks such selectors unmatchable.
         /// </remarks>
-        private static bool MatchesPseudo(in PseudoRecord pseudo, IgniteSupportedDomNode node)
+        private static bool MatchesPseudo(
+            in PseudoRecord pseudo,
+            ReadOnlySpan<Token> selectorTokens,
+            IgniteSupportedDomNode node)
         {
             switch (pseudo.Kind)
             {
+                case PseudoClassKind.Not:
+                    return !MatchesSimpleCompound(
+                        selectorTokens.Slice(pseudo.ArgumentStart, pseudo.ArgumentLength),
+                        node);
+
                 case PseudoClassKind.Root:
                     return node.Parent is null;
 

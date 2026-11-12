@@ -104,10 +104,24 @@ public sealed partial class LayoutEngine
 
     /// <summary>
     /// Scratch buffer for
-    /// <see cref="DataTable.MatchRules(IgniteSupportedDomNode,RendererContext,Span{MatchedRule})"/>
+    /// <see cref="DataTable.MatchRules(IgniteSupportedDomNode, RendererContext, Span{MatchedRule}, PseudoElementKind)"/>
     /// overload; grows to fit the largest match set.
     /// </summary>
     private MatchedRule[] _matchBuffer = new MatchedRule[16];
+
+    /// <summary>Scratch buffer for pseudo-element rule matches.</summary>
+    private MatchedRule[] _pseudoMatchBuffer = new MatchedRule[8];
+
+    /// <summary>Synthetic DOM nodes used by generated <c>::before</c>/<c>::after</c> boxes.</summary>
+    private readonly Dictionary<(IgniteSupportedDomNode Node, PseudoElementKind Kind), IgniteSupportedDomNode>
+        _pseudoNodes = [];
+
+    /// <summary>
+    /// Synthetic text nodes used to give a flex/grid container's direct text an
+    /// anonymous item, so it participates in the container's layout instead of
+    /// being dropped when the element also has element children.
+    /// </summary>
+    private readonly Dictionary<IgniteSupportedDomNode, IgniteSupportedDomNode> _textNodes = [];
 
     /// <summary>
     /// Per-frame configuration, including the viewport, providers and scroll
@@ -161,6 +175,12 @@ public sealed partial class LayoutEngine
 
     /// <summary>Scratch list of fixed boxes deferred to the second paint pass.</summary>
     private readonly List<LayoutBox> _fixedBoxes = [];
+
+    /// <summary>Positive z-index boxes deferred above the normal paint tree.</summary>
+    private readonly List<(LayoutBox Box, float Tx, float Ty)> _overlayBoxes = [];
+
+    /// <summary>True while the deferred positive z-index pass is running.</summary>
+    private bool _paintingOverlays;
 
     /// <summary>
     /// Pooled child lists indexed by flex/grid nesting depth. Each nested layout
@@ -324,6 +344,8 @@ public sealed partial class LayoutEngine
             _boxCache.Clear();
         }
 
+        RefreshSuppression(root);
+
         _root = BuildBox(root, null, null, null, 0);
 
         if (_options.ReuseLayoutBoxes)
@@ -425,6 +447,7 @@ public sealed partial class LayoutEngine
 
         if (_root is not null)
         {
+            ApplyRootScrollBehavior(_root);
             RefreshScrollMetrics(_root);
             BuildDisplayList(_root, viewport);
         }
@@ -500,6 +523,11 @@ public sealed partial class LayoutEngine
         if (_root is not null)
         {
             RefreshAnimatedStyles(_root, null);
+
+            // Animation refresh rebuilds every style from the cached base
+            // style, which does not contain the root's viewport-scrolling
+            // behaviour. Reapply it so scrolling survives an animated frame.
+            ApplyRootScrollBehavior(_root);
         }
 
         _animations.Prune();
@@ -818,9 +846,82 @@ public sealed partial class LayoutEngine
         return style;
     }
 
+    /// <summary>
+    /// Marks every element whose computed <c>display</c> is <c>none</c> as
+    /// suppressed so structural selectors only see rendered siblings.
+    /// </summary>
+    /// <param name="root">Root of the frame's DOM tree.</param>
+    /// <remarks>
+    /// <para>
+    /// Host trees keep declarative scaffolding in the child list that a browser
+    /// would not mount, for example a closed dropdown menu. Those nodes generate
+    /// no box, but a browser built from the mounted markup would not have them as
+    /// siblings at all; <c>:last-child</c> and <c>:first-child</c> would see a
+    /// different child list. Suppressing them keeps selector matching and box
+    /// construction consistent.
+    /// </para>
+    /// <para>
+    /// A first pass resolves display for the whole tree. If any flag changed, the
+    /// styles resolved before the change were matched against the old sibling set,
+    /// so the pass repeats with a cleared style cache until the flags settle. Later
+    /// frames normally make a single pass that hits every cached style.
+    /// </para>
+    /// </remarks>
+    private void RefreshSuppression(IgniteSupportedDomNode root)
+    {
+        for (var iteration = 0; iteration < 3; iteration++)
+        {
+            var changed = false;
+            ResolveSuppression(root, null, ref changed);
+
+            if (!changed)
+            {
+                return;
+            }
+
+            _styleCache.Clear();
+        }
+
+        var settled = false;
+        ResolveSuppression(root, null, ref settled);
+    }
+
+    /// <summary>Resolves display for one subtree and updates suppression flags.</summary>
+    /// <param name="node">Subtree root.</param>
+    /// <param name="parentStyle">Inherited style of the parent, or <see langword="null"/>.</param>
+    /// <param name="changed">Set to <see langword="true"/> when a flag flipped.</param>
+    private void ResolveSuppression(
+        IgniteSupportedDomNode node,
+        ComputedStyle? parentStyle,
+        ref bool changed)
+    {
+        var style = ResolveStyle(node, parentStyle);
+        var suppressed = style.Display == Display.None;
+
+        if (node.IsSuppressed != suppressed)
+        {
+            node.IsSuppressed = suppressed;
+            changed = true;
+        }
+
+        if (suppressed)
+        {
+            return;
+        }
+
+        var children = node.Children;
+
+        for (var i = 0; i < children.Length; i++)
+        {
+            if (children[i] is { } child)
+            {
+                ResolveSuppression(child, style, ref changed);
+            }
+        }
+    }
+
     /// <summary>Returns the text a node contributes to layout.</summary>
-    /// <param name="node">Node whose text is requested.</param>
-    /// <returns>
+    /// <param name="node">Node whose text is requested.</param>    /// <returns>
     /// The text from <see cref="LayoutOptions.TextProvider"/> when supplied,
     /// otherwise <see cref="IgniteSupportedDomNode.TextContent"/>.
     /// </returns>
@@ -946,6 +1047,136 @@ public sealed partial class LayoutEngine
             }
         }
 
+        // A flex or grid container's own text is an anonymous item. When the
+        // element also has real children (an accordion button with a generated
+        // ::after icon, for example), giving the text a synthetic text child is
+        // the only way it can take part in flex/grid placement. Text-only
+        // containers still use the block path in LayoutContent.
+        if ((style.IsFlexContainer || style.IsGridContainer)
+            && !string.IsNullOrEmpty(node.TextContent))
+        {
+            var textStyle = new ComputedStyle();
+            textStyle.CopyInheritedFromShared(style);
+            textStyle.Display = Display.Inline;
+
+            var textNode = GetOrCreateTextNode(node);
+
+            var textBox = new LayoutBox(textNode, textStyle, depth + 1, 0)
+            {
+                Parent = box
+            };
+
+            box.Children.Insert(0, textBox);
+        }
+
+        // Generated content participates in the element's formatting context:
+        // ::before is the first child and ::after is the last child. They are
+        // matched against the originating element and inherit its style.
+        var before = BuildPseudoBox(node, style, box, childPositionedAncestor, depth + 1, PseudoElementKind.Before);
+
+        if (before is not null)
+        {
+            box.Children.Insert(0, before);
+        }
+
+        var after = BuildPseudoBox(node, style, box, childPositionedAncestor, depth + 1, PseudoElementKind.After);
+
+        if (after is not null)
+        {
+            box.Children.Add(after);
+        }
+
+        return box;
+    }
+
+    /// <summary>Returns the cached synthetic text node for an element.</summary>
+    /// <param name="owner">Element whose direct text is being represented.</param>
+    /// <returns>A text node carrying the element's current text.</returns>
+    private IgniteSupportedDomNode GetOrCreateTextNode(IgniteSupportedDomNode owner)
+    {
+        if (!_textNodes.TryGetValue(owner, out var node))
+        {
+            node = new IgniteSupportedDomNode { IsTextNode = true, Parent = owner };
+            _textNodes[owner] = node;
+        }
+
+        node.TextContent = owner.TextContent;
+        return node;
+    }
+
+    /// <summary>
+    /// Builds a generated <c>::before</c>/<c>::after</c> box when the
+    /// stylesheet declares one for an element.
+    /// </summary>
+    /// <param name="node">Originating element.</param>
+    /// <param name="parentStyle">The element's computed style.</param>
+    /// <param name="parentBox">The element's layout box.</param>
+    /// <param name="positionedAncestor">Containing block for absolute pseudo content.</param>
+    /// <param name="depth">Depth assigned to the generated box.</param>
+    /// <param name="kind">Which pseudo-element to build.</param>
+    /// <returns>The generated box, or <see langword="null"/> when the rule set has no content.</returns>
+    /// <remarks>
+    /// The pseudo rules are matched with the element node as the subject, then
+    /// applied to a fresh style inherited from the element. This keeps the
+    /// selector engine unchanged for normal elements while allowing the cascade
+    /// and custom properties to flow into generated content.
+    /// </remarks>
+    private LayoutBox? BuildPseudoBox(
+        IgniteSupportedDomNode node,
+        ComputedStyle parentStyle,
+        LayoutBox parentBox,
+        LayoutBox? positionedAncestor,
+        int depth,
+        PseudoElementKind kind)
+    {
+        var count = _table.MatchRules(node, _rendererContext, _pseudoMatchBuffer, kind);
+
+        if (count == 0)
+        {
+            return null;
+        }
+
+        if (count > _pseudoMatchBuffer.Length)
+        {
+            Array.Resize(ref _pseudoMatchBuffer, Math.Max(count, _pseudoMatchBuffer.Length * 2));
+            count = _table.MatchRules(node, _rendererContext, _pseudoMatchBuffer, kind);
+        }
+
+        var style = _resolver.ResolvePseudo(node, parentStyle, _pseudoMatchBuffer.AsSpan(0, count));
+
+        if (style.Display == Display.None || style.Content is null)
+        {
+            return null;
+        }
+
+        var key = (node, kind);
+
+        if (!_pseudoNodes.TryGetValue(key, out var pseudoNode))
+        {
+            pseudoNode = new IgniteSupportedDomNode
+            {
+                TagName = node.TagName,
+                Parent = node
+            };
+
+            _pseudoNodes[key] = pseudoNode;
+        }
+
+        pseudoNode.TextContent = style.Content;
+
+        var box = new LayoutBox(pseudoNode, style, depth, 0)
+        {
+            Parent = parentBox,
+            IsContents = style.Display == Display.Contents,
+            PseudoElementKind = kind
+        };
+
+        if (style.IsAbsolutelyPositioned)
+        {
+            box.ContainingBlock = style.Position == Position.Fixed ? null : positionedAncestor;
+            _absolutes.Add(box);
+        }
+
         return box;
     }
 
@@ -975,15 +1206,7 @@ public sealed partial class LayoutEngine
     /// </remarks>
     private void LayoutRootBox(LayoutBox root, Rect viewport)
     {
-        // Give an application root the browser's default window behaviour: it
-        // fills the viewport and scrolls vertically when its content overflows.
-        // An author rule that explicitly hides or clips overflow still wins.
-        if (_options.RootScrolls && root.Style.OverflowY == Overflow.Visible)
-        {
-            var style = root.Style.Clone();
-            style.OverflowY = Overflow.Auto;
-            root.Style = style;
-        }
+        ApplyRootScrollBehavior(root);
 
         if (root.IsContents)
         {
@@ -1016,6 +1239,36 @@ public sealed partial class LayoutEngine
             forcedBorderHeight: null,
             fillHeight: _options.RootScrolls && root.Style.Height.IsAuto,
             definiteContentHeight: null);
+    }
+
+    /// <summary>
+    /// Gives an application root the browser's default window scrolling
+    /// behaviour when the author leaves <c>overflow-y</c> visible.
+    /// </summary>
+    /// <param name="root">Root box about to be laid out or repainted.</param>
+    /// <remarks>
+    /// <para>
+    /// The root style is an ordinary resolved style and must be kept in sync
+    /// with this behaviour. A full layout applies it before geometry; an
+    /// animation-only repaint rebuilds every box style from the cached base
+    /// style, so it applies the rule again afterwards. Without that second
+    /// application an animated app (a spinner is enough) would silently lose
+    /// its viewport scroll container on the first repaint.
+    /// </para>
+    /// <para>
+    /// An explicit <c>overflow-y</c> other than <c>visible</c> is honoured.
+    /// </para>
+    /// </remarks>
+    private void ApplyRootScrollBehavior(LayoutBox root)
+    {
+        if (!_options.RootScrolls || root.Style.OverflowY != Overflow.Visible)
+        {
+            return;
+        }
+
+        var style = root.Style.Clone();
+        style.OverflowY = Overflow.Auto;
+        root.Style = style;
     }
 
     // -------------------------------------------------------------- box sizing
@@ -1756,7 +2009,12 @@ public sealed partial class LayoutEngine
         }
         else if (float.IsFinite(bottom))
         {
-            y = containingBlock.Bottom - bottom - (forcedHeight ?? box.BorderBox.Height) - box.Margin.Bottom;
+            // A bottom-anchored box shrinks to fit when its height is auto. The
+            // used height has to be known before the position is computed;
+            // otherwise the box starts where its bottom edge belongs and hangs
+            // below the containing block (the classic carousel-caption overlap).
+            forcedHeight ??= MeasureMaxContentHeight(box, containingBlock.Width);
+            y = containingBlock.Bottom - bottom - forcedHeight.Value - box.Margin.Bottom;
         }
         else
         {
@@ -1850,7 +2108,10 @@ public sealed partial class LayoutEngine
     private float MeasureContentMaxWidth(LayoutBox box, in LengthContext context)
     {
         var textWidth = 0f;
-        var text = GetNodeText(box.Node);
+        var text = box.Children.Count > 0
+            && (box.Style.IsFlexContainer || box.Style.IsGridContainer)
+            ? null
+            : GetNodeText(box.Node);
 
         if (!string.IsNullOrEmpty(text))
         {
@@ -1868,6 +2129,15 @@ public sealed partial class LayoutEngine
 
         var sum = 0f;
         var max = 0f;
+        var flowChildren = 0;
+
+        // A block container measures the widest line formed by its children.
+        // Consecutive inline children share one line and therefore add up;
+        // a block child contributes its own max-content width. Treating every
+        // child independently under-measures mixed content such as Bootstrap's
+        // alert (a heading block followed by an inline text/link run), which
+        // then wraps text and makes the alert too tall.
+        var inlineRun = textWidth;
 
         for (var i = 0; i < box.Children.Count; i++)
         {
@@ -1880,18 +2150,53 @@ public sealed partial class LayoutEngine
 
             var childContext = CreateContext(child.Style);
             var margin = child.Style.Margin.Resolve(in childContext, 0);
-            var childWidth = MeasureMaxContentWidth(child) + margin.Horizontal;
+            var childWidth = MeasureMaxContentWidth(child)
+                + margin.Horizontal;
 
             sum += childWidth;
-            max = MathF.Max(max, childWidth);
+            flowChildren++;
+
+            if (inlineFlow)
+            {
+                max = MathF.Max(max, childWidth);
+                continue;
+            }
+
+            if (IsInlineLevel(child))
+            {
+                inlineRun += childWidth;
+                max = MathF.Max(max, inlineRun);
+            }
+            else
+            {
+                max = MathF.Max(max, inlineRun);
+                inlineRun = 0;
+                max = MathF.Max(max, childWidth);
+            }
         }
+
+        max = MathF.Max(max, inlineRun);
 
         // An inline-level container puts its text and inline children on one
         // line, so their intrinsic widths add up. A block container's intrinsic
-        // width is the widest child instead.
-        return inlineFlow
-            ? textWidth + sum
-            : MathF.Max(textWidth, max);
+        // width is the widest line instead.
+        if (inlineFlow)
+        {
+            // A single-line flex row also needs its column gaps in the
+            // intrinsic width, otherwise the measured width is short by the
+            // gaps and a wrapping container (Bootstrap's .btn-toolbar) wraps a
+            // child onto the next line during the real layout pass.
+            if (style.IsFlexContainer
+                && style.FlexDirection is FlexDirection.Row or FlexDirection.RowReverse
+                && flowChildren > 1)
+            {
+                sum += ResolveGap(style.ColumnGap, in context, 0) * (flowChildren - 1);
+            }
+
+            return textWidth + sum;
+        }
+
+        return max;
     }
 
     // ------------------------------------------------------------------ text
@@ -2160,6 +2465,13 @@ public sealed partial class LayoutEngine
             box.FloatContext = box.Parent?.FloatContext ?? new FloatContext();
         }
 
+        // Out-of-flow children need a hypothetical position even when the
+        // formatting context never places them. Block and inline flow refine
+        // this as they walk their children; flex, grid and table layout skip
+        // absolute children entirely, so the container's content origin is the
+        // static position they would otherwise lack.
+        InitializeOutOfFlowStaticPositions(box, content);
+
         if (box.IsContents)
         {
             return LayoutBlockChildren(box, content, definiteContentHeight);
@@ -2168,6 +2480,17 @@ public sealed partial class LayoutEngine
         if (box.Style.Display is Display.Table or Display.InlineTable)
         {
             return LayoutTable(box, content, definiteContentHeight);
+        }
+
+        // A flex or grid container can own text directly (an element whose
+        // only children are text nodes, such as Bootstrap's .accordion-button).
+        // There is no anonymous flex item to place, so lay the run out with the
+        // block/inline path instead of silently dropping it.
+        if (box.Children.Count == 0
+            && (box.Style.IsFlexContainer || box.Style.IsGridContainer)
+            && !string.IsNullOrEmpty(GetNodeText(box.Node)))
+        {
+            return LayoutBlockChildren(box, content, definiteContentHeight);
         }
 
         if (box.Style.IsFlexContainer)
@@ -2181,6 +2504,32 @@ public sealed partial class LayoutEngine
         }
 
         return LayoutBlockChildren(box, content, definiteContentHeight);
+    }
+
+    /// <summary>
+    /// Seeds the static position of every out-of-flow child from a container's
+    /// content box before its formatting context runs.
+    /// </summary>
+    /// <param name="box">Container whose direct children are inspected.</param>
+    /// <param name="content">Content box in absolute CSS pixels.</param>
+    /// <remarks>
+    /// Block and inline formatting contexts overwrite this with the exact flow
+    /// position. Flex, grid and table contexts do not place absolute children at
+    /// all, so without the seed an absolute child without insets (the common
+    /// Bootstrap dropdown menu) would keep the default (0, 0) and paint at the
+    /// viewport origin.
+    /// </remarks>
+    private static void InitializeOutOfFlowStaticPositions(LayoutBox box, Rect content)
+    {
+        for (var i = 0; i < box.Children.Count; i++)
+        {
+            var child = box.Children[i];
+
+            if (child.IsOutOfFlow)
+            {
+                child.StaticPosition = new Point(content.X, content.Y);
+            }
+        }
     }
 
     /// <summary>Returns whether a box participates in an inline formatting context.</summary>

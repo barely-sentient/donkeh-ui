@@ -85,6 +85,13 @@ public sealed unsafe class ImageCache : IDisposable
 
         try
         {
+            if (SvgRasterizer.TryRender(source, out _, out var svgWidth, out var svgHeight))
+            {
+                width = svgWidth;
+                height = svgHeight;
+                return true;
+            }
+
             var data = LoadBytes(source);
 
             if (data is null)
@@ -247,6 +254,11 @@ public sealed unsafe class ImageCache : IDisposable
     /// </remarks>
     private ImageEntry Load(string source, GL gl)
     {
+        if (SvgRasterizer.TryRender(source, out var svgPixels, out var svgWidth, out var svgHeight))
+        {
+            return Upload(gl, svgPixels, svgWidth, svgHeight);
+        }
+
         var data = LoadBytes(source);
 
         if (data is null)
@@ -295,6 +307,45 @@ public sealed unsafe class ImageCache : IDisposable
         gl.BindTexture(TextureTarget.Texture2D, 0);
 
         return new ImageEntry(texture, image.Width, image.Height);
+    }
+
+    /// <summary>Uploads tightly packed RGBA pixels as a texture entry.</summary>
+    /// <param name="gl">Active OpenGL context.</param>
+    /// <param name="pixels">Row-major, top-down RGBA pixels.</param>
+    /// <param name="width">Bitmap width in pixels.</param>
+    /// <param name="height">Bitmap height in pixels.</param>
+    /// <returns>The texture entry, or <see langword="default"/> on failure.</returns>
+    private static unsafe ImageEntry Upload(GL gl, byte[] pixels, int width, int height)
+    {
+        if (width <= 0 || height <= 0 || pixels.Length < width * height * 4)
+        {
+            return default;
+        }
+
+        var texture = gl.GenTexture();
+        gl.BindTexture(TextureTarget.Texture2D, texture);
+        gl.PixelStore(PixelStoreParameter.UnpackAlignment, 4);
+
+        fixed (byte* data = pixels)
+        {
+            gl.TexImage2D(
+                TextureTarget.Texture2D,
+                0,
+                InternalFormat.Rgba8,
+                (uint) width,
+                (uint) height,
+                0,
+                PixelFormat.Rgba,
+                PixelType.UnsignedByte,
+                data);
+        }
+
+        gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int) GLEnum.Linear);
+        gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int) GLEnum.Linear);
+        gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int) GLEnum.ClampToEdge);
+        gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int) GLEnum.ClampToEdge);
+        gl.BindTexture(TextureTarget.Texture2D, 0);
+        return new ImageEntry(texture, width, height);
     }
 
     /// <summary>

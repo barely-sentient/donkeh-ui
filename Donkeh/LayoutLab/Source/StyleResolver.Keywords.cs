@@ -1654,7 +1654,36 @@ public sealed partial class StyleResolver
             {
                 if (i + 1 < remainder.Count)
                 {
-                    ApplyBackgroundSize(style, remainder[++i]);
+                    var size = remainder[++i];
+
+                    if (i + 1 < remainder.Count && IsBackgroundSizeToken(remainder[i + 1]))
+                    {
+                        size += " " + remainder[++i];
+                    }
+
+                    ApplyBackgroundSize(style, size);
+                }
+            }
+            else if (part.Contains('/'))
+            {
+                // The compact position/size form, e.g. center/1em or 50%/cover.
+                var slash = part.IndexOf('/');
+                var position = part[..slash];
+                var size = part[(slash + 1)..];
+
+                if (position.Length > 0)
+                {
+                    ApplyBackgroundPosition(style, position);
+                }
+
+                if (i + 1 < remainder.Count && IsBackgroundSizeToken(remainder[i + 1]))
+                {
+                    size += " " + remainder[++i];
+                }
+
+                if (size.Length > 0)
+                {
+                    ApplyBackgroundSize(style, size);
                 }
             }
             else if (lower is "left" or "right" or "top" or "bottom" or "center"
@@ -1666,6 +1695,28 @@ public sealed partial class StyleResolver
                 ApplyBackgroundPosition(style, position);
             }
         }
+    }
+
+    /// <summary>Returns whether a shorthand token can be the second background-size value.</summary>
+    /// <param name="token">Lower-case-ready token from a background shorthand.</param>
+    /// <returns><see langword="true"/> for <c>auto</c>, keywords and length units.</returns>
+    private static bool IsBackgroundSizeToken(string token)
+    {
+        var lower = token.ToLowerInvariant();
+
+        return lower is "auto" or "cover" or "contain"
+            || lower.EndsWith('%')
+            || lower.EndsWith("px", StringComparison.Ordinal)
+            || lower.EndsWith("em", StringComparison.Ordinal)
+            || lower.EndsWith("rem", StringComparison.Ordinal)
+            || lower.EndsWith("vh", StringComparison.Ordinal)
+            || lower.EndsWith("vw", StringComparison.Ordinal)
+            || lower.EndsWith("vmin", StringComparison.Ordinal)
+            || lower.EndsWith("vmax", StringComparison.Ordinal)
+            || lower.EndsWith("pt", StringComparison.Ordinal)
+            || lower.EndsWith("cm", StringComparison.Ordinal)
+            || lower.EndsWith("mm", StringComparison.Ordinal)
+            || lower.EndsWith("in", StringComparison.Ordinal);
     }
 
     /// <summary>

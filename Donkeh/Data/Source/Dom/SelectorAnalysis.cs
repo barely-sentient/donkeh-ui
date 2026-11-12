@@ -65,6 +65,7 @@ namespace Donkeh.Data.Dom
         private static readonly int PlaceholderShownId = InternTable.Intern(":placeholder-shown");
         private static readonly int ReadOnlyId = InternTable.Intern(":read-only");
         private static readonly int ReadWriteId = InternTable.Intern(":read-write");
+        private static readonly int NotId = InternTable.Intern(":not");
 
         private const int MaxAnBLength = 32;
 
@@ -87,6 +88,10 @@ namespace Donkeh.Data.Dom
         /// Set to <see langword="true"/> only when every construct is supported and
         /// at least one compound was produced.
         /// </param>
+        /// <param name="pseudoElement">
+        /// Receives the generated pseudo-element targeted by the selector, or
+        /// <see cref="PseudoElementKind.None"/> for the element itself.
+        /// </param>
         /// <returns>
         /// The specificity packed as ids in bits 20-29, classes in bits 10-19 and
         /// types in bits 0-9.
@@ -102,11 +107,13 @@ namespace Donkeh.Data.Dom
             List<CompoundRecord> compounds,
             List<AttributeFilter> filters,
             List<PseudoRecord> pseudos,
-            out bool matchable)
+            out bool matchable,
+            out PseudoElementKind pseudoElement)
         {
             var idCount = 0;
             var classCount = 0;
             var typeCount = 0;
+            var pseudoElementKind = PseudoElementKind.None;
 
             var supported = true;
             var firstCompound = compounds.Count;
@@ -126,7 +133,8 @@ namespace Donkeh.Data.Dom
                         AddCompound(
                             selector, compoundStart, i, leading,
                             compounds, filters, pseudos,
-                            ref idCount, ref classCount, ref typeCount, ref supported);
+                            ref idCount, ref classCount, ref typeCount, ref supported,
+                            ref pseudoElementKind);
 
                         leading = combinator;
                         compoundStart = i + 1;
@@ -138,7 +146,8 @@ namespace Donkeh.Data.Dom
                         AddCompound(
                             selector, compoundStart, i, leading,
                             compounds, filters, pseudos,
-                            ref idCount, ref classCount, ref typeCount, ref supported);
+                            ref idCount, ref classCount, ref typeCount, ref supported,
+                            ref pseudoElementKind);
 
                         leading = Combinator.Descendant;
                         compoundStart = i;
@@ -189,13 +198,15 @@ namespace Donkeh.Data.Dom
             AddCompound(
                 selector, compoundStart, selector.Length, leading,
                 compounds, filters, pseudos,
-                ref idCount, ref classCount, ref typeCount, ref supported);
+                ref idCount, ref classCount, ref typeCount, ref supported,
+                ref pseudoElementKind);
 
             if (bracketDepth != 0 || parenDepth != 0)
             {
                 supported = false;
             }
 
+            pseudoElement = pseudoElementKind;
             matchable = supported && compounds.Count > firstCompound;
             return Pack(idCount, classCount, typeCount);
         }
@@ -215,6 +226,9 @@ namespace Donkeh.Data.Dom
         /// <param name="classCount">Accumulates the class/attribute/pseudo count.</param>
         /// <param name="typeCount">Accumulates the type/pseudo element count.</param>
         /// <param name="supported">Cleared when the compound cannot be evaluated.</param>
+        /// <param name="pseudoElement">
+        /// Receives the generated pseudo-element targeted by this compound.
+        /// </param>
         private static void AddCompound(
             ReadOnlySpan<Token> selector,
             int start,
@@ -226,7 +240,8 @@ namespace Donkeh.Data.Dom
             ref int idCount,
             ref int classCount,
             ref int typeCount,
-            ref bool supported)
+            ref bool supported,
+            ref PseudoElementKind pseudoElement)
         {
             var filterOffset = filters.Count;
             var pseudoOffset = pseudos.Count;
@@ -300,7 +315,7 @@ namespace Donkeh.Data.Dom
                     case TokenKind.PseudoClass:
                         classCount++;
 
-                        if (TryParsePseudoClass(selector, i, end, out var pseudo, out var next))
+                        if (TryParsePseudoClass(selector, i, end, start, out var pseudo, out var next))
                         {
                             pseudos.Add(pseudo);
                             i = next;
@@ -314,7 +329,26 @@ namespace Donkeh.Data.Dom
 
                     case TokenKind.PseudoElement:
                         typeCount++;
-                        compoundSupported = false;
+
+                        // Only ::before and ::after generate boxes, and a
+                        // pseudo-element must be the subject (the final token).
+                        // Every other pseudo-element remains unmatchable.
+                        var pseudoName = InternTable.GetString(token.InternedId);
+                        var isSubject = i == end - 1;
+
+                        if (isSubject && pseudoName is "::before" or ":before")
+                        {
+                            pseudoElement = PseudoElementKind.Before;
+                        }
+                        else if (isSubject && pseudoName is "::after" or ":after")
+                        {
+                            pseudoElement = PseudoElementKind.After;
+                        }
+                        else
+                        {
+                            compoundSupported = false;
+                        }
+
                         break;
 
                     case TokenKind.Function:
@@ -486,6 +520,7 @@ namespace Donkeh.Data.Dom
         /// <param name="selector">The full selector tokens.</param>
         /// <param name="index">Index of the pseudo class token.</param>
         /// <param name="end">One past the compound's last token.</param>
+        /// <param name="compoundStart">First token of the containing compound.</param>
         /// <param name="pseudo">Receives the parsed pseudo class on success.</param>
         /// <param name="next">
         /// Receives the index of the last token consumed (the closing parenthesis
@@ -497,10 +532,11 @@ namespace Donkeh.Data.Dom
         /// stack buffer of <see cref="MaxAnBLength"/> characters; a longer argument
         /// is rejected rather than truncated.
         /// </remarks>
-        private static bool TryParsePseudoClass(
+        internal static bool TryParsePseudoClass(
             ReadOnlySpan<Token> selector,
             int index,
             int end,
+            int compoundStart,
             out PseudoRecord pseudo,
             out int next)
         {
@@ -508,6 +544,67 @@ namespace Donkeh.Data.Dom
             next = index;
 
             var id = selector[index].InternedId;
+
+            if (id == NotId)
+            {
+                if (index + 2 >= end || selector[index + 1].Kind != TokenKind.LeftParenthesis)
+                {
+                    return false;
+                }
+
+                var depth = 0;
+                var closeIndex = -1;
+
+                for (var i = index + 1; i < end; i++)
+                {
+                    if (selector[i].Kind == TokenKind.LeftParenthesis)
+                    {
+                        depth++;
+                    }
+                    else if (selector[i].Kind == TokenKind.RightParenthesis)
+                    {
+                        depth--;
+
+                        if (depth == 0)
+                        {
+                            closeIndex = i;
+                            break;
+                        }
+                    }
+                }
+
+                if (closeIndex <= index + 2)
+                {
+                    return false;
+                }
+
+                // A single simple compound is the common Bootstrap pattern
+                // (:not(.show), :not(.collapsed), :not(.disabled)). Selector
+                // lists and combinators inside the argument are left
+                // unsupported rather than matched incorrectly.
+                for (var i = index + 2; i < closeIndex; i++)
+                {
+                    if (selector[i].Kind is TokenKind.Comma
+                        or TokenKind.DirectChildBracket
+                        or TokenKind.Plus
+                        or TokenKind.Tilde
+                        or TokenKind.ColumnCombinator)
+                    {
+                        return false;
+                    }
+
+                    if (DataTable.HasGap(selector, i))
+                    {
+                        return false;
+                    }
+                }
+
+                pseudo.Kind = PseudoClassKind.Not;
+                pseudo.ArgumentStart = index + 2 - compoundStart;
+                pseudo.ArgumentLength = closeIndex - (index + 2);
+                next = closeIndex;
+                return true;
+            }
 
             if (id == RootId)
             {

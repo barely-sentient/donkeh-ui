@@ -54,6 +54,17 @@ public sealed class ComputedStyle
     internal BackgroundImageSpec[]? CachedBackgroundSpecs;
 
     /// <summary>
+    /// Gets or sets generated content for a pseudo-element, or
+    /// <see langword="null"/> when the element is not a pseudo-element or its
+    /// <c>content</c> is <c>none</c>/<c>normal</c>.
+    /// </summary>
+    /// <remarks>
+    /// Only string values are represented. Functions such as <c>attr()</c> and
+    /// counters are parsed as unsupported and leave this <see langword="null"/>.
+    /// </remarks>
+    public string? Content { get; set; }
+
+    /// <summary>
     /// Gets or sets the used <c>display</c> value, which selects the box type
     /// and formatting context.
     /// </summary>
@@ -249,6 +260,16 @@ public sealed class ComputedStyle
 
     /// <summary>Gets or sets the horizontal alignment of text lines; inherited.</summary>
     public TextAlign TextAlign { get; set; } = TextAlign.Start;
+
+    /// <summary>
+    /// Gets or sets the inline vertical offset for an inline-level box.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="CssLength.Auto"/> means the default baseline alignment. A
+    /// positive length raises the box, matching the common
+    /// <c>vertical-align: 0.255em</c> dropdown-caret idiom.
+    /// </remarks>
+    public CssLength VerticalAlign { get; set; } = CssLength.Auto;
 
     /// <summary>Gets or sets whitespace collapsing and wrapping rules; inherited.</summary>
     public WhiteSpace WhiteSpace { get; set; } = WhiteSpace.Normal;
@@ -809,6 +830,7 @@ public sealed class ComputedStyle
     public void CopyAllFrom(ComputedStyle source)
     {
         Display = source.Display;
+        Content = source.Content;
         Position = source.Position;
         Float = source.Float;
         Clear = source.Clear;
@@ -859,6 +881,7 @@ public sealed class ComputedStyle
         LineHeight = source.LineHeight;
         LetterSpacing = source.LetterSpacing;
         TextAlign = source.TextAlign;
+        VerticalAlign = source.VerticalAlign;
         WhiteSpace = source.WhiteSpace;
         TextOverflow = source.TextOverflow;
         TextDecoration = source.TextDecoration;

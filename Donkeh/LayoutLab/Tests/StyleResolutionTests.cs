@@ -1140,4 +1140,21 @@ public class StyleResolutionTests
         Assert.Equal(TextAlign.Center, style.TextAlign);
         Assert.Equal(WhiteSpace.Pre, style.WhiteSpace);
     }
+
+    [Fact]
+    public void InlineStyleAttributeWinsOverMatchedRules()
+    {
+        var node = TestSupport.Node("div", "node");
+        node.SetAttribute("style", "width: 65%; color: #123456; --accent: #654321;");
+
+        var style = TestSupport.ResolveStyle(
+            "#node { width: 10px; color: #000000; }",
+            node);
+
+        Assert.Equal(65, style.Width.Value, 3);
+        Assert.Equal(LengthUnit.Percent, style.Width.Unit);
+        Assert.Equal(0xFF123456u, style.Color);
+        Assert.True(style.CustomProperties!.TryGetValue("--accent", out var accent));
+        Assert.Equal("#654321", accent);
+    }
 }

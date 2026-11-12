@@ -10,7 +10,7 @@ namespace Donkeh.LayoutLab;
 /// </summary>
 /// <remarks>
 /// Declarations are applied weakest-first, exactly as
-/// <see cref="DataTable.MatchRules(IgniteSupportedDomNode, RendererContext)"/>
+/// <see cref="DataTable.MatchRules(IgniteSupportedDomNode, RendererContext, PseudoElementKind)"/>
 /// returns them. Important declarations get a
 /// second pass so they beat every normal declaration without allocating a
 /// per-property cascade map. Values that need a containing block stay as
@@ -109,7 +109,7 @@ public sealed partial class StyleResolver
     /// </param>
     /// <param name="matches">
     /// The rules that matched the node, ordered weakest first exactly as
-    /// <see cref="DataTable.MatchRules(IgniteSupportedDomNode, RendererContext)"/>
+    /// <see cref="DataTable.MatchRules(IgniteSupportedDomNode, RendererContext, PseudoElementKind)"/>
     /// returns them.
     /// </param>
     /// <returns>A fully populated style owned by the caller.</returns>
@@ -178,6 +178,7 @@ public sealed partial class StyleResolver
 
         ApplyMatches(style, parent, matches, important: false);
         ApplyMatches(style, parent, matches, important: true);
+        ApplyInlineStyle(style, parent, node);
 
         // Text nodes and fragments are framework concepts, not CSS elements.
         // Text flows inline and a fragment is transparent to layout.
@@ -191,6 +192,268 @@ public sealed partial class StyleResolver
         }
 
         return style;
+    }
+
+    /// <summary>Parses the string form of the <c>content</c> property.</summary>
+    /// <param name="value">Declaration value.</param>
+    /// <returns>
+    /// The unquoted text, or <see langword="null"/> for <c>none</c>,
+    /// <c>normal</c> and unsupported function forms.
+    /// </returns>
+    private static string? ParseGeneratedContent(string value)
+    {
+        value = value.Trim();
+
+        if (value.Length == 0
+            || value.Equals("none", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("normal", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        if (value[0] is not ('\'' or '"'))
+        {
+            return null;
+        }
+
+        var quote = value[0];
+        var builder = new System.Text.StringBuilder(value.Length);
+
+        for (var i = 1; i < value.Length; i++)
+        {
+            var c = value[i];
+
+            if (c == quote)
+            {
+                break;
+            }
+
+            if (c == '\\' && i + 1 < value.Length)
+            {
+                var escaped = value[++i];
+                builder.Append(escaped is 'n' ? '\n' : escaped);
+                continue;
+            }
+
+            builder.Append(c);
+        }
+
+        return builder.ToString();
+    }
+
+    /// <summary>
+    /// Resolves the style of a generated <c>::before</c> or <c>::after</c>
+    /// pseudo-element.
+    /// </summary>
+    /// <param name="node">The originating element.</param>
+    /// <param name="parent">The originating element's computed style.</param>
+    /// <param name="matches">Pseudo-element rules that matched the element.</param>
+    /// <returns>The pseudo-element's computed style.</returns>
+    /// <remarks>
+    /// Pseudo-elements inherit from their originating element. Their initial
+    /// <c>display</c> is <c>inline</c> rather than the element default
+    /// <c>block</c>, and only the rules targeting the same pseudo-element are
+    /// supplied by the layout engine.
+    /// </remarks>
+    public ComputedStyle ResolvePseudo(
+        IgniteSupportedDomNode node,
+        ComputedStyle? parent,
+        ReadOnlySpan<MatchedRule> matches)
+    {
+        ArgumentNullException.ThrowIfNull(node);
+
+        var style = new ComputedStyle { Display = Display.Inline };
+
+        if (parent is not null)
+        {
+            style.CopyInheritedFromShared(parent);
+        }
+
+        CollectCustomProperties(style, matches);
+        style.RefreshCustomPropertyHash();
+        ApplyMatches(style, parent, matches, important: false);
+        ApplyMatches(style, parent, matches, important: true);
+        return style;
+    }
+
+    /// <summary>
+    /// Applies declarations from a node's <c>style</c> attribute.
+    /// </summary>
+    /// <param name="style">Style receiving the inline declarations.</param>
+    /// <param name="parent">Parent style, used by CSS-wide keywords.</param>
+    /// <param name="node">Node whose <c>style</c> attribute is read.</param>
+    /// <remarks>
+    /// <para>
+    /// Inline declarations are the last author origin, so they run after every
+    /// matched rule and override equal-origin declarations. Custom properties
+    /// are collected first because a normal declaration in the same attribute
+    /// may reference them.
+    /// </para>
+    /// <para>
+    /// The attribute is a declaration list, not a full stylesheet: only
+    /// <c>property: value</c> pairs separated by semicolons are accepted.
+    /// Semicolons inside quotes or parentheses (data URIs and functions) are
+    /// part of the value, not separators.
+    /// </para>
+    /// </remarks>
+    private void ApplyInlineStyle(ComputedStyle style, ComputedStyle? parent, IgniteSupportedDomNode node)
+    {
+        if (!node.TryGetAttribute("style", out var css) || string.IsNullOrWhiteSpace(css))
+        {
+            return;
+        }
+
+        var hasCustom = false;
+
+        foreach (var (name, value) in EnumerateInlineDeclarations(css))
+        {
+            if (!name.StartsWith("--", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            SetCustomProperty(style, name, CleanValue(InternTable.Intern(value), value));
+            hasCustom = true;
+        }
+
+        if (hasCustom)
+        {
+            style.RefreshCustomPropertyHash();
+        }
+
+        foreach (var (name, value) in EnumerateInlineDeclarations(css))
+        {
+            if (name.StartsWith("--", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var property = CssPropertyIds.Get(InternTable.Intern(name));
+
+            if (property != CssProperty.Unknown)
+            {
+                ApplyDeclaration(style, parent, property, InternTable.Intern(value), value);
+            }
+        }
+    }
+
+    /// <summary>Splits a <c>style</c> attribute into trimmed property/value pairs.</summary>
+    /// <param name="css">Inline declaration text.</param>
+    /// <returns>The declarations in source order; malformed pairs are skipped.</returns>
+    /// <remarks>
+    /// A lightweight scanner is enough here. It only needs to know about
+    /// quotes, parentheses and brackets so semicolons and colons inside a
+    /// <c>url()</c>, <c>rgb()</c> or quoted string are not treated as syntax.
+    /// </remarks>
+    private static IEnumerable<(string Name, string Value)> EnumerateInlineDeclarations(string css)
+    {
+        var start = 0;
+        var depth = 0;
+        var quote = '\0';
+
+        for (var i = 0; i <= css.Length; i++)
+        {
+            var c = i < css.Length ? css[i] : ';';
+
+            if (quote != '\0')
+            {
+                if (c == quote && (i == 0 || css[i - 1] != '\\'))
+                {
+                    quote = '\0';
+                }
+
+                continue;
+            }
+
+            if (c is '\'' or '"')
+            {
+                quote = c;
+                continue;
+            }
+
+            if (c is '(' or '[')
+            {
+                depth++;
+                continue;
+            }
+
+            if (c is ')' or ']')
+            {
+                depth = Math.Max(0, depth - 1);
+                continue;
+            }
+
+            if (c != ';' || depth != 0)
+            {
+                continue;
+            }
+
+            var declaration = css.AsSpan(start, i - start).Trim();
+            start = i + 1;
+
+            if (declaration.IsEmpty)
+            {
+                continue;
+            }
+
+            var colon = FindDeclarationColon(declaration);
+
+            if (colon <= 0)
+            {
+                continue;
+            }
+
+            var name = declaration[..colon].Trim().ToString();
+            var value = declaration[(colon + 1)..].Trim().ToString();
+
+            if (name.Length > 0 && value.Length > 0)
+            {
+                yield return (name, value);
+            }
+        }
+    }
+
+    /// <summary>Finds the colon that separates a property name from its value.</summary>
+    /// <param name="declaration">One declaration without its trailing semicolon.</param>
+    /// <returns>The colon index, or <c>-1</c> when the declaration is malformed.</returns>
+    private static int FindDeclarationColon(ReadOnlySpan<char> declaration)
+    {
+        var depth = 0;
+        var quote = '\0';
+
+        for (var i = 0; i < declaration.Length; i++)
+        {
+            var c = declaration[i];
+
+            if (quote != '\0')
+            {
+                if (c == quote && (i == 0 || declaration[i - 1] != '\\'))
+                {
+                    quote = '\0';
+                }
+
+                continue;
+            }
+
+            if (c is '\'' or '"')
+            {
+                quote = c;
+            }
+            else if (c is '(' or '[')
+            {
+                depth++;
+            }
+            else if (c is ')' or ']')
+            {
+                depth = Math.Max(0, depth - 1);
+            }
+            else if (c == ':' && depth == 0)
+            {
+                return i;
+            }
+        }
+
+        return -1;
     }
 
     /// <summary>
@@ -782,6 +1045,10 @@ public sealed partial class StyleResolver
                 style.TextAlign = ParseTextAlign(value);
                 break;
 
+            case CssProperty.VerticalAlign:
+                style.VerticalAlign = ParseLengthCached(valueId, value);
+                break;
+
             case CssProperty.TextDecoration:
             case CssProperty.TextDecorationLine:
                 style.TextDecoration = ParseTextDecoration(value);
@@ -1164,12 +1431,15 @@ public sealed partial class StyleResolver
                 style.AppRegion = ParseAppRegion(value);
                 break;
 
+            case CssProperty.Content:
+                style.Content = ParseGeneratedContent(value);
+                break;
+
             case CssProperty.PointerEvents:
             case CssProperty.Cursor:
             case CssProperty.UserSelect:
             case CssProperty.WillChange:
             case CssProperty.Contain:
-            case CssProperty.Content:
             case CssProperty.ObjectPosition:
                 // Parsed and ignored by the first-cut painter. Keeping the case
                 // explicit documents that these are intentionally not layout

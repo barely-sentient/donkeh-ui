@@ -482,6 +482,42 @@ public class BlockLayoutTests
     }
 
     [Fact]
+    public void AutoHeightAbsoluteBoxKeepsItsBottomEdge()
+    {
+        var root = TestSupport.Node("div", "root");
+        var absolute = TestSupport.Node("div", "absolute", text: "caption line");
+        root.Children = [absolute];
+
+        var result = Lay(
+            "#root { position: relative; height: 400px; }"
+            + " #absolute { position: absolute; bottom: 20px; left: 0; right: 0; padding: 10px; }",
+            root);
+
+        var box = TestSupport.Box(result, absolute);
+        Assert.Equal(380, box.BorderBox.Bottom, 3);
+        Assert.True(box.BorderBox.Height > 20, "The auto height should include the text and padding.");
+    }
+
+    [Fact]
+    public void MinHeightGrowsAnAutoHeightAncestor()
+    {
+        var root = TestSupport.Node("div", "root");
+        var column = TestSupport.Node("div", "column");
+        var stage = TestSupport.Node("div", "stage");
+        column.Children = [stage];
+        root.Children = [column];
+
+        var result = Lay(
+            "#root { display: flex; flex-direction: column; width: 300px; }"
+            + " #column { display: flex; flex-direction: column; }"
+            + " #stage { min-height: 180px; }",
+            root);
+
+        Assert.Equal(180, TestSupport.Box(result, column).BorderBox.Height, 3);
+        Assert.Equal(180, TestSupport.Box(result, stage).BorderBox.Height, 3);
+    }
+
+    [Fact]
     public void AbsoluteBoxWithoutInsetsUsesItsStaticPosition()
     {
         var root = TestSupport.Node("div", "root");
@@ -613,6 +649,46 @@ public class BlockLayoutTests
 
         Assert.Equal(20, TestSupport.Box(result, inline).BorderBox.X, 3);
         Assert.Equal(0, TestSupport.Box(result, inline).BorderBox.Y, 3);
+    }
+
+    [Fact]
+    public void TextNodeAndInlineChildShareTheLineWhenTheyFit()
+    {
+        var root = TestSupport.Node("div", "root");
+        var text = TestSupport.Node("span", "text", "ab");
+        text.IsTextNode = true;
+        var link = TestSupport.Node("a", "link", "cd");
+        var tail = TestSupport.Node("span", "tail", ".");
+        tail.IsTextNode = true;
+        root.Children = [text, link, tail];
+
+        var result = Lay(
+            "#root { font-size: 10px; line-height: 20px; width: 200px; }"
+            + " #link { display: inline; }",
+            root);
+
+        Assert.Equal(0, TestSupport.Box(result, link).BorderBox.Y, 3);
+        Assert.Equal(20, TestSupport.Box(result, root).BorderBox.Height, 3);
+    }
+
+    [Fact]
+    public void InlineChildWrapsInsteadOfBeingSqueezedIntoTheRemainder()
+    {
+        var root = TestSupport.Node("div", "root");
+        var text = TestSupport.Node("span", "text", "abcdefghi");
+        text.IsTextNode = true;
+        var link = TestSupport.Node("a", "link", "cd");
+        root.Children = [text, link];
+
+        var result = Lay(
+            "#root { font-size: 10px; line-height: 20px; width: 100px; }"
+            + " #link { display: inline; }",
+            root);
+
+        // The text run fills most of the first line. The link must move to the
+        // next line rather than being clamped to the small remainder.
+        Assert.Equal(20, TestSupport.Box(result, link).BorderBox.Y, 3);
+        Assert.Equal(20, TestSupport.Box(result, link).BorderBox.Width, 3);
     }
 
     [Fact]

@@ -583,4 +583,96 @@ public class FlexLayoutTests
 
         TestSupport.AssertRect(TestSupport.Box(result, inline).BorderBox, 0, 0, 200, 20);
     }
+
+    [Fact]
+    public void ColumnItemKeepsItsDefinitePercentageWidth()
+    {
+        var root = TestSupport.Node("div", "root");
+        var column = TestSupport.Node("div", "column");
+        var child = TestSupport.Node("div", "child");
+        root.Children = [column];
+        column.Children = [child];
+
+        var result = Lay(
+            "#root { display: flex; flex-direction: column; align-items: flex-start; width: 400px; }"
+            + " #column { display: flex; flex-direction: column; align-items: flex-start; width: 100%; }"
+            + " #child { width: 100%; height: 20px; }",
+            root);
+
+        // A definite width on a column item is not a flex decision. It must
+        // resolve against the column's content width instead of collapsing to
+        // the child's max-content width.
+        Assert.Equal(400, TestSupport.Box(result, column).BorderBox.Width, 3);
+        Assert.Equal(400, TestSupport.Box(result, child).BorderBox.Width, 3);
+    }
+
+    [Fact]
+    public void IntrinsicWidthIncludesRowGaps()
+    {
+        var root = TestSupport.Node("div", "root");
+        var toolbar = TestSupport.Node("div", "toolbar");
+        var a = TestSupport.Node("div", "a");
+        var b = TestSupport.Node("div", "b");
+        root.Children = [toolbar];
+        toolbar.Children = [a, b];
+
+        var result = Lay(
+            "#root { display: flex; flex-direction: column; align-items: flex-start; width: 400px; }"
+            + " #toolbar { display: flex; flex-wrap: wrap; gap: 8px; }"
+            + " #a { width: 70px; height: 20px; }"
+            + " #b { width: 35px; height: 20px; }",
+            root);
+
+        // The intrinsic width includes the 8 px gap, so the second item stays
+        // on the first line instead of wrapping into a column below it.
+        Assert.Equal(113, TestSupport.Box(result, toolbar).BorderBox.Width, 3);
+        Assert.Equal(78, TestSupport.Box(result, b).BorderBox.X, 3);
+        Assert.Equal(0, TestSupport.Box(result, b).BorderBox.Y, 3);
+    }
+
+    [Fact]
+    public void FlexContainerLaysOutDirectText()
+    {
+        var root = TestSupport.Node("div", "root");
+        var button = TestSupport.Node("button", "button", "Accordion Item", "accordion-button");
+        root.Children = [button];
+
+        var result = Lay(
+            "#root { width: 300px; }"
+            + " #button { display: flex; align-items: center; padding: 10px; }",
+            root);
+
+        var box = TestSupport.Box(result, button);
+        var text = Assert.Single(box.Children);
+        Assert.NotNull(text.Text);
+        Assert.Equal(14 * 10, text.Text!.Size.Width, 3);
+        Assert.Equal(39.2, box.BorderBox.Height, 3);
+    }
+
+    [Fact]
+    public void FlexItemMoveCarriesAbsoluteDescendantStaticPosition()
+    {
+        var root = TestSupport.Node("div", "root");
+        var bar = TestSupport.Node("div", "bar");
+        var item = TestSupport.Node("div", "item");
+        var toggle = TestSupport.Node("button", "toggle");
+        var menu = TestSupport.Node("div", "menu");
+        root.Children = [bar];
+        bar.Children = [item];
+        item.Children = [toggle, menu];
+
+        var result = Lay(
+            "#root { width: 500px; }"
+            + " #bar { display: flex; justify-content: flex-end; }"
+            + " #item { position: relative; width: 120px; }"
+            + " #toggle { display: block; height: 30px; }"
+            + " #menu { position: absolute; width: 80px; height: 20px; }",
+            root);
+
+        // The menu has no insets, so it uses its static position. That position
+        // must move with the flex item instead of staying at the origin the item
+        // was measured at.
+        Assert.Equal(380, TestSupport.Box(result, menu).BorderBox.X, 3);
+        Assert.Equal(30, TestSupport.Box(result, menu).BorderBox.Y, 3);
+    }
 }

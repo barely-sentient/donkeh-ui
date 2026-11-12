@@ -53,6 +53,8 @@ namespace Donkeh.Data.Dom
         private int _indexInParent = -1;
         private int _elementIndexInParent = -1;
         private int _elementChildCount;
+        private int _suppressedChildCount;
+        private bool _isSuppressed;
 
         /// <summary>
         /// True when this node is a framework text node. Text nodes do not match
@@ -65,6 +67,45 @@ namespace Donkeh.Data.Dom
         /// selectors and generate no box of their own.
         /// </summary>
         public bool IsFragment { get; set; }
+
+        /// <summary>
+        /// True when the node generated no box in the current frame because its
+        /// computed <c>display</c> is <c>none</c>.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The host tree often keeps declarative scaffolding that a browser would
+        /// not mount at all, such as a closed dropdown menu that is styled
+        /// <c>display: none</c> but still sits in the parent's child list. A
+        /// browser built from the mounted markup would not have that sibling, so
+        /// structural selectors (<c>:last-child</c>, <c>:nth-child</c>, the sibling
+        /// combinators) are evaluated over the rendered children instead.
+        /// </para>
+        /// <para>
+        /// The layout engine sets this flag after resolving styles and before it
+        /// builds boxes, so matching and layout see the same sibling set. It only
+        /// applies to elements; text nodes and fragments are already excluded.
+        /// </para>
+        /// </remarks>
+        public bool IsSuppressed
+        {
+            get => _isSuppressed;
+            set
+            {
+                if (_isSuppressed == value)
+                {
+                    return;
+                }
+
+                _isSuppressed = value;
+
+                if (_parent is not null)
+                {
+                    _parent._suppressedChildCount += value ? 1 : -1;
+                    _parent._revision++;
+                }
+            }
+        }
 
         /// <summary>
         /// Optional text carried by the element. The engine has no text nodes,
@@ -240,6 +281,15 @@ namespace Donkeh.Data.Dom
                 }
 
                 _elementChildCount = elementIndex;
+                _suppressedChildCount = 0;
+
+                for (var i = 0; i < _children.Length; i++)
+                {
+                    if (_children[i] is { IsSuppressed: true, IsTextNode: false, IsFragment: false })
+                    {
+                        _suppressedChildCount++;
+                    }
+                }
             }
         }
 
@@ -642,6 +692,10 @@ namespace Donkeh.Data.Dom
         /// Position among the siblings, or 0 for the root. Validated against the
         /// parent's array so a hand-edited tree still resolves correctly.
         /// </summary>
+        /// <remarks>
+        /// Siblings with <see cref="IsSuppressed"/> set generate no box and are
+        /// skipped, so structural selectors see the same children the layout does.
+        /// </remarks>
         internal int SiblingIndex
         {
             get
@@ -653,10 +707,36 @@ namespace Donkeh.Data.Dom
 
                 var siblings = _parent._children;
 
-                if ((uint)_indexInParent < (uint)siblings.Length
+                if (_parent._suppressedChildCount == 0
+                    && (uint)_indexInParent < (uint)siblings.Length
                     && ReferenceEquals(siblings[_indexInParent], this))
                 {
                     return _elementIndexInParent >= 0 ? _elementIndexInParent : 0;
+                }
+
+                if (_parent._suppressedChildCount > 0)
+                {
+                    var suppressedIndex = 0;
+
+                    for (var i = 0; i < siblings.Length; i++)
+                    {
+                        var sibling = siblings[i];
+
+                        if (sibling is null || sibling.IsTextNode || sibling.IsFragment)
+                        {
+                            continue;
+                        }
+
+                        if (ReferenceEquals(sibling, this))
+                        {
+                            return suppressedIndex;
+                        }
+
+                        if (!sibling.IsSuppressed)
+                        {
+                            suppressedIndex++;
+                        }
+                    }
                 }
 
                 return FindElementIndex(siblings, this);
@@ -665,9 +745,12 @@ namespace Donkeh.Data.Dom
 
         /// <summary>
         /// Number of elements in the sibling list, or 1 for the root. Text nodes
-        /// and fragments are not elements and do not count.
+        /// and fragments are not elements and do not count, nor do suppressed
+        /// elements that generated no box.
         /// </summary>
-        internal int SiblingCount => _parent?._elementChildCount ?? 1;
+        internal int SiblingCount => _parent is null
+            ? 1
+            : Math.Max(0, _parent._elementChildCount - _parent._suppressedChildCount);
 
         /// <summary>
         /// Returns the element at an element-relative sibling index, or this node
@@ -693,7 +776,7 @@ namespace Donkeh.Data.Dom
             {
                 var sibling = siblings[i];
 
-                if (sibling is null || sibling.IsTextNode || sibling.IsFragment)
+                if (sibling is null || sibling.IsTextNode || sibling.IsFragment || sibling.IsSuppressed)
                 {
                     continue;
                 }
@@ -717,7 +800,7 @@ namespace Donkeh.Data.Dom
             {
                 var sibling = siblings[i];
 
-                if (sibling is null || sibling.IsTextNode || sibling.IsFragment)
+                if (sibling is null || sibling.IsTextNode || sibling.IsFragment || sibling.IsSuppressed)
                 {
                     continue;
                 }

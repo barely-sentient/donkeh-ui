@@ -124,7 +124,7 @@ public sealed partial class LayoutEngine
                     }
                 }
 
-                if (used + mainGap + bases[i] + mainMargins[i] > mainAvailable)
+                if (used + mainGap + bases[i] + mainMargins[i] > mainAvailable + 0.01f)
                 {
                     lineStarts[lineCount++] = i;
                 }
@@ -308,9 +308,19 @@ public sealed partial class LayoutEngine
             {
                 var maxContent = MeasureMaxContentWidth(item);
                 var available = MathF.Max(0, content.Width - item.Margin.Horizontal);
-                var width = stretch
-                    ? available
-                    : MathF.Min(maxContent, available);
+                var widthAuto = IsCrossSizeAuto(item.Style, row);
+
+                // A definite cross size on a column item (for example
+                // Bootstrap's .container { width: 100% }) is not a flex
+                // decision. Forcing the measured max-content width here would
+                // override the author's percentage against the container's
+                // definite width and leave rows and cards too narrow. Only an
+                // auto width is stretched or shrink-to-fit.
+                float? width = widthAuto
+                    ? stretch
+                        ? available
+                        : MathF.Min(maxContent, available)
+                    : null;
 
                 PrepareAndMeasureWidth(item, content.Width, width, false, false, false);
                 LayoutPreparedBox(
@@ -834,23 +844,61 @@ public sealed partial class LayoutEngine
         var context = CreateContext(style);
         var padding = style.Padding.Resolve(in context, cbWidth);
         var border = ResolveBorders(style, in context, cbWidth);
+        var extra = padding.Vertical + border.Vertical;
         var resolved = style.Height.ResolveOr(in context, float.NaN, float.NaN);
+
+        // A used size is never smaller than min-height or larger than
+        // max-height. Without this clamp a box such as a carousel with
+        // min-height: 180px measured as only its text content, so the flex
+        // column that contained it was too short and the carousel painted
+        // over the next cell.
+        var minHeight = style.MinHeight.ResolveOr(in context, float.NaN, 0);
+        var maxHeight = style.MaxHeight.IsAuto
+            ? float.PositiveInfinity
+            : style.MaxHeight.ResolveOr(in context, float.NaN, float.PositiveInfinity);
+
+        if (style.BoxSizing == BoxSizing.ContentBox)
+        {
+            minHeight += extra;
+
+            if (float.IsFinite(maxHeight))
+            {
+                maxHeight += extra;
+            }
+        }
 
         if (float.IsFinite(resolved))
         {
-            return style.BoxSizing == BoxSizing.BorderBox
+            var definite = style.BoxSizing == BoxSizing.BorderBox
                 ? resolved
-                : resolved + padding.Vertical + border.Vertical;
+                : resolved + extra;
+
+            return MathF.Max(minHeight, MathF.Min(definite, maxHeight));
         }
 
         var content = 0f;
-        var text = GetNodeText(box.Node);
+        var text = box.Children.Count > 0
+            && (style.IsFlexContainer || style.IsGridContainer)
+            ? null
+            : GetNodeText(box.Node);
+
+        var textHeight = 0f;
+        var textWidth = 0f;
+        var textIsSingleLine = false;
 
         if (!string.IsNullOrEmpty(text) && ShouldLayoutText(style, text))
         {
             var layout = GetTextLayout(box.Node, style, text, MathF.Max(1, cbWidth), out _);
-            content = layout.Size.Height;
+            textHeight = layout.Size.Height;
+            textWidth = layout.Size.Width;
+            textIsSingleLine = layout.Lines.Length <= 1;
         }
+
+        // A single-line text run and the inline children that follow it share
+        // one line box, so the line consumes the text height instead of adding
+        // to it. Multi-line text occupies whole lines of its own before any
+        // inline child starts.
+        content = textIsSingleLine ? 0f : textHeight;
 
         var row = style.IsFlexContainer
             && style.FlexDirection is FlexDirection.Row or FlexDirection.RowReverse;
@@ -944,6 +992,15 @@ public sealed partial class LayoutEngine
         }
         else
         {
+            var available = MathF.Max(1, cbWidth - padding.Horizontal - border.Horizontal);
+            // Direct text and the inline children that follow it share one
+            // line box. Seeding the line with the text run keeps generated
+            // content (a split-button caret, for example) from being measured
+            // as an extra line, which would make the box a full icon taller.
+            var lineWidth = textIsSingleLine ? textWidth : 0f;
+            var lineHeight = textIsSingleLine ? textHeight : 0f;
+            var hasInlineLine = textIsSingleLine;
+
             for (var i = 0; i < box.Children.Count; i++)
             {
                 var child = box.Children[i];
@@ -960,20 +1017,53 @@ public sealed partial class LayoutEngine
                 if (horizontal)
                 {
                     content = MathF.Max(content, childHeight);
+                    continue;
                 }
-                else
+
+                if (IsInlineLevel(child))
                 {
-                    if (content > 0)
+                    // Adjacent inline children form one line box. Summing every
+                    // inline child's height stacks them vertically and makes a
+                    // mixed-content block (an alert heading plus a text/link
+                    // run) measure several lines too tall.
+                    var childWidth = MeasureMaxContentWidth(child) + margin.Horizontal;
+
+                    if (hasInlineLine && lineWidth + childWidth > available)
                     {
-                        content += mainGap;
+                        content += lineHeight;
+                        lineWidth = 0;
+                        lineHeight = 0;
                     }
 
-                    content += childHeight;
+                    lineWidth += childWidth;
+                    lineHeight = MathF.Max(lineHeight, childHeight);
+                    hasInlineLine = true;
+                    continue;
                 }
+
+                if (hasInlineLine)
+                {
+                    content += lineHeight;
+                    lineWidth = 0;
+                    lineHeight = 0;
+                    hasInlineLine = false;
+                }
+
+                if (content > 0)
+                {
+                    content += mainGap;
+                }
+
+                content += childHeight;
+            }
+
+            if (hasInlineLine)
+            {
+                content += lineHeight;
             }
         }
 
-        return content + padding.Vertical + border.Vertical;
+        return MathF.Max(minHeight, MathF.Min(content + extra, maxHeight));
     }
 
     /// <summary>Resolves an item's effective cross-axis alignment.</summary>

@@ -517,13 +517,58 @@ public sealed partial class LayoutEngine
         var lineY = band.Y;
         var lineHeight = 0f;
         var right = band.Right;
+        var textAlign = container.Style.TextAlign;
+        var alignStart = band.Left;
+
+        // Align the whole inline run (text plus inline children such as a
+        // dropdown caret), not just the text. Centring the text on its own
+        // leaves only half of the free space for the caret, so it wraps or
+        // overlaps.
+        if (textAlign is TextAlign.Center or TextAlign.End or TextAlign.Right)
+        {
+            var inlineWidth = 0f;
+
+            if (!string.IsNullOrEmpty(text))
+            {
+                var measureStyle = CreateTextStyle(container.Style);
+                inlineWidth += _measurer.Measure(
+                    ApplyTextTransform(text, container.Style.TextTransform),
+                    in measureStyle).Width;
+            }
+
+            for (var i = start; i < start + count; i++)
+            {
+                var inlineChild = children[i];
+
+                if (inlineChild.IsOutOfFlow)
+                {
+                    continue;
+                }
+
+                var childContext = CreateContext(inlineChild.Style);
+                inlineWidth += MeasureMaxContentWidth(inlineChild)
+                    + inlineChild.Style.Margin.Resolve(in childContext, content.Width).Horizontal;
+            }
+
+            var available = MathF.Max(0, band.Right - band.Left);
+
+            if (inlineWidth < available)
+            {
+                alignStart = textAlign == TextAlign.Center
+                    ? band.Left + (available - inlineWidth) * 0.5f
+                    : band.Right - inlineWidth;
+                lineX = alignStart;
+            }
+        }
 
         if (!string.IsNullOrEmpty(text))
         {
             var available = MathF.Max(0, right - lineX);
+            var textStyle = container.Style;
+
             var layout = floats is { Count: > 0 }
-                ? GetTextLayoutInBands(container.Node, container.Style, text, content, lineY, floats)
-                : GetTextLayout(container.Node, container.Style, text, available, out _);
+                ? GetTextLayoutInBands(container.Node, textStyle, text, content, lineY, floats)
+                : GetTextLayout(container.Node, textStyle, text, available, out _);
 
             if (layout.Lines.Length > 1)
             {
@@ -535,9 +580,34 @@ public sealed partial class LayoutEngine
             }
             else
             {
+                // Single-line text is positioned by the inline run below, which
+                // has already applied text-align to the text and every inline
+                // sibling that follows. Re-shape with Start so the text layout
+                // does not shift the glyphs inside its line box: that shift is
+                // not part of the width the next inline box advances by, so a
+                // centred split-button caret would be painted over the label.
+                if (textStyle.TextAlign != TextAlign.Start)
+                {
+                    textStyle = textStyle.Clone();
+                    textStyle.TextAlign = TextAlign.Start;
+                    layout = floats is { Count: > 0 }
+                        ? GetTextLayoutInBands(container.Node, textStyle, text, content, lineY, floats)
+                        : GetTextLayout(container.Node, textStyle, text, available, out _);
+                }
+
                 container.Text = layout;
-                container.TextOrigin = new Point(content.X, lineY);
-                lineX = band.Left + layout.Size.Width;
+                container.TextOrigin = new Point(lineX, lineY);
+
+                // Advance by the shaped width, but never less than the
+                // measured advance. Some glyph runs paint slightly past the
+                // line-box width, which otherwise lets a following inline box
+                // (a split-button caret) sit on top of the last glyph.
+                var shapedWidth = layout.Size.Width;
+                var measuredTextStyle = CreateTextStyle(textStyle);
+                var measuredWidth = _measurer.Measure(
+                    ApplyTextTransform(text, textStyle.TextTransform),
+                    in measuredTextStyle).Width;
+                lineX += MathF.Max(shapedWidth, measuredWidth);
                 lineHeight = MathF.Max(lineHeight, layout.Size.Height);
             }
         }
@@ -549,6 +619,67 @@ public sealed partial class LayoutEngine
             if (child.IsOutOfFlow)
             {
                 child.StaticPosition = new Point(lineX, lineY);
+                continue;
+            }
+
+            // A text node is a text run, not an atomic inline box. Treating it
+            // as a box lets a long run consume the whole line even when only
+            // part of it fits, which pushes the following inline element (for
+            // example an alert link) onto a new line. Shape the run directly
+            // so subsequent inline siblings continue after its last line.
+            if (child.Node.IsTextNode
+                && child.Children.Count == 0
+                && GetNodeText(child.Node) is { Length: > 0 } textNodeText)
+            {
+                band = BandAt(floats, lineY, content);
+
+                if (band.Y > lineY + 0.001f)
+                {
+                    lineY = band.Y;
+                    lineX = band.Left;
+                    lineHeight = 0;
+                }
+
+                right = band.Right;
+                var textStyle = CreateTextStyle(child.Style);
+                var spaceWidth = _measurer.Measure(" ", in textStyle).Width;
+                var lineHasContent = lineX > band.Left + 0.001f;
+
+                // Text shaping trims line edges, but a whitespace character at
+                // the edge of one inline run is the separator before the next
+                // inline element. Preserve it as a measured space so "with" and
+                // a following link do not run together.
+                if (lineHasContent && char.IsWhiteSpace(textNodeText[0]))
+                {
+                    lineX += spaceWidth;
+                }
+
+                var textAvailable = MathF.Max(0, right - lineX);
+                var textLayout = floats is { Count: > 0 }
+                    ? GetTextLayoutInBands(child.Node, child.Style, textNodeText, content, lineY, floats)
+                    : GetTextLayout(child.Node, child.Style, textNodeText, textAvailable, out _);
+
+                child.Text = textLayout;
+                child.TextOrigin = new Point(lineX, lineY);
+                child.ApplyBorderBox(lineX, lineY, textLayout.Size.Width, textLayout.Size.Height);
+
+                if (textLayout.Lines.Length > 1)
+                {
+                    lineY += textLayout.Size.Height;
+                    lineX = band.Left;
+                    lineHeight = 0;
+                }
+                else
+                {
+                    lineX += textLayout.Size.Width;
+                    lineHeight = MathF.Max(lineHeight, textLayout.Size.Height);
+                }
+
+                if (i + 1 < start + count && char.IsWhiteSpace(textNodeText[^1]))
+                {
+                    lineX += spaceWidth;
+                }
+
                 continue;
             }
 
@@ -571,10 +702,15 @@ public sealed partial class LayoutEngine
             // container's content width as the basis.
             PrepareBox(child, content.Width);
             var autoWidth = child.Style.Width.IsAuto;
-            var outer = (autoWidth ? MathF.Min(maxContent, available) : maxContent)
-                + child.Margin.Horizontal;
 
-            if (lineX > band.Left + 0.001f && outer > available)
+            // The fit test uses the child's max-content width, not the width
+            // already clamped to the remaining space. Clamping first makes a
+            // too-small remainder look like an exact fit, so an inline link
+            // after a text run is squeezed into a few pixels instead of moving
+            // to the next line (or shrinking only when the line is empty).
+            var outer = maxContent + child.Margin.Horizontal;
+
+            if (lineX > band.Left + 0.001f && outer > available + 0.01f)
             {
                 lineY += lineHeight;
                 lineHeight = 0;
@@ -612,6 +748,19 @@ public sealed partial class LayoutEngine
                 forcedBorderHeight: null,
                 fillHeight: false,
                 definiteContentHeight: null);
+
+            if (!child.Style.VerticalAlign.IsAuto)
+            {
+                // Inline boxes are laid out from the line's top edge in this
+                // engine. Centre a vertically aligned box in the line and then
+                // apply the CSS offset (positive raises it), so a dropdown
+                // caret sits on the text line instead of hugging the button
+                // top.
+                var line = MathF.Max(lineHeight, child.Margin.Top + height + child.Margin.Bottom);
+                var targetTop = lineY
+                    + MathF.Max(0, (line - child.Margin.Top - height - child.Margin.Bottom) * 0.5f);
+                child.Translate(0, targetTop - child.BorderBox.Y);
+            }
 
             lineX = borderX + child.BorderBox.Width + child.Margin.Right;
             lineHeight = MathF.Max(lineHeight, child.Margin.Top + height + child.Margin.Bottom);

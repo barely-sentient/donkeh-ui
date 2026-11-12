@@ -24,7 +24,7 @@ namespace Donkeh.Data
     /// </para>
     /// <para>
     /// The table is mutable while parsing and not thread-safe. Do not mutate it
-    /// while <see cref="MatchRules(IgniteSupportedDomNode, RendererContext)"/> is
+    /// while <see cref="MatchRules(IgniteSupportedDomNode, RendererContext, PseudoElementKind)"/> is
     /// running: matching uses shared scratch buffers, the growing token arenas
     /// invalidate previously returned spans, and the condition cache stores a
     /// single owner/version pair.
@@ -447,7 +447,17 @@ namespace Donkeh.Data
             }
 
             var newId = _selectors.Count;
-            var discriminator = NormalizeDiscriminator(selector[^1]);
+
+            // A pseudo-element is not part of the DOM node's own keys, so the
+            // candidate index must use the last real compound token instead.
+            var discriminatorIndex = selector.Length - 1;
+
+            while (discriminatorIndex > 0 && selector[discriminatorIndex].Kind == TokenKind.PseudoElement)
+            {
+                discriminatorIndex--;
+            }
+
+            var discriminator = NormalizeDiscriminator(selector[discriminatorIndex]);
             var tokenOffset = AppendSelectorTokens(selector);
 
             // One pass splits the selector into compounds, computes the specificity
@@ -461,7 +471,8 @@ namespace Donkeh.Data
                 _compoundScratch,
                 _filterScratch,
                 _pseudoScratch,
-                out var matchable);
+                out var matchable,
+                out var pseudoElement);
 
             var compoundOffset = _compounds.Count;
             var filterBase = _attributeFilters.Count;
@@ -500,7 +511,8 @@ namespace Donkeh.Data
                 Specificity = specificity,
                 CompoundOffset = compoundOffset,
                 CompoundCount = _compoundScratch.Count,
-                IsMatchable = matchable
+                IsMatchable = matchable,
+                PseudoElement = pseudoElement
             });
 
             // Both lists are parallel to _selectors.

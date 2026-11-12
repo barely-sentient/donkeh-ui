@@ -1,3 +1,4 @@
+using Donkeh.Data;
 using Donkeh.Data.Dom;
 
 namespace Donkeh.LayoutLab;
@@ -97,6 +98,7 @@ public sealed class LayoutBox
         Radius = default;
 
         IsContents = false;
+        PseudoElementKind = PseudoElementKind.None;
         ContainingBlock = null;
         StaticPosition = default;
         IsScrollContainer = false;
@@ -150,6 +152,9 @@ public sealed class LayoutBox
 
     /// <summary>Gets the resolved corner radii in CSS pixels.</summary>
     public CornerRadius Radius { get; internal set; }
+
+    /// <summary>Gets or sets which generated pseudo-element produced this box, if any.</summary>
+    internal PseudoElementKind PseudoElementKind { get; set; }
 
     /// <summary>Gets a value indicating whether the box comes from <c>display: contents</c>.</summary>
     /// <remarks>Such a box owns no background, border or geometry of its own; its children are painted in its place.</remarks>
@@ -284,9 +289,15 @@ public sealed class LayoutBox
     /// immediately.
     /// </para>
     /// <para>
-    /// Out-of-flow children are skipped because they are positioned separately;
-    /// <see cref="ContainingBlock"/> and <see cref="StaticPosition"/> are not
-    /// adjusted.
+    /// Out-of-flow children need more care than in-flow children. Their
+    /// <see cref="StaticPosition"/> always moves with the subtree because it
+    /// records where the box would have been in normal flow. Their already
+    /// resolved geometry only moves when this box is their containing block;
+    /// an absolutely positioned child anchored to an ancestor, and a fixed child
+    /// anchored to the viewport, must stay where its containing block puts it.
+    /// This matters when a flex or grid item is measured at the origin and then
+    /// translated into place: without it, a dropdown menu without insets keeps
+    /// the static position it had before the item moved.
     /// </para>
     /// </remarks>
     public void Translate(float dx, float dy)
@@ -307,6 +318,14 @@ public sealed class LayoutBox
             var child = Children[i];
 
             if (!child.IsOutOfFlow)
+            {
+                child.Translate(dx, dy);
+                continue;
+            }
+
+            child.StaticPosition = child.StaticPosition.Translate(dx, dy);
+
+            if (!child.IsFixed && ReferenceEquals(child.ContainingBlock, this))
             {
                 child.Translate(dx, dy);
             }

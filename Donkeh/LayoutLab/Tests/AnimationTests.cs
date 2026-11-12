@@ -37,6 +37,38 @@ public class AnimationTests
     }
 
     [Fact]
+    public void AnimatedRepaintKeepsRootScrolling()
+    {
+        const string css = """
+            @keyframes spin { to { transform: rotate(360deg); } }
+            .spin { width: 20px; height: 20px; animation: 1s linear infinite spin; }
+            #child { height: 2000px; }
+            """;
+
+        var table = TestSupport.Build(css);
+        var root = TestSupport.Node("div", "root");
+        var spinner = TestSupport.Node("div", null, null, "spin");
+        var child = TestSupport.Node("div", "child");
+        root.Children = [spinner, child];
+
+        var options = TestSupport.Options(800, 600);
+        options.RootScrolls = true;
+        var engine = new LayoutEngine(table);
+
+        options.AnimationTimeSeconds = 0;
+        engine.Layout(root, options);
+        options.AnimationTimeSeconds = 0.5;
+        var result = engine.Layout(root, options);
+        var box = TestSupport.Box(result, root);
+
+        // Changing an animation rebuilds every style from the cached base
+        // style. The root must still be the viewport scroll container.
+        Assert.True(box.IsScrollContainer);
+        Assert.Equal(Overflow.Auto, box.Style.OverflowY);
+        Assert.Equal(2020, box.ScrollHeight, 3);
+    }
+
+    [Fact]
     public void InterpolatesOpacityBetweenKeyframes()
     {
         const string css = """

@@ -2,6 +2,19 @@ using Donkeh.Parser.Objects;
 
 namespace Donkeh.Data
 {
+    /// <summary>Generated pseudo-element targeted by a selector.</summary>
+    public enum PseudoElementKind : byte
+    {
+        /// <summary>No pseudo-element; the selector targets the element itself.</summary>
+        None,
+
+        /// <summary><c>::before</c> generated content.</summary>
+        Before,
+
+        /// <summary><c>::after</c> generated content.</summary>
+        After
+    }
+
     /// <summary>
     /// A selector stored as a slice of the owning <see cref="DataTable"/>'s flat
     /// token arena. Keeping the tokens in one arena avoids one array allocation
@@ -76,5 +89,11 @@ namespace Donkeh.Data
         /// classes and combinators).
         /// </summary>
         public bool IsMatchable { get; init; }
+
+        /// <summary>
+        /// The generated pseudo-element this selector targets, or
+        /// <see cref="PseudoElementKind.None"/> for the element itself.
+        /// </summary>
+        public PseudoElementKind PseudoElement { get; init; }
     }
 }

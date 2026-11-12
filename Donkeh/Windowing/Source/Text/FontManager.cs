@@ -1032,15 +1032,18 @@ internal sealed unsafe class FontFace
     /// <summary>Returns the font-unit to pixel scale for a CSS font size.</summary>
     /// <param name="fontSize">The font size in CSS pixels.</param>
     /// <returns>
-    /// The multiplier that converts design units to pixels, computed with
-    /// stb_truetype's pixel-height scaling.
+    /// The multiplier that converts design units to pixels, computed from the
+    /// font's units-per-em so the em square matches the CSS font size.
     /// </returns>
     /// <remarks>
-    /// Sizes below 1 pixel are clamped to 1 so scaling never collapses to zero
-    /// or inverts. The scale is recomputed on every call; only metrics and glyphs
-    /// are cached.
+    /// CSS <c>font-size</c> describes the em square, not the ascent-to-descent
+    /// span. stb_truetype's pixel-height scaling would make text 25% too small
+    /// for fonts whose vertical metrics exceed the em (Segoe UI among them), so
+    /// the em mapping is used instead. Sizes below 1 pixel are clamped to 1 so
+    /// scaling never collapses to zero or inverts.
     /// </remarks>
-    public float GetScaleForCss(float fontSize) => StbTrueType.stbtt_ScaleForPixelHeight(_info, MathF.Max(1, fontSize));
+    public float GetScaleForCss(float fontSize) =>
+        StbTrueType.stbtt_ScaleForMappingEmToPixels(_info, MathF.Max(1, fontSize));
 
     /// <summary>
     /// Returns cached ascent, descent and scale for a CSS font size.
@@ -1155,7 +1158,7 @@ internal sealed unsafe class FontFace
             return cached;
         }
 
-        var scale = StbTrueType.stbtt_ScaleForPixelHeight(_info, pixelSize);
+        var scale = StbTrueType.stbtt_ScaleForMappingEmToPixels(_info, pixelSize);
         int width;
         int height;
         int xOffset;

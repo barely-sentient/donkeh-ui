@@ -128,7 +128,7 @@ public class MatchingTests
     }
 
     [Fact]
-    public void ExcludesSelectorsUsingConstructsThatNeedStateOrGeneratedContent()
+    public void MatchesSimpleNegationAndExcludesUnsupportedLogicalFunctions()
     {
         var table = Build(
             ".btn:hover { color: a; }" +
@@ -143,8 +143,26 @@ public class MatchingTests
 
         var matches = table.MatchRules(node);
 
-        Assert.Single(matches);
-        Assert.Equal("f", Value(matches[0]));
+        Assert.Equal(2, matches.Length);
+        Assert.Equal("c", Value(matches[^1]));
+    }
+
+    [Fact]
+    public void PseudoElementRulesMatchOnlyTheRequestedPseudoElement()
+    {
+        var table = Build(
+            ".btn::before { color: a; }" +
+            ".btn::after { color: b; }" +
+            ".btn { color: c; }");
+
+        var node = new IgniteSupportedDomNode { TagName = "div" };
+        node.AddClass("btn");
+
+        Assert.Equal("c", Value(Assert.Single(table.MatchRules(node))));
+        Assert.Equal("a", Value(Assert.Single(
+            table.MatchRules(node, null, PseudoElementKind.Before))));
+        Assert.Equal("b", Value(Assert.Single(
+            table.MatchRules(node, null, PseudoElementKind.After))));
     }
 
     [Fact]

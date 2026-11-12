@@ -735,8 +735,23 @@ public sealed unsafe class GLRenderer : IDisposable
                 new Vector4(rect.X, rect.Y, rect.Width, rect.Height),
                 ColorOf(top.Color, _opacity),
                 ToRadii(border.Radius),
-                new Vector4(2, 0, MathF.Max(1, topWidth), 0),
+                new Vector4(2, 0, MathF.Max(1, topWidth), ShapeInstance.AllBorderSides),
                 new Vector4(rect.X, rect.Y, rect.Width, rect.Height)));
+            return;
+        }
+
+        if (!border.Radius.IsZero)
+        {
+            // Rounded borders with per-side colours are a ring split along the
+            // corner bisectors. Emit one sector per painted side so the shape
+            // stays round under a rotation instead of becoming four axis-aligned
+            // strips; the fragment shader picks the sector from the local
+            // position, so the colour boundaries meet on the diagonals exactly
+            // like CSS.
+            AddRoundedSide(rect, border, top, topWidth, 0);
+            AddRoundedSide(rect, border, right, rightWidth, 1);
+            AddRoundedSide(rect, border, bottom, bottomWidth, 2);
+            AddRoundedSide(rect, border, left, leftWidth, 3);
             return;
         }
 
@@ -763,6 +778,28 @@ public sealed unsafe class GLRenderer : IDisposable
                 new Rect(rect.Right - rightWidth, rect.Y + topWidth, rightWidth, MathF.Max(0, rect.Height - topWidth - bottomWidth)),
                 right.Color);
         }
+    }
+
+    /// <summary>Adds one coloured sector of a rounded border ring.</summary>
+    /// <param name="rect">Border box in CSS pixels.</param>
+    /// <param name="border">Full border specification providing the radii.</param>
+    /// <param name="side">Side whose width and colour are used.</param>
+    /// <param name="width">Resolved side width in CSS pixels.</param>
+    /// <param name="sector">Sector index: 0 top, 1 right, 2 bottom, 3 left.</param>
+    private void AddRoundedSide(in Rect rect, in BorderSpec border, in BorderSide side, float width, int sector)
+    {
+        if (width <= 0 || (side.Color >> 24) == 0)
+        {
+            return;
+        }
+
+        var run = EnsureShapeRun();
+        run.Shapes.Add(new ShapeInstance(
+            new Vector4(rect.X, rect.Y, rect.Width, rect.Height),
+            ColorOf(side.Color, _opacity),
+            ToRadii(border.Radius),
+            new Vector4(2, 0, width, sector),
+            new Vector4(rect.X, rect.Y, rect.Width, rect.Height)));
     }
 
     /// <summary>Appends an outer or inset box shadow as a single SDF instance.</summary>
@@ -1575,10 +1612,14 @@ public sealed unsafe class GLRenderer : IDisposable
     /// <param name="transform">The accumulated CSS-pixel affine transform for the run.</param>
     /// <remarks>
     /// <para>
-    /// The matrix is sent as two <c>vec3</c> rows: <c>(M11, M12, M31)</c> and
-    /// <c>(M21, M22, M32)</c>. The shader dots the position with each pair before
-    /// adding the translation and projecting through <c>uViewport</c>; there is
-    /// no perspective divide beyond the fixed <c>w = 1</c>.
+    /// The matrix is sent so the shader reproduces
+    /// <see cref="Vector2.Transform(Vector2, Matrix3x2)"/> (row-vector)
+    /// convention: <c>uTransform0 = (M11, M21, M31)</c> and
+    /// <c>uTransform1 = (M12, M22, M32)</c>. Each pair is dotted with the
+    /// position before adding the translation and projecting through
+    /// <c>uViewport</c>; there is no perspective divide beyond the fixed
+    /// <c>w = 1</c>. Sending <c>(M11, M12, M31)</c> instead transposed the
+    /// linear part, which made a rotating box orbit its own centre.
     /// </para>
     /// <para>
     /// An unclipped run receives a very large rectangle (±1e7) and zero radii
@@ -1589,8 +1630,8 @@ public sealed unsafe class GLRenderer : IDisposable
     private void SetCommonUniforms(ShaderProgram program, in ClipState clip, Matrix3x2 transform)
     {
         program.Uniform2("uViewport", _viewportWidth, _viewportHeight);
-        program.Uniform3("uTransform0", transform.M11, transform.M12, transform.M31);
-        program.Uniform3("uTransform1", transform.M21, transform.M22, transform.M32);
+        program.Uniform3("uTransform0", transform.M11, transform.M21, transform.M31);
+        program.Uniform3("uTransform1", transform.M12, transform.M22, transform.M32);
 
         if (clip.HasClip)
         {
@@ -1957,7 +1998,9 @@ public sealed unsafe class GLRenderer : IDisposable
         /// <param name="parameters">
         /// X is the SDF mode (0 solid, 1 rounded rect, 2 border ring, 3 outer
         /// shadow, 4 inset shadow, 5 ellipse); Y is the blur radius used by
-        /// modes 3 and 4; Z is the border thickness used by mode 2; W is unused.
+        /// modes 3 and 4; Z is the border thickness used by mode 2; W selects
+        /// the mode-2 border sector (0 top, 1 right, 2 bottom, 3 left) or
+        /// <see cref="AllBorderSides"/> for the whole ring.
         /// </param>
         /// <param name="sdfRect">
         /// Bounds of the shape the distance field is evaluated against.
@@ -1994,6 +2037,12 @@ public sealed unsafe class GLRenderer : IDisposable
 
         /// <summary>Rectangle the distance field is measured against, in CSS pixels.</summary>
         public readonly Vector4 SdfRect;
+
+        /// <summary>
+        /// <see cref="Parameters"/> W value that paints the whole border ring
+        /// instead of a single sector.
+        /// </summary>
+        public const float AllBorderSides = -1;
     }
 
     /// <summary>
@@ -2068,6 +2117,7 @@ public sealed unsafe class GLRenderer : IDisposable
         out vec2 vScreen;
         out vec2 vLocal;
         out vec2 vHalf;
+        out vec2 vSdfOffset;
         out vec4 vColor;
         out vec4 vRadii;
         out vec4 vParams;
@@ -2076,7 +2126,6 @@ public sealed unsafe class GLRenderer : IDisposable
         void main()
         {
             vec2 p = iRect.xy + aCorner * iRect.zw;
-            vScreen = p;
             vLocal = (aCorner - 0.5) * iRect.zw;
             vHalf = iRect.zw * 0.5;
             vColor = iColor;
@@ -2084,8 +2133,19 @@ public sealed unsafe class GLRenderer : IDisposable
             vParams = iParams;
             vSdfRect = iSdfRect;
 
+            // The SDF is evaluated in the quad's own (pre-transform) space so
+            // rotating or scaling a box rotates the shape instead of sampling a
+            // screen-space field that no longer matches the rasterised pixels.
+            vSdfOffset = (iSdfRect.xy + iSdfRect.zw * 0.5) - (iRect.xy + iRect.zw * 0.5);
+
             vec2 t = vec2(dot(uTransform0.xy, p) + uTransform0.z,
                           dot(uTransform1.xy, p) + uTransform1.z);
+
+            // Clip tests must use the transformed position; the interpolated
+            // pre-transform position is only valid while the transform is the
+            // identity.
+            vScreen = t;
+
             gl_Position = vec4(t.x / uViewport.x * 2.0 - 1.0,
                                1.0 - t.y / uViewport.y * 2.0,
                                0.0, 1.0);
@@ -2116,6 +2176,7 @@ public sealed unsafe class GLRenderer : IDisposable
         in vec2 vScreen;
         in vec2 vLocal;
         in vec2 vHalf;
+        in vec2 vSdfOffset;
         in vec4 vColor;
         in vec4 vRadii;
         in vec4 vParams;
@@ -2161,9 +2222,7 @@ public sealed unsafe class GLRenderer : IDisposable
             }
 
             int mode = int(vParams.x + 0.5);
-            vec2 center = vSdfRect.xy + vSdfRect.zw * 0.5;
-            vec2 halfSize = vSdfRect.zw * 0.5;
-            float d = sdRoundBox(vScreen - center, halfSize, vRadii);
+            float d = sdRoundBox(vLocal - vSdfOffset, vSdfRect.zw * 0.5, vRadii);
             float alpha = 1.0;
 
             if (mode == 0)
@@ -2176,6 +2235,17 @@ public sealed unsafe class GLRenderer : IDisposable
             }
             else if (mode == 2)
             {
+                if (vParams.w >= 0.0)
+                {
+                    vec2 n = (vLocal - vSdfOffset) / max(vSdfRect.zw * 0.5, vec2(0.001));
+                    int side = (abs(n.x) > abs(n.y)) ? (n.x > 0.0 ? 1 : 3) : (n.y > 0.0 ? 2 : 0);
+
+                    if (float(side) != vParams.w)
+                    {
+                        discard;
+                    }
+                }
+
                 float w = max(1.0, vParams.z);
                 alpha = smoothstep(-w - 1.0, -w + 1.0, d) * (1.0 - smoothstep(-1.0, 1.0, d));
             }
@@ -2237,10 +2307,14 @@ public sealed unsafe class GLRenderer : IDisposable
         {
             vUv = aUv;
             vColor = aColor;
-            vScreen = aPosition;
 
             vec2 t = vec2(dot(uTransform0.xy, aPosition) + uTransform0.z,
                           dot(uTransform1.xy, aPosition) + uTransform1.z);
+
+            // Clip against the transformed position; the pre-transform point is
+            // only the same while the accumulated transform is the identity.
+            vScreen = t;
+
             gl_Position = vec4(t.x / uViewport.x * 2.0 - 1.0,
                                1.0 - t.y / uViewport.y * 2.0,
                                0.0, 1.0);

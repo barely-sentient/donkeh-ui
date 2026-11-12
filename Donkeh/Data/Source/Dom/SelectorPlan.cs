@@ -65,7 +65,10 @@ namespace Donkeh.Data.Dom
         AnyLink,
         PlaceholderShown,
         ReadOnly,
-        ReadWrite
+        ReadWrite,
+
+        /// <summary><c>:not(compound)</c>; the argument is a simple compound.</summary>
+        Not
     }
 
     /// <summary>
@@ -131,5 +134,11 @@ namespace Donkeh.Data.Dom
 
         /// <summary>The <c>B</c> offset for the <c>:nth-*</c> forms, or 0.</summary>
         public int B;
+
+        /// <summary>First token of a <c>:not()</c> argument, relative to the selector.</summary>
+        public int ArgumentStart;
+
+        /// <summary>Number of tokens in a <c>:not()</c> argument.</summary>
+        public int ArgumentLength;
     }
 }
