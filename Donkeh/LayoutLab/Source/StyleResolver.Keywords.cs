@@ -1758,16 +1758,25 @@ public sealed partial class StyleResolver
     /// <param name="style">The style being updated.</param>
     /// <param name="value">The position value.</param>
     /// <remarks>
-    /// One or two space-separated components are supported. Keywords map to
-    /// percentages: left/top 0%, center 50%, right/bottom 100%. With no value, x
-    /// defaults to 0% and y to 50%, matching the CSS initial position. The
-    /// three- and four-value edge-offset forms are not supported.
+    /// One- to four-value forms are supported. Keywords map to percentages:
+    /// left/top 0%, center 50%, right/bottom 100%. When the first value is a
+    /// vertical keyword the pair is swapped, so <c>top center</c> works. The
+    /// three- and four-value edge-offset forms (<c>right 0.75rem center</c>) are
+    /// represented as <c>calc(100% - offset)</c> on the relevant axis.
     /// </remarks>
     private static void ApplyBackgroundPosition(ComputedStyle style, string value)
     {
         var parts = CssValueParser.SplitTopLevel(value, ' ');
 
-        static CssLength Component(string part, bool horizontal, CssLength fallback)
+        static bool IsHorizontal(string part) =>
+            part.Equals("left", StringComparison.OrdinalIgnoreCase)
+            || part.Equals("right", StringComparison.OrdinalIgnoreCase);
+
+        static bool IsVertical(string part) =>
+            part.Equals("top", StringComparison.OrdinalIgnoreCase)
+            || part.Equals("bottom", StringComparison.OrdinalIgnoreCase);
+
+        static CssLength Component(string part)
         {
             return part.ToLowerInvariant() switch
             {
@@ -1778,13 +1787,77 @@ public sealed partial class StyleResolver
             };
         }
 
-        style.BackgroundPositionX = parts.Count > 0
-            ? Component(parts[0], horizontal: true, CssLength.Percent(0))
-            : CssLength.Percent(0);
+        static CssLength EdgeOffset(string edge, CssLength offset)
+        {
+            if (!edge.Equals("right", StringComparison.OrdinalIgnoreCase)
+                && !edge.Equals("bottom", StringComparison.OrdinalIgnoreCase))
+            {
+                return offset;
+            }
 
-        style.BackgroundPositionY = parts.Count > 1
-            ? Component(parts[1], horizontal: false, CssLength.Percent(50))
-            : CssLength.Percent(50);
+            // right 0.75rem == calc(100% - 0.75rem) against the free space.
+            return new CssLength(
+                0,
+                LengthUnit.Number,
+                new CssBinaryExpression(
+                    '-',
+                    new CssLiteralExpression(CssLength.Percent(100)),
+                    new CssLiteralExpression(offset)));
+        }
+
+        if (parts.Count == 0)
+        {
+            style.BackgroundPositionX = CssLength.Percent(0);
+            style.BackgroundPositionY = CssLength.Percent(50);
+            return;
+        }
+
+        if (parts.Count == 3
+            && IsHorizontal(parts[0])
+            && (parts[2].Equals("center", StringComparison.OrdinalIgnoreCase)
+                || IsVertical(parts[2])))
+        {
+            style.BackgroundPositionX = EdgeOffset(parts[0], CssValueParser.ParseLength(parts[1]));
+            style.BackgroundPositionY = Component(parts[2]);
+            return;
+        }
+
+        if (parts.Count == 3
+            && IsVertical(parts[0])
+            && (parts[2].Equals("center", StringComparison.OrdinalIgnoreCase)
+                || IsHorizontal(parts[2])))
+        {
+            style.BackgroundPositionY = EdgeOffset(parts[0], CssValueParser.ParseLength(parts[1]));
+            style.BackgroundPositionX = Component(parts[2]);
+            return;
+        }
+
+        if (parts.Count >= 4)
+        {
+            if (IsHorizontal(parts[0]) && IsVertical(parts[2]))
+            {
+                style.BackgroundPositionX = EdgeOffset(parts[0], CssValueParser.ParseLength(parts[1]));
+                style.BackgroundPositionY = EdgeOffset(parts[2], CssValueParser.ParseLength(parts[3]));
+                return;
+            }
+
+            if (IsVertical(parts[0]) && IsHorizontal(parts[2]))
+            {
+                style.BackgroundPositionY = EdgeOffset(parts[0], CssValueParser.ParseLength(parts[1]));
+                style.BackgroundPositionX = EdgeOffset(parts[2], CssValueParser.ParseLength(parts[3]));
+                return;
+            }
+        }
+
+        if (parts.Count > 1 && IsVertical(parts[0]) && IsHorizontal(parts[1]))
+        {
+            style.BackgroundPositionY = Component(parts[0]);
+            style.BackgroundPositionX = Component(parts[1]);
+            return;
+        }
+
+        style.BackgroundPositionX = Component(parts[0]);
+        style.BackgroundPositionY = parts.Count > 1 ? Component(parts[1]) : CssLength.Percent(50);
     }
 
     /// <summary>

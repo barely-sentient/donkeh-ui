@@ -709,9 +709,19 @@ public sealed partial class LayoutEngine
 
                 width = MathF.Min(width, area.Width);
                 height = MathF.Min(height, area.Height);
+
+                // background-position is resolved against the free space, so a
+                // percentage of 100 keeps the image's right edge flush with the
+                // area and calc(100% - 0.75rem) leaves a right inset (used by
+                // Bootstrap's form-select chevron).
+                var freeX = MathF.Max(0, area.Width - width);
+                var freeY = MathF.Max(0, area.Height - height);
+                var positionX = style.BackgroundPositionX.ResolveOr(in imageContext, freeX, 0);
+                var positionY = style.BackgroundPositionY.ResolveOr(in imageContext, freeY, 0);
+
                 drawArea = new Rect(
-                    area.X + (area.Width - width) / 2,
-                    area.Y + (area.Height - height) / 2,
+                    area.X + positionX,
+                    area.Y + positionY,
                     width,
                     height);
             }

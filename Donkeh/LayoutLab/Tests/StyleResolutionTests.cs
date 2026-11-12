@@ -349,6 +349,20 @@ public class StyleResolutionTests
     }
 
     [Fact]
+    public void BackgroundPositionSupportsEdgeOffsets()
+    {
+        var style = TestSupport.Style("background-position: right 10px center");
+        var context = TestSupport.Options().CreateRootLengthContext();
+
+        Assert.Equal(190, style.BackgroundPositionX.Resolve(in context, 200), 3);
+        Assert.Equal(50, style.BackgroundPositionY.Resolve(in context, 100), 3);
+
+        var bootstrap = TestSupport.Style("background-position: right .75rem center; font-size: 16px");
+        Assert.Equal(188, bootstrap.BackgroundPositionX.Resolve(in context, 200), 3);
+        Assert.Equal(50, bootstrap.BackgroundPositionY.Resolve(in context, 100), 3);
+    }
+
+    [Fact]
     public void BackgroundPositionMapsKeywordsToPercentages()
     {
         var style = TestSupport.Style("background-position: right bottom");

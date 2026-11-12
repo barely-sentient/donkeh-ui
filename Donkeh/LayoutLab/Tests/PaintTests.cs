@@ -151,6 +151,38 @@ public class PaintTests
     }
 
     [Fact]
+    public void BackgroundImageHonoursPositionAndExplicitSize()
+    {
+        var root = TestSupport.Node("div", "root");
+        var result = Lay(
+            "#root { width: 200px; height: 100px; background-image: url(a.png);"
+            + " background-size: 16px 12px; background-position: right 10px center; }",
+            root);
+
+        var draw = TestSupport.Single(result, InstructionOpCode.DrawBackgroundImage);
+        TestSupport.AssertRect(draw.Rect, 174, 44, 16, 12);
+    }
+
+    [Fact]
+    public void FormSelectChevronSitsAtTheRightEdge()
+    {
+        var root = TestSupport.Node("select", "root", null, "form-select");
+
+        var result = Lay(
+            ":root { --chevron: url(a.png); }"
+            + " .form-select { width: 200px; height: 40px;"
+            + " background-color: #fff;"
+            + " background-image: var(--chevron), none;"
+            + " background-repeat: no-repeat;"
+            + " background-position: right .75rem center;"
+            + " background-size: 16px 12px; }",
+            root);
+
+        var draw = TestSupport.Single(result, InstructionOpCode.DrawBackgroundImage);
+        TestSupport.AssertRect(draw.Rect, 172, 14, 16, 12);
+    }
+
+    [Fact]
     public void MultipleBackgroundLayersEachEmitADraw()
     {
         var root = TestSupport.Node("div", "root");
