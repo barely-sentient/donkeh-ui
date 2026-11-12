@@ -291,5 +291,11 @@ namespace Donkeh.UILab
         /// The argument is the window-side <c>AudioPlayer</c> control surface.
         /// </summary>
         public Delegate? OnAudioReady { get; init; }
+
+        /// <summary>
+        /// Handler invoked when a <c>video</c> element's player has been created.
+        /// The argument is the window-side <c>VideoPlayer</c> control surface.
+        /// </summary>
+        public Delegate? OnVideoReady { get; init; }
     }
 }

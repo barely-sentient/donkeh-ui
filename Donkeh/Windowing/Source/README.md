@@ -72,9 +72,11 @@ cascade.
 - `<a>`, `<button>` and every element with event handlers receive routed
   pointer events.
 - `<audio>` plays files through the cross-platform SoundFlow/MiniAudio backend.
-  `controls`, `autoplay`, `loop`, `muted`, `volume` and `playbackrate` map to the
-  usual media behaviour; `OnPlay`, `OnPause`, `OnEnded`, `OnTimeUpdate` and
-  `OnReady` expose playback to host code.
+  `<video>` decodes through LibVLC and composites decoded frames as textures.
+  Both support `controls`, `autoplay`, `loop`, `muted`, `volume` and
+  `playbackrate`; `OnPlay`, `OnPause`, `OnEnded`, `OnTimeUpdate` and `OnReady`
+  expose playback to host code. Player creation, I/O and decoding run off the
+  render thread; only the final frame upload touches the GL context.
 
 ### Rendering
 

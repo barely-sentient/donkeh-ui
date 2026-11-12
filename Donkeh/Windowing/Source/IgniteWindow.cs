@@ -79,6 +79,15 @@ public sealed partial class IgniteWindow : IDisposable
     /// <summary>Scratch set of audio elements present in the current layout.</summary>
     private readonly HashSet<ElementNode> _audioLive = [];
 
+    /// <summary>Shared LibVLC host and per-element video players, created on demand.</summary>
+    private VideoHost? _videoHost;
+
+    /// <summary>Previous playing state per video element, used to raise play/pause events.</summary>
+    private readonly Dictionary<ElementNode, bool> _videoWasPlaying = [];
+
+    /// <summary>Scratch set of video elements present in the current layout.</summary>
+    private readonly HashSet<ElementNode> _videoLive = [];
+
     /// <summary>Author stylesheets in cascade order; the last one wins on ties.</summary>
     private readonly List<string> _stylesheets = [];
 
@@ -432,8 +441,8 @@ public sealed partial class IgniteWindow : IDisposable
     /// <summary>Active thumb drag on a native scrollbar, if any.</summary>
     private ScrollbarDrag? _scrollDrag;
 
-    /// <summary>Audio element whose progress thumb is being dragged, if any.</summary>
-    private ElementNode? _audioSeekElement;
+    /// <summary>Audio or video element whose progress thumb is being dragged, if any.</summary>
+    private ElementNode? _mediaSeekElement;
 
     /// <summary>
     /// Creates the window controller, its text measurer and the initial CSS
@@ -1098,9 +1107,9 @@ public sealed partial class IgniteWindow : IDisposable
 
         _audioHost?.Prune(_audioLive);
 
-        if (_audioSeekElement is not null && !_audioLive.Contains(_audioSeekElement))
+        if (_mediaSeekElement is not null && !_audioLive.Contains(_mediaSeekElement))
         {
-            _audioSeekElement = null;
+            _mediaSeekElement = null;
         }
 
         if (_audioWasPlaying.Count > 0)
@@ -1120,6 +1129,125 @@ public sealed partial class IgniteWindow : IDisposable
                 foreach (var element in stale)
                 {
                     _audioWasPlaying.Remove(element);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Creates or updates one LibVLC player per <c>video</c> element, uploads
+    /// decoded frames and dispatches the media events.
+    /// </summary>
+    private void SyncVideoElements()
+    {
+        if (_layoutResult?.Root is null)
+        {
+            return;
+        }
+
+        _videoLive.Clear();
+
+        foreach (var box in EnumerateLayoutBoxes(_layoutResult.Root))
+        {
+            if (box.Node is not ElementNode element
+                || !string.Equals(element.Tag, "video", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var source = GetAttribute(element, "src");
+
+            if (string.IsNullOrWhiteSpace(source))
+            {
+                continue;
+            }
+
+            _videoLive.Add(element);
+
+            var options = new VideoElementOptions(
+                source,
+                element.TryGetAttribute("autoplay", out var ignoredAutoplay),
+                element.TryGetAttribute("loop", out var ignoredLoop),
+                element.TryGetAttribute("muted", out var ignoredMuted),
+                ReadFloatAttribute(element, "volume", 1f),
+                ReadFloatAttribute(element, "playbackrate", 1f));
+
+            _videoHost ??= new VideoHost();
+            var known = _videoHost.GetPlayer(element) is not null;
+            var textureKey = "videoframe:" + element.GetHashCode().ToString(CultureInfo.InvariantCulture);
+            var player = _videoHost.Ensure(element, options, textureKey);
+
+            if (player is null)
+            {
+                continue;
+            }
+
+            if (!known && element.VideoReadyHandler is { } ready)
+            {
+                try { ready.DynamicInvoke(player); }
+                catch { }
+            }
+
+            var ended = _videoHost.ConsumeEnded(element);
+
+            if (ended)
+            {
+                Invoke(element, "ended");
+                _videoWasPlaying[element] = false;
+            }
+
+            var playing = player.IsPlaying;
+
+            if (!ended
+                && _videoWasPlaying.TryGetValue(element, out var wasPlaying)
+                && wasPlaying != playing)
+            {
+                Invoke(element, playing ? "play" : "pause");
+            }
+
+            _videoWasPlaying[element] = playing;
+
+            if (playing)
+            {
+                _needsPaint = true;
+
+                if (element.TryGetEventHandler("timeupdate", out var handler)
+                    && handler is Action<float> timeUpdate)
+                {
+                    try { timeUpdate(player.Time); }
+                    catch { }
+                }
+            }
+        }
+
+        _videoHost?.UpdateFrames(_images);
+        _videoHost?.Prune(_videoLive);
+
+        if (_mediaSeekElement is not null && !_videoLive.Contains(_mediaSeekElement))
+        {
+            if (!_audioLive.Contains(_mediaSeekElement))
+            {
+                _mediaSeekElement = null;
+            }
+        }
+
+        if (_videoWasPlaying.Count > 0)
+        {
+            List<ElementNode>? stale = null;
+
+            foreach (var element in _videoWasPlaying.Keys)
+            {
+                if (!_videoLive.Contains(element))
+                {
+                    (stale ??= []).Add(element);
+                }
+            }
+
+            if (stale is not null)
+            {
+                foreach (var element in stale)
+                {
+                    _videoWasPlaying.Remove(element);
                 }
             }
         }
@@ -1287,6 +1415,7 @@ public sealed partial class IgniteWindow : IDisposable
 
         UpdateDevTools(delta);
         SyncAudioElements();
+        SyncVideoElements();
 
         var size = _window.Size;
         var framebuffer = _window.FramebufferSize;
@@ -3189,7 +3318,21 @@ public sealed partial class IgniteWindow : IDisposable
     /// </remarks>
     private ImageSpec? GetImage(LayoutBox box)
     {
-        if (box.Node is not ElementNode element || !string.Equals(element.Tag, "img", StringComparison.OrdinalIgnoreCase))
+        if (box.Node is not ElementNode element)
+        {
+            return null;
+        }
+
+        if (string.Equals(element.Tag, "video", StringComparison.OrdinalIgnoreCase))
+        {
+            var videoKey = _videoHost?.GetTextureKey(element);
+
+            return videoKey is null
+                ? null
+                : new ImageSpec(videoKey, box.Style.ObjectFit, 1, 0xFFFFFFFF);
+        }
+
+        if (!string.Equals(element.Tag, "img", StringComparison.OrdinalIgnoreCase))
         {
             return null;
         }
@@ -3447,8 +3590,88 @@ public sealed partial class IgniteWindow : IDisposable
                 break;
 
             case "audio":
-                PaintAudioControls(box, element, instructions, constants);
+            case "video":
+                PaintMediaControls(box, element, instructions, constants);
                 break;
+        }
+    }
+
+    /// <summary>Gets the playback state for an audio or video element.</summary>
+    private (bool IsPlaying, float Time, float Duration)? GetMediaState(ElementNode element)
+    {
+        if (string.Equals(element.Tag, "audio", StringComparison.OrdinalIgnoreCase))
+        {
+            var audio = _audioHost?.GetPlayer(element);
+            return audio is null ? null : (audio.IsPlaying, audio.Time, audio.Duration);
+        }
+
+        if (string.Equals(element.Tag, "video", StringComparison.OrdinalIgnoreCase))
+        {
+            var video = _videoHost?.GetPlayer(element);
+            return video is null ? null : (video.IsPlaying, video.Time, video.Duration);
+        }
+
+        return null;
+    }
+
+    /// <summary>Starts or pauses an audio/video element.</summary>
+    private void ToggleMedia(ElementNode element)
+    {
+        if (string.Equals(element.Tag, "audio", StringComparison.OrdinalIgnoreCase))
+        {
+            var audio = _audioHost?.GetPlayer(element);
+
+            if (audio is null)
+            {
+                return;
+            }
+
+            if (audio.IsPlaying)
+            {
+                audio.Pause();
+            }
+            else
+            {
+                audio.Play();
+            }
+
+            return;
+        }
+
+        var video = _videoHost?.GetPlayer(element);
+
+        if (video is null)
+        {
+            return;
+        }
+
+        if (video.IsPlaying)
+        {
+            video.Pause();
+        }
+        else
+        {
+            video.Play();
+        }
+    }
+
+    /// <summary>Seeks an audio/video element to a fraction of its duration.</summary>
+    private void SeekMedia(ElementNode element, float fraction)
+    {
+        var duration = GetMediaState(element)?.Duration ?? 0;
+
+        if (duration <= 0)
+        {
+            return;
+        }
+
+        if (string.Equals(element.Tag, "audio", StringComparison.OrdinalIgnoreCase))
+        {
+            _audioHost?.GetPlayer(element)?.Seek(duration * fraction);
+        }
+        else
+        {
+            _videoHost?.GetPlayer(element)?.Seek(duration * fraction);
         }
     }
 
@@ -3456,7 +3679,7 @@ public sealed partial class IgniteWindow : IDisposable
     /// Paints the optional transport bar of an <c>audio</c> element: a
     /// play/pause button, a clickable progress bar and elapsed/total time.
     /// </summary>
-    private void PaintAudioControls(
+    private void PaintMediaControls(
         LayoutBox box,
         ElementNode element,
         InstructionBuffer instructions,
@@ -3474,10 +3697,10 @@ public sealed partial class IgniteWindow : IDisposable
             return;
         }
 
-        var player = _audioHost?.GetPlayer(element);
-        var playing = player?.IsPlaying == true;
-        var time = player?.Time ?? 0;
-        var duration = player?.Duration ?? 0;
+        var state = GetMediaState(element);
+        var playing = state?.IsPlaying == true;
+        var time = state?.Time ?? 0;
+        var duration = state?.Duration ?? 0;
 
         instructions.AddDrawRect(bar, 0xFFF6F8FA);
         instructions.AddDrawRect(new Rect(bar.X, bar.Y, bar.Width, 1), 0xFFD0D7DE);
@@ -3564,10 +3787,10 @@ public sealed partial class IgniteWindow : IDisposable
     }
 
     /// <summary>
-    /// Handles a press on an audio element's transport bar. Returns
+    /// Handles a press on an audio or video transport bar. Returns
     /// <see langword="true"/> when the press landed on the bar and was consumed.
     /// </summary>
-    private bool TryHandleAudioPointer(ElementNode element, float x, float y)
+    private bool TryHandleMediaPointer(ElementNode element, float x, float y)
     {
         if (!element.TryGetAttribute("controls", out var ignoredControls))
         {
@@ -3588,9 +3811,7 @@ public sealed partial class IgniteWindow : IDisposable
             return false;
         }
 
-        var player = _audioHost?.GetPlayer(element);
-
-        if (player is null)
+        if (GetMediaState(element) is null)
         {
             return true;
         }
@@ -3598,69 +3819,48 @@ public sealed partial class IgniteWindow : IDisposable
         if (x >= button.X && x <= button.X + button.Width
             && y >= button.Y && y <= button.Y + button.Height)
         {
-            if (player.IsPlaying)
-            {
-                player.Pause();
-            }
-            else
-            {
-                player.Play();
-            }
+            ToggleMedia(element);
         }
         else if (progress.Width > 0
             && x >= progress.X && x <= progress.X + progress.Width)
         {
-            _audioSeekElement = element;
-            SeekAudioFromX(element, player, progress, x);
+            _mediaSeekElement = element;
+            SeekMediaFromX(element, progress, x);
         }
 
         _needsPaint = true;
         return true;
     }
 
-    /// <summary>Continues a thumb drag on an audio progress bar.</summary>
-    private void UpdateAudioSeekDrag(float x)
+    /// <summary>Continues a thumb drag on an audio/video progress bar.</summary>
+    private void UpdateMediaSeekDrag(float x)
     {
-        if (_audioSeekElement is null)
+        if (_mediaSeekElement is null)
         {
             return;
         }
 
-        var layout = LayoutFor(_audioSeekElement);
+        var layout = LayoutFor(_mediaSeekElement);
 
-        if (layout is null || !layout.TryGetBox(_audioSeekElement, out var box))
-        {
-            return;
-        }
-
-        var player = _audioHost?.GetPlayer(_audioSeekElement);
-
-        if (player is null)
+        if (layout is null || !layout.TryGetBox(_mediaSeekElement, out var box))
         {
             return;
         }
 
         var (_, _, progress) = GetAudioControlRects(box);
-        SeekAudioFromX(_audioSeekElement, player, progress, x);
+        SeekMediaFromX(_mediaSeekElement, progress, x);
         _needsPaint = true;
     }
 
-    /// <summary>Maps a horizontal pointer position to a seek operation.</summary>
-    private static void SeekAudioFromX(ElementNode element, AudioPlayer player, Rect progress, float x)
+    /// <summary>Maps a horizontal pointer position to a media seek operation.</summary>
+    private void SeekMediaFromX(ElementNode element, Rect progress, float x)
     {
         if (progress.Width <= 0)
         {
             return;
         }
 
-        var duration = player.Duration;
-
-        if (duration <= 0)
-        {
-            return;
-        }
-
-        player.Seek(Math.Clamp((x - progress.X) / progress.Width, 0f, 1f) * duration);
+        SeekMedia(element, Math.Clamp((x - progress.X) / progress.Width, 0f, 1f));
     }
 
     /// <summary>
@@ -3975,9 +4175,9 @@ public sealed partial class IgniteWindow : IDisposable
             return;
         }
 
-        if (_audioSeekElement is not null)
+        if (_mediaSeekElement is not null)
         {
-            UpdateAudioSeekDrag(x);
+            UpdateMediaSeekDrag(x);
             return;
         }
 
@@ -4093,7 +4293,9 @@ public sealed partial class IgniteWindow : IDisposable
 
         var element = HitTest(_mouseX, _mouseY);
 
-        if (element is { Tag: "audio" } && TryHandleAudioPointer(element, _mouseX, _mouseY))
+        if (element is not null
+            && (element.Tag == "audio" || element.Tag == "video")
+            && TryHandleMediaPointer(element, _mouseX, _mouseY))
         {
             _pressed = element;
             SetActive(element);
@@ -4251,9 +4453,9 @@ public sealed partial class IgniteWindow : IDisposable
             return;
         }
 
-        if (_audioSeekElement is not null)
+        if (_mediaSeekElement is not null)
         {
-            _audioSeekElement = null;
+            _mediaSeekElement = null;
             _pressed = null;
             SetActive(null);
             _needsPaint = true;

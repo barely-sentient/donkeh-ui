@@ -23,17 +23,20 @@ namespace Donkeh.Windowing
     /// <c>audio</c> element in a window.
     /// </summary>
     /// <remarks>
-    /// The engine and device are created lazily on the first audio element, so
-    /// windows that never use audio pay no cost. All failures are contained:
-    /// a missing device, codec or file simply leaves the element silent.
+    /// The engine, device and every player are created on a worker thread, so
+    /// opening a slow file or network stream never stalls the frame loop. The
+    /// public surface is thread-safe; state that the UI reads is published only
+    /// after construction finishes.
     /// </remarks>
     internal sealed class AudioHost : IDisposable
     {
+        private readonly object _sync = new();
+        private readonly object _deviceLock = new();
         private readonly Dictionary<ElementNode, Track> _tracks = [];
+        private readonly HashSet<ElementNode> _pending = [];
         private readonly AudioFormat _format = AudioFormat.DvdHq;
         private MiniAudioEngine? _engine;
         private AudioPlaybackDevice? _device;
-        private bool _failed;
         private bool _disposed;
 
         /// <summary>Gets whether at least one track is currently playing.</summary>
@@ -41,11 +44,14 @@ namespace Donkeh.Windowing
         {
             get
             {
-                foreach (var track in _tracks.Values)
+                lock (_sync)
                 {
-                    if (track.Player.IsPlaying)
+                    foreach (var track in _tracks.Values)
                     {
-                        return true;
+                        if (track.Player.IsPlaying)
+                        {
+                            return true;
+                        }
                     }
                 }
 
@@ -54,39 +60,99 @@ namespace Donkeh.Windowing
         }
 
         /// <summary>
-        /// Gets or creates the player for an element and applies the current
-        /// declarative options.
+        /// Gets or schedules the player for an element. Returns
+        /// <see langword="null"/> while creation is still running on a worker.
         /// </summary>
         public AudioPlayer? Ensure(ElementNode element, in AudioElementOptions options)
         {
-            if (_disposed || _failed || string.IsNullOrWhiteSpace(options.Source))
+            if (_disposed || string.IsNullOrWhiteSpace(options.Source))
             {
                 return null;
             }
+
+            lock (_sync)
+            {
+                if (_tracks.TryGetValue(element, out var existing))
+                {
+                    if (string.Equals(existing.Source, options.Source, StringComparison.Ordinal))
+                    {
+                        Apply(existing, options);
+                        return existing.Player;
+                    }
+
+                    RemoveLocked(element);
+                }
+
+                if (_pending.Contains(element))
+                {
+                    return null;
+                }
+
+                _pending.Add(element);
+            }
+
+            var captured = options;
+            Task.Run(() => CreateTrack(element, captured));
+            return null;
+        }
+
+        /// <summary>Gets the player already associated with an element, if any.</summary>
+        public AudioPlayer? GetPlayer(ElementNode element)
+        {
+            lock (_sync)
+            {
+                return _tracks.TryGetValue(element, out var track) ? track.Player : null;
+            }
+        }
+
+        /// <summary>Gets and clears the natural-end flag for an element.</summary>
+        public bool ConsumeEnded(ElementNode element)
+        {
+            lock (_sync)
+            {
+                if (!_tracks.TryGetValue(element, out var track) || !track.Ended)
+                {
+                    return false;
+                }
+
+                track.Ended = false;
+                return true;
+            }
+        }
+
+        /// <summary>Disposes players for elements that are no longer in the tree.</summary>
+        public void Prune(HashSet<ElementNode> live)
+        {
+            List<ElementNode>? stale = null;
+
+            lock (_sync)
+            {
+                foreach (var element in _tracks.Keys)
+                {
+                    if (!live.Contains(element))
+                    {
+                        (stale ??= []).Add(element);
+                    }
+                }
+
+                if (stale is not null)
+                {
+                    foreach (var element in stale)
+                    {
+                        RemoveLocked(element);
+                    }
+                }
+            }
+        }
+
+        private void CreateTrack(ElementNode element, AudioElementOptions options)
+        {
+            Track? track = null;
 
             try
             {
                 EnsureDevice();
-            }
-            catch
-            {
-                _failed = true;
-                return null;
-            }
 
-            if (_tracks.TryGetValue(element, out var existing))
-            {
-                if (string.Equals(existing.Source, options.Source, StringComparison.Ordinal))
-                {
-                    Apply(existing, options);
-                    return existing.Player;
-                }
-
-                Remove(element);
-            }
-
-            try
-            {
                 var isNetworked = Uri.TryCreate(options.Source, UriKind.Absolute, out var uri)
                     && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
 
@@ -105,67 +171,44 @@ namespace Donkeh.Windowing
 
                 var sound = new SoundPlayer(_engine!, _format, provider);
                 _device!.MasterMixer.AddComponent(sound);
-
-                var track = new Track(options.Source, stream, provider, sound, new AudioPlayer(sound));
+                track = new Track(options.Source, stream, provider, sound, new AudioPlayer(sound));
                 sound.PlaybackEnded += (_, _) => track.Ended = true;
-                _tracks[element] = track;
                 Apply(track, options);
-                return track.Player;
             }
             catch
             {
-                return null;
-            }
-        }
-
-        /// <summary>Gets the player already associated with an element, if any.</summary>
-        public AudioPlayer? GetPlayer(ElementNode element)
-        {
-            return _tracks.TryGetValue(element, out var track) ? track.Player : null;
-        }
-
-        /// <summary>Gets and clears the natural-end flag for an element.</summary>
-        public bool ConsumeEnded(ElementNode element)
-        {
-            if (!_tracks.TryGetValue(element, out var track) || !track.Ended)
-            {
-                return false;
+                track = null;
             }
 
-            track.Ended = false;
-            return true;
-        }
-
-        /// <summary>Disposes players for elements that are no longer in the tree.</summary>
-        public void Prune(HashSet<ElementNode> live)
-        {
-            List<ElementNode>? stale = null;
-
-            foreach (var element in _tracks.Keys)
+            lock (_sync)
             {
-                if (!live.Contains(element))
+                var accepted = _pending.Remove(element);
+
+                if (track is null || !accepted || _disposed)
                 {
-                    (stale ??= []).Add(element);
-                }
-            }
+                    if (track is not null)
+                    {
+                        Task.Run(track.Dispose);
+                    }
 
-            if (stale is not null)
-            {
-                foreach (var element in stale)
-                {
-                    Remove(element);
+                    return;
                 }
+
+                _tracks[element] = track;
             }
         }
 
         private void EnsureDevice()
         {
-            _engine ??= new MiniAudioEngine();
-            _device ??= _engine.InitializePlaybackDevice(null, _format, new MiniAudioDeviceConfig());
-
-            if (!_device.IsRunning)
+            lock (_deviceLock)
             {
-                _device.Start();
+                _engine ??= new MiniAudioEngine();
+                _device ??= _engine.InitializePlaybackDevice(null, _format, new MiniAudioDeviceConfig());
+
+                if (!_device.IsRunning)
+                {
+                    _device.Start();
+                }
             }
         }
 
@@ -193,36 +236,57 @@ namespace Donkeh.Windowing
             }
         }
 
-        private void Remove(ElementNode element)
+        private void RemoveLocked(ElementNode element)
         {
+            _pending.Remove(element);
+
             if (!_tracks.Remove(element, out var track))
             {
                 return;
             }
 
-            _device?.MasterMixer.RemoveComponent(track.Sound);
-            track.Dispose();
+            var device = _device;
+            Task.Run(() =>
+            {
+                device?.MasterMixer.RemoveComponent(track.Sound);
+                track.Dispose();
+            });
         }
 
         /// <inheritdoc/>
         public void Dispose()
         {
-            if (_disposed)
+            List<Track>? tracks = null;
+
+            lock (_sync)
             {
-                return;
+                if (_disposed)
+                {
+                    return;
+                }
+
+                _disposed = true;
+                _pending.Clear();
+                tracks = [.. _tracks.Values];
+                _tracks.Clear();
             }
 
-            _disposed = true;
+            var device = _device;
 
-            foreach (var track in _tracks.Values)
+            Task.Run(() =>
             {
-                _device?.MasterMixer.RemoveComponent(track.Sound);
-                track.Dispose();
-            }
+                if (tracks is not null)
+                {
+                    foreach (var track in tracks)
+                    {
+                        device?.MasterMixer.RemoveComponent(track.Sound);
+                        track.Dispose();
+                    }
+                }
 
-            _tracks.Clear();
-            _device?.Dispose();
-            _engine?.Dispose();
+                device?.Dispose();
+                _engine?.Dispose();
+            });
         }
 
         private sealed class Track : IDisposable

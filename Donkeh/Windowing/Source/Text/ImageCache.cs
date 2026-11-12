@@ -171,6 +171,65 @@ public sealed unsafe class ImageCache : IDisposable
     }
 
     /// <summary>
+    /// Uploads a caller-owned RGBA frame to a dynamic texture entry. The cache
+    /// owns the texture, so video hosts can update the same source every frame
+    /// without managing GL objects.
+    /// </summary>
+    /// <param name="source">Stable texture key used by <see cref="GetTexture"/>.</param>
+    /// <param name="rgba">Tightly packed RGBA pixels, row-major, top-down.</param>
+    /// <param name="width">Frame width in pixels.</param>
+    /// <param name="height">Frame height in pixels.</param>
+    public void UpdateDynamicTexture(string source, ReadOnlySpan<byte> rgba, int width, int height)
+    {
+        if (_gl is null || width <= 0 || height <= 0 || rgba.Length < width * height * 4)
+        {
+            return;
+        }
+
+        if (!_entries.TryGetValue(source, out var entry)
+            || entry.Texture == 0
+            || entry.Width != width
+            || entry.Height != height)
+        {
+            if (entry.Texture != 0)
+            {
+                _gl.DeleteTexture(entry.Texture);
+            }
+
+            var texture = _gl.GenTexture();
+            _gl.BindTexture(TextureTarget.Texture2D, texture);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)GLEnum.Linear);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)GLEnum.Linear);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.ClampToEdge);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)GLEnum.ClampToEdge);
+            entry = new ImageEntry(texture, width, height);
+            _entries[source] = entry;
+        }
+        else
+        {
+            _gl.BindTexture(TextureTarget.Texture2D, entry.Texture);
+        }
+
+        _gl.PixelStore(PixelStoreParameter.UnpackAlignment, 4);
+
+        fixed (byte* pixels = rgba)
+        {
+            _gl.TexImage2D(
+                TextureTarget.Texture2D,
+                0,
+                InternalFormat.Rgba8,
+                (uint)width,
+                (uint)height,
+                0,
+                PixelFormat.Rgba,
+                PixelType.UnsignedByte,
+                pixels);
+        }
+
+        _gl.BindTexture(TextureTarget.Texture2D, 0);
+    }
+
+    /// <summary>
     /// Decodes encoded bytes and uploads them as a new RGBA texture.
     /// </summary>
     /// <param name="source">The source string, used only for byte lookup and diagnostics.</param>

@@ -215,6 +215,12 @@ namespace Donkeh.UILab
         /// </summary>
         public Delegate? AudioReadyHandler { get; set; }
 
+        /// <summary>
+        /// Handler invoked when the host creates a player for a <c>video</c>
+        /// element. <see langword="null"/> for other elements.
+        /// </summary>
+        public Delegate? VideoReadyHandler { get; set; }
+
         /// <summary>The tag name this element was created with.</summary>
         /// <value>
         /// The original case-preserved tag text, or an empty string when the
@@ -461,6 +467,11 @@ namespace Donkeh.UILab
             if (props.OnAudioReady is { } audioReady)
             {
                 AudioReadyHandler = audioReady;
+            }
+
+            if (props.OnVideoReady is { } videoReady)
+            {
+                VideoReadyHandler = videoReady;
             }
         }
 
