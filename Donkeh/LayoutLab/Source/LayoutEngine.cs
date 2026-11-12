@@ -2235,6 +2235,136 @@ public sealed partial class LayoutEngine
         return max;
     }
 
+    /// <summary>Computes and caches a box's min-content border-box width.</summary>
+    /// <param name="box">Box to measure.</param>
+    /// <returns>Min-content width including padding and border, in CSS pixels.</returns>
+    /// <remarks>
+    /// Mirrors <see cref="MeasureMaxContentWidth"/> but uses the widest
+    /// unbreakable word for text and the min-content width of descendants. A
+    /// definite width is the same for both intrinsic sizes; percentages are
+    /// treated as indefinite.
+    /// </remarks>
+    private float MeasureMinContentWidth(LayoutBox box)
+    {
+        if (box.HasIntrinsicMinWidth)
+        {
+            return box.IntrinsicMinWidth;
+        }
+
+        var style = box.Style;
+        var context = CreateContext(style);
+        var padding = style.Padding.Resolve(in context, 0);
+        var border = ResolveBorders(style, in context, 0);
+        var width = style.Width.Unit == LengthUnit.Percent
+            ? float.NaN
+            : style.Width.ResolveOr(in context, float.NaN, float.NaN);
+
+        float content;
+
+        if (float.IsFinite(width))
+        {
+            content = width;
+        }
+        else if (_options.IntrinsicSizeProvider?.Invoke(box.Node) is { } intrinsic)
+        {
+            content = intrinsic.Width;
+        }
+        else
+        {
+            content = MeasureContentMinWidth(box, in context);
+        }
+
+        var result = content + padding.Horizontal + border.Horizontal;
+        box.IntrinsicMinWidth = result;
+        return result;
+    }
+
+    /// <summary>Measures the min-content content width of text and child boxes.</summary>
+    /// <param name="box">Box whose content is measured.</param>
+    /// <param name="context">Length context used for child margins and gaps.</param>
+    /// <returns>Content width without the box's own padding and border, in CSS pixels.</returns>
+    /// <remarks>
+    /// Text contributes its widest word unless white-space forbids wrapping. A
+    /// non-wrapping row flex container adds its items and column gaps because it
+    /// cannot break between them; other containers take the widest child.
+    /// </remarks>
+    private float MeasureContentMinWidth(LayoutBox box, in LengthContext context)
+    {
+        var text = box.Children.Count > 0
+            && (box.Style.IsFlexContainer || box.Style.IsGridContainer)
+            ? null
+            : GetNodeText(box.Node);
+        var style = box.Style;
+        var textWidth = string.IsNullOrEmpty(text) ? 0 : MeasureTextMinWidth(text, style);
+        var inlineFlow = style.Display is Display.Inline or Display.InlineBlock
+            or Display.InlineFlex or Display.InlineGrid or Display.InlineTable
+            || (style.IsFlexContainer
+                && style.FlexDirection is FlexDirection.Row or FlexDirection.RowReverse)
+            || style.IsGridContainer;
+        var nowrapRow = style.IsFlexContainer
+            && style.FlexDirection is FlexDirection.Row or FlexDirection.RowReverse
+            && style.FlexWrap == FlexWrap.NoWrap;
+        var sum = 0f;
+        var max = textWidth;
+        var flowChildren = 0;
+
+        for (var i = 0; i < box.Children.Count; i++)
+        {
+            var child = box.Children[i];
+
+            if (child.IsOutOfFlow || child.IsContents)
+            {
+                continue;
+            }
+
+            var childContext = CreateContext(child.Style);
+            var margin = child.Style.Margin.Resolve(in childContext, 0);
+            var childWidth = MeasureMinContentWidth(child) + margin.Horizontal;
+
+            sum += childWidth;
+            flowChildren++;
+            max = MathF.Max(max, childWidth);
+        }
+
+        if (inlineFlow && nowrapRow)
+        {
+            if (flowChildren > 1)
+            {
+                sum += ResolveGap(style.ColumnGap, in context, 0) * (flowChildren - 1);
+            }
+
+            return textWidth + sum;
+        }
+
+        return max;
+    }
+
+    /// <summary>Measures the widest unbreakable word in a text run.</summary>
+    /// <param name="text">Raw text before case transformation.</param>
+    /// <param name="style">Computed style supplying font and white-space mode.</param>
+    /// <returns>The min-content width in CSS pixels.</returns>
+    private float MeasureTextMinWidth(string text, ComputedStyle style)
+    {
+        var textStyle = CreateTextStyle(style);
+        var transformed = ApplyTextTransform(text, style.TextTransform);
+
+        if (style.WhiteSpace is WhiteSpace.NoWrap or WhiteSpace.Pre)
+        {
+            return _measurer.Measure(transformed, in textStyle).Width;
+        }
+
+        var max = 0f;
+
+        foreach (var word in transformed.Split(
+            (char[]?)null,
+            StringSplitOptions.RemoveEmptyEntries))
+        {
+            max = MathF.Max(max, _measurer.Measure(word, in textStyle).Width);
+        }
+
+        return max;
+    }
+
     // ------------------------------------------------------------------ text
 
     /// <summary>

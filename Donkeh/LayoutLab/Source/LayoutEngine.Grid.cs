@@ -82,15 +82,13 @@ public sealed partial class LayoutEngine
             style.GridTemplateColumns,
             content.Width,
             columnGap,
-            in context,
-            items.Count);
+            in context);
 
         var rowExpansion = ExpandTracks(
             style.GridTemplateRows,
             definiteContentHeight ?? float.NaN,
             rowGap,
-            in context,
-            items.Count);
+            in context);
 
         if (items.Count == 0)
         {
@@ -99,6 +97,7 @@ public sealed partial class LayoutEngine
             var emptySizes = ResolveTrackSizes(
                 rowExpansion.Tracks,
                 definiteContentHeight ?? float.NaN,
+                emptyContributions,
                 emptyContributions,
                 rowGap,
                 in context);
@@ -151,10 +150,24 @@ public sealed partial class LayoutEngine
             rowTracks = GrowTracks(rowTracks, placedRowCount, style.GridAutoRows);
         }
 
+        // auto-fit removes empty copies of the repeated pattern. Doing this
+        // before sizing also removes their gutters, because positions are
+        // rebuilt from the compacted track list.
+        columnTracks = CollapseAutoFitTracks(
+            columnTracks, placements, columnAxis: true, columnExpansion);
+        rowTracks = CollapseAutoFitTracks(
+            rowTracks, placements, columnAxis: false, rowExpansion);
+
         columnCount = columnTracks.Length;
         var rowCount = rowTracks.Length;
 
+        if (columnCount == 0 || rowCount == 0)
+        {
+            return 0;
+        }
+
         var columnContributions = new float[columnCount];
+        var columnMinContributions = new float[columnCount];
         var rowContributions = new float[rowCount];
 
         for (var i = 0; i < items.Count; i++)
@@ -163,12 +176,16 @@ public sealed partial class LayoutEngine
             var placement = placements[i];
             PrepareBox(item, content.Width);
 
+            var span = Math.Max(1, placement.ColumnSpan);
             var width = MeasureMaxContentWidth(item) + item.Margin.Horizontal;
-            var share = width / Math.Max(1, placement.ColumnSpan);
+            var minWidth = MeasureMinContentWidth(item) + item.Margin.Horizontal;
+            var share = width / span;
+            var minShare = minWidth / span;
 
             for (var c = placement.Column; c < placement.Column + placement.ColumnSpan && c < columnCount; c++)
             {
                 columnContributions[c] = MathF.Max(columnContributions[c], share);
+                columnMinContributions[c] = MathF.Max(columnMinContributions[c], minShare);
             }
         }
 
@@ -176,6 +193,7 @@ public sealed partial class LayoutEngine
             columnTracks,
             content.Width,
             columnContributions,
+            columnMinContributions,
             columnGap,
             in context);
 
@@ -218,6 +236,7 @@ public sealed partial class LayoutEngine
         var rowSizes = ResolveTrackSizes(
             rowTracks,
             definiteContentHeight ?? float.NaN,
+            rowContributions,
             rowContributions,
             rowGap,
             in context);
@@ -1166,12 +1185,22 @@ public sealed partial class LayoutEngine
     /// Names per line. Index <c>i</c> names the line before track <c>i</c>; there
     /// are <c>Tracks.Length + 1</c> entries, the last naming the end line.
     /// </param>
+    /// <param name="AutoRepeatStart">First track index of the expanded auto-repeat, or -1.</param>
+    /// <param name="AutoRepeatPatternLength">Tracks in one copy of the repeated pattern.</param>
+    /// <param name="AutoRepeatCount">Number of expanded copies.</param>
+    /// <param name="AutoRepeatFit">Whether the repeat used <c>auto-fit</c>.</param>
     /// <remarks>
     /// An empty result means the template was unspecified, so all tracks are
     /// implicit. The arrays are newly allocated by <see cref="ExpandTracks"/> and
     /// are not shared with the parsed <see cref="GridTrackList"/>.
     /// </remarks>
-    private readonly record struct ExpandedTracks(GridTrack[] Tracks, string[][] LineNames);
+    private readonly record struct ExpandedTracks(
+        GridTrack[] Tracks,
+        string[][] LineNames,
+        int AutoRepeatStart,
+        int AutoRepeatPatternLength,
+        int AutoRepeatCount,
+        bool AutoRepeatFit);
 
     /// <summary>
     /// Expands <c>repeat(auto-fill|auto-fit, ...)</c> to the number of copies
@@ -1185,7 +1214,6 @@ public sealed partial class LayoutEngine
     /// </param>
     /// <param name="gap">Gap between tracks in CSS pixels, included in the repeat size.</param>
     /// <param name="context">Length context used to resolve fixed, percent and fr minimums.</param>
-    /// <param name="itemCount">Item count used to bound <c>auto-fit</c> collapsing.</param>
     /// <returns>
     /// Concrete tracks and line names, or empty arrays when the template is
     /// empty/unspecified.
@@ -1198,43 +1226,37 @@ public sealed partial class LayoutEngine
     /// to every copy.
     /// </para>
     /// <para>
-    /// <c>auto-fit</c> is approximated rather than implemented exactly: the
-    /// repeat count is clamped to the number of items, but empty copies are not
-    /// collapsed to zero width afterwards. As a result the collapsed space is not
-    /// redistributed to flexible tracks.
+    /// <c>auto-fit</c> first clamps the repeat count to the number of items.
+    /// After placement, <see cref="CollapseAutoFitTracks"/> removes copies that
+    /// received no items and compacts the surviving tracks, which also drops
+    /// their gutters so free space reaches the remaining tracks.
     /// </para>
     /// </remarks>
     private static ExpandedTracks ExpandTracks(
         GridTrackList? list,
         float available,
         float gap,
-        in LengthContext context,
-        int itemCount)
+        in LengthContext context)
     {
         if (list is null || list.Count == 0)
         {
             // An unspecified template means no explicit tracks. Every track is
             // implicit and picks up grid-auto-rows / grid-auto-columns from the
             // very first one.
-            return new ExpandedTracks([], []);
+            return new ExpandedTracks([], [], -1, 0, 0, false);
         }
 
         if (list.AutoRepeatIndex < 0 || list.AutoRepeatTracks.Length == 0)
         {
-            return new ExpandedTracks(list.Tracks, list.LineNames);
+            return new ExpandedTracks(list.Tracks, list.LineNames, -1, 0, 0, false);
         }
 
         var pattern = list.AutoRepeatTracks;
         var patternNames = list.AutoRepeatLineNames;
         var repeats = CountAutoRepeats(pattern, available, gap, in context);
 
-        if (list.AutoRepeatFit)
-        {
-            // auto-fit collapses tracks that would otherwise stay empty. With a
-            // repeated pattern this is approximated by the item count.
-            repeats = Math.Clamp(repeats, 1, Math.Max(1, itemCount));
-        }
-
+        // auto-fit uses the same expansion as auto-fill; empty copies are
+        // removed after placement by CollapseAutoFitTracks.
         var tracks = new List<GridTrack>(list.Count - 1 + pattern.Length * repeats);
         var names = new List<List<string>>(tracks.Capacity + 1)
         {
@@ -1268,7 +1290,121 @@ public sealed partial class LayoutEngine
             }
         }
 
-        return new ExpandedTracks(tracks.ToArray(), ToNameArrays(names));
+        return new ExpandedTracks(
+            tracks.ToArray(),
+            ToNameArrays(names),
+            list.AutoRepeatIndex,
+            pattern.Length,
+            repeats,
+            list.AutoRepeatFit);
+    }
+
+    /// <summary>Collapses empty copies of an auto-fit repeat pattern.</summary>
+    /// <param name="tracks">Expanded tracks on one axis.</param>
+    /// <param name="placements">Item placements, remapped in place.</param>
+    /// <param name="columnAxis">
+    /// <see langword="true"/> to operate on columns, <see langword="false"/> for rows.
+    /// </param>
+    /// <param name="expansion">Metadata recorded by <see cref="ExpandTracks"/>.</param>
+    /// <returns>
+    /// The original array when nothing collapsed, otherwise a compacted array.
+    /// </returns>
+    /// <remarks>
+    /// A copy is empty when no item occupies any of its tracks. Removing it also
+    /// removes the gaps around it, so free space reaches the remaining tracks
+    /// naturally during sizing.
+    /// </remarks>
+    private static GridTrack[] CollapseAutoFitTracks(
+        GridTrack[] tracks,
+        GridItemPlacement[] placements,
+        bool columnAxis,
+        in ExpandedTracks expansion)
+    {
+        if (!expansion.AutoRepeatFit
+            || expansion.AutoRepeatCount <= 0
+            || expansion.AutoRepeatPatternLength <= 0
+            || expansion.AutoRepeatStart < 0)
+        {
+            return tracks;
+        }
+
+        var occupied = new bool[tracks.Length];
+
+        for (var i = 0; i < placements.Length; i++)
+        {
+            var placement = placements[i];
+            var start = columnAxis ? placement.Column : placement.Row;
+            var span = Math.Max(1, columnAxis ? placement.ColumnSpan : placement.RowSpan);
+
+            for (var t = start; t < start + span && t < occupied.Length; t++)
+            {
+                occupied[t] = true;
+            }
+        }
+
+        var keep = new bool[tracks.Length];
+        Array.Fill(keep, true);
+        var collapsed = false;
+
+        for (var copy = 0; copy < expansion.AutoRepeatCount; copy++)
+        {
+            var copyStart = expansion.AutoRepeatStart + copy * expansion.AutoRepeatPatternLength;
+            var hasItem = false;
+
+            for (var t = copyStart; t < copyStart + expansion.AutoRepeatPatternLength && t < tracks.Length; t++)
+            {
+                hasItem |= occupied[t];
+            }
+
+            if (hasItem)
+            {
+                continue;
+            }
+
+            collapsed = true;
+
+            for (var t = copyStart; t < copyStart + expansion.AutoRepeatPatternLength && t < tracks.Length; t++)
+            {
+                keep[t] = false;
+            }
+        }
+
+        if (!collapsed)
+        {
+            return tracks;
+        }
+
+        var map = new int[tracks.Length + 1];
+        var compacted = new List<GridTrack>(tracks.Length);
+
+        for (var i = 0; i < tracks.Length; i++)
+        {
+            map[i] = compacted.Count;
+
+            if (keep[i])
+            {
+                compacted.Add(tracks[i]);
+            }
+        }
+
+        map[tracks.Length] = compacted.Count;
+
+        for (var i = 0; i < placements.Length; i++)
+        {
+            var placement = placements[i];
+            var start = columnAxis ? placement.Column : placement.Row;
+            var span = Math.Max(1, columnAxis ? placement.ColumnSpan : placement.RowSpan);
+            var end = Math.Min(start + span, tracks.Length);
+            var newStart = map[Math.Min(start, tracks.Length)];
+            var newEnd = map[Math.Max(newStart, end)];
+            var newSpan = Math.Max(1, newEnd - newStart);
+
+            placements[i] = columnAxis
+                ? placement with { Column = newStart, ColumnSpan = newSpan }
+                : placement with { Row = newStart, RowSpan = newSpan };
+        }
+
+        return compacted.ToArray();
     }
 
     /// <summary>Copies per-line name lists into a jagged array.</summary>
@@ -1428,9 +1564,12 @@ public sealed partial class LayoutEngine
     /// indefinite (for example an auto-height grid's rows).
     /// </param>
     /// <param name="contributions">
-    /// Per-track content contribution in CSS pixels: the largest max-content
+    /// Per-track max-content contribution in CSS pixels: the largest max-content
     /// outer size of any item, divided by the item's span so spanning items do not
     /// inflate every covered track.
+    /// </param>
+    /// <param name="minContributions">
+    /// Per-track min-content contribution, measured and divided the same way.
     /// </param>
     /// <param name="gap">Gap between tracks in CSS pixels.</param>
     /// <param name="context">Length context used to resolve fixed and percentage minimums.</param>
@@ -1438,14 +1577,14 @@ public sealed partial class LayoutEngine
     /// <remarks>
     /// <para>
     /// Sizing order. Fixed and percentage tracks resolve their minimum against
-    /// <paramref name="available"/> and grow toward the content contribution up
-    /// to the <see cref="GridTrack.Maximum"/> limit; <c>fit-content()</c> tracks
-    /// take <c>min(limit, contribution)</c>; auto, min-content and max-content
-    /// tracks take at least their minimum and then their contribution.
-    /// The caller supplies one max-content-based contribution per track, so
-    /// <c>min-content</c> and <c>max-content</c> tracks still receive the same
-    /// size. Flexible tracks start at the larger of their explicit minimum and
-    /// their contribution, then share free space.
+    /// <paramref name="available"/> and grow toward the max-content contribution
+    /// up to the <see cref="GridTrack.Maximum"/> limit; <c>fit-content()</c>
+    /// tracks clamp the max-content contribution between min-content and the
+    /// limit. <c>min-content</c> tracks use the min-content contribution,
+    /// <c>max-content</c> tracks use the max-content contribution, and auto
+    /// tracks take at least their minimum then their max-content contribution.
+    /// Flexible tracks start at the larger of their explicit minimum and their
+    /// min-content contribution, then share free space.
     /// </para>
     /// <para>
     /// On a definite axis, positive free space (<c>available - total</c>) goes to
@@ -1458,14 +1597,15 @@ public sealed partial class LayoutEngine
     /// </para>
     /// <para>
     /// On an indefinite axis there is no free space to distribute. <c>fr</c>
-    /// tracks fall back to the larger of their minimum and contribution and
-    /// behave like auto tracks.
+    /// tracks fall back to the larger of their minimum and min-content
+    /// contribution and behave like auto tracks.
     /// </para>
     /// </remarks>
     private float[] ResolveTrackSizes(
         GridTrack[] tracks,
         float available,
         float[] contributions,
+        float[] minContributions,
         float gap,
         in LengthContext context)
     {
@@ -1504,17 +1644,31 @@ public sealed partial class LayoutEngine
                 case GridTrackKind.Fr:
                     frTotal += MathF.Max(0, track.Fr);
                     sizes[i] = MathF.Max(0, track.Minimum.ResolveOr(in context, available, 0));
-                    sizes[i] = MathF.Max(sizes[i], MathF.Max(0, contributions[i]));
+                    sizes[i] = MathF.Max(sizes[i], MathF.Max(0, minContributions[i]));
                     autoTracks.Add(i);
                     break;
 
                 case GridTrackKind.FitContent:
                 {
-                    var limit = track.Maximum.ResolveOr(
+                    var limit = MathF.Max(0, track.Maximum.ResolveOr(
                         in context,
                         available,
-                        MathF.Max(0, track.FitContentLimit));
-                    sizes[i] = Math.Clamp(MathF.Max(0, contributions[i]), 0, MathF.Max(0, limit));
+                        MathF.Max(0, track.FitContentLimit)));
+                    sizes[i] = MathF.Min(MathF.Max(0, contributions[i]), limit);
+                    break;
+                }
+
+                case GridTrackKind.MinContent:
+                {
+                    var minimum = MathF.Max(0, track.Minimum.ResolveOr(in context, available, 0));
+                    sizes[i] = MathF.Max(minimum, MathF.Max(0, minContributions[i]));
+                    break;
+                }
+
+                case GridTrackKind.MaxContent:
+                {
+                    var minimum = MathF.Max(0, track.Minimum.ResolveOr(in context, available, 0));
+                    sizes[i] = MathF.Max(minimum, MathF.Max(0, contributions[i]));
                     break;
                 }
 
@@ -1522,12 +1676,7 @@ public sealed partial class LayoutEngine
                 {
                     var minimum = MathF.Max(0, track.Minimum.ResolveOr(in context, available, 0));
                     sizes[i] = MathF.Max(minimum, MathF.Max(0, contributions[i]));
-
-                    if (track.Kind == GridTrackKind.Auto)
-                    {
-                        autoTracks.Add(i);
-                    }
-
+                    autoTracks.Add(i);
                     break;
                 }
             }
@@ -1569,7 +1718,7 @@ public sealed partial class LayoutEngine
                 if (tracks[i].Kind == GridTrackKind.Fr)
                 {
                     var minimum = MathF.Max(0, tracks[i].Minimum.ResolveOr(in context, available, 0));
-                    sizes[i] = MathF.Max(minimum, MathF.Max(0, contributions[i]));
+                    sizes[i] = MathF.Max(minimum, MathF.Max(0, minContributions[i]));
                 }
             }
         }

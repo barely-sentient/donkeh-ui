@@ -35,6 +35,12 @@ public sealed class LayoutBox
     /// </summary>
     private bool _hasIntrinsicWidth;
 
+    /// <summary>Cached min-content width in CSS pixels.</summary>
+    private float _intrinsicMinWidth;
+
+    /// <summary>Whether <see cref="_intrinsicMinWidth"/> has been computed.</summary>
+    private bool _hasIntrinsicMinWidth;
+
     /// <summary>Creates a box for a node and pre-sizes its child list.</summary>
     /// <param name="node">The DOM node the box represents; stored as <see cref="Node"/>.</param>
     /// <param name="style">The resolved style; stored as <see cref="Style"/>.</param>
@@ -112,6 +118,8 @@ public sealed class LayoutBox
         Baseline = 0;
         _intrinsicWidth = 0;
         _hasIntrinsicWidth = false;
+        _intrinsicMinWidth = 0;
+        _hasIntrinsicMinWidth = false;
     }
 
     /// <summary>Gets the parent box, or <see langword="null"/> for the root.</summary>
@@ -278,6 +286,21 @@ public sealed class LayoutBox
 
     /// <summary>Gets a value indicating whether <see cref="IntrinsicWidth"/> has been computed for this box.</summary>
     internal bool HasIntrinsicWidth => _hasIntrinsicWidth;
+
+    /// <summary>Gets or sets the cached min-content width in CSS pixels.</summary>
+    /// <remarks>Setting the value records that it has been computed even when it is zero.</remarks>
+    internal float IntrinsicMinWidth
+    {
+        get => _intrinsicMinWidth;
+        set
+        {
+            _intrinsicMinWidth = value;
+            _hasIntrinsicMinWidth = true;
+        }
+    }
+
+    /// <summary>Gets a value indicating whether <see cref="IntrinsicMinWidth"/> has been computed.</summary>
+    internal bool HasIntrinsicMinWidth => _hasIntrinsicMinWidth;
 
     /// <summary>Translates this box and its in-flow descendants.</summary>
     /// <param name="dx">The horizontal delta in CSS pixels.</param>

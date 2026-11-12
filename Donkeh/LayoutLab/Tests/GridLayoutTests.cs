@@ -116,6 +116,43 @@ public class GridLayoutTests
     }
 
     [Fact]
+    public void MinContentAndMaxContentUseDifferentContributions()
+    {
+        var (root, a, b, _) = Tree(2);
+        a.TextContent = "aa bb";
+        b.TextContent = "cc dd ee";
+
+        var result = Lay(
+            "#root { display: grid; grid-template-columns: min-content max-content;"
+            + " grid-template-rows: 30px; font-size: 10px; line-height: 20px; }",
+            root);
+
+        // "aa bb" is 50px max-content but 20px min-content; "cc dd ee" is 80px
+        // max-content. The min-content track takes 20px, so the max-content
+        // track starts there.
+        Assert.Equal(20, TestSupport.Box(result, b).BorderBox.X, 3);
+        Assert.Equal(80, TestSupport.Box(result, b).BorderBox.Width, 3);
+    }
+
+    [Fact]
+    public void AutoFitCollapsesEmptyCopiesAndTheirGutters()
+    {
+        var (root, a, b, _) = Tree(2);
+        var result = Lay(
+            "#root { display: grid; column-gap: 10px;"
+            + " grid-template-columns: repeat(auto-fit, 100px);"
+            + " grid-template-rows: 20px; }"
+            + " #a { height: 20px; }"
+            + " #b { grid-column: 9; height: 20px; }",
+            root);
+
+        // Nine copies fit. Only the first and last receive items; the seven empty
+        // copies collapse, so B moves next to A with a single 10px gap.
+        Assert.Equal(0, TestSupport.Box(result, a).BorderBox.X, 3);
+        Assert.Equal(110, TestSupport.Box(result, b).BorderBox.X, 3);
+    }
+
+    [Fact]
     public void FitContentClampsToItsLimit()
     {
         var (root, a, b, _) = Tree(2);
