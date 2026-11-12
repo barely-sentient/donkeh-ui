@@ -9,7 +9,7 @@ namespace Donkeh.LayoutLab;
 /// the instructions in <see cref="Instructions"/> have been renumbered to match
 /// it.
 /// </remarks>
-public sealed class OptimisationResult
+public readonly struct OptimisationResult
 {
     /// <summary>Creates a result from an optimised buffer.</summary>
     /// <param name="instructions">The output instruction buffer.</param>
@@ -91,6 +91,14 @@ public static class Optimiser
         Blend
     }
 
+    /// <summary>
+    /// Reusable scope stack for the current thread. A frame can contain many
+    /// push/pop pairs, and allocating a fresh list on every optimise pass added
+    /// steady-state garbage to otherwise allocation-free frames.
+    /// </summary>
+    [ThreadStatic]
+    private static List<Scope>? _scopeScratch;
+
     /// <summary>Bookkeeping for one open push/pop scope.</summary>
     /// <param name="Kind">The scope family, used to match pops.</param>
     /// <param name="Emit">Whether the matching push and pop survive in the output.</param>
@@ -162,7 +170,8 @@ public static class Optimiser
 
         var output = outputBuffer ?? new InstructionBuffer(Math.Max(8, source.Count));
         output.Clear();
-        var scopes = new List<Scope>(8);
+        var scopes = _scopeScratch ??= new List<Scope>(8);
+        scopes.Clear();
         var clip = initialClip;
         var transformDepth = 0;
         var filterDepth = 0;

@@ -54,7 +54,14 @@ internal static class SvgRasterizer
                 return false;
             }
 
-            const int target = 64;
+            // Icons are rasterised at 64 px so they stay crisp when scaled up.
+            // Larger SVGs (illustrations, card/figure images) keep their declared
+            // size up to a bounded texture budget; a fixed 64 px target made a
+            // 640x360 image report a 64x36 intrinsic size and stay thumbnail-sized.
+            var target = Math.Clamp(
+                (int)MathF.Round(MathF.Max(viewWidth, viewHeight)),
+                64,
+                512);
             const int supersample = 4;
             var scale = target / MathF.Max(viewWidth, viewHeight);
             var pixelWidth = Math.Max(1, (int) MathF.Round(viewWidth * scale));

@@ -37,6 +37,14 @@ public sealed unsafe class ImageCache : IDisposable
     /// <summary>Encoded file or base64 bytes keyed by the original source string.</summary>
     private readonly ConcurrentDictionary<string, byte[]> _bytes = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Intrinsic pixel dimensions of successfully decoded sources. Layout asks
+    /// for these while sizing every <c>img</c>; without the cache an SVG source
+    /// was rasterised again on every layout pass just to read its dimensions.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, (int Width, int Height)> _info =
+        new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>The context used for texture creation and deletion.</summary>
     private GL? _gl;
 
@@ -67,10 +75,10 @@ public sealed unsafe class ImageCache : IDisposable
     /// </returns>
     /// <remarks>
     /// <para>
-    /// The encoded bytes are cached but the header parse is repeated on every
-    /// call; the decoded pixels and texture are not produced here, so this is
-    /// suitable for intrinsic-size queries during layout before the image is
-    /// painted.
+    /// Successful dimensions are cached per source, so repeated layout passes do
+    /// not re-rasterise an SVG or re-parse an image header. The decoded pixels
+    /// and texture are not produced here, so this is suitable for intrinsic-size
+    /// queries during layout before the image is painted.
     /// </para>
     /// <para>
     /// A missing file, an unsupported or corrupt format, a non-base64 data URI and
@@ -83,12 +91,20 @@ public sealed unsafe class ImageCache : IDisposable
         width = 0;
         height = 0;
 
+        if (_info.TryGetValue(source, out var cachedInfo))
+        {
+            width = cachedInfo.Width;
+            height = cachedInfo.Height;
+            return true;
+        }
+
         try
         {
             if (SvgRasterizer.TryRender(source, out _, out var svgWidth, out var svgHeight))
             {
                 width = svgWidth;
                 height = svgHeight;
+                _info[source] = (svgWidth, svgHeight);
                 return true;
             }
 
@@ -109,7 +125,14 @@ public sealed unsafe class ImageCache : IDisposable
 
             width = info.Value.Width;
             height = info.Value.Height;
-            return width > 0 && height > 0;
+
+            if (width > 0 && height > 0)
+            {
+                _info[source] = (width, height);
+                return true;
+            }
+
+            return false;
         }
         catch
         {
