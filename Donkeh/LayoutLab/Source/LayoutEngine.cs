@@ -1558,12 +1558,12 @@ public sealed partial class LayoutEngine
     /// <param name="box">Box whose scroll metrics are updated after layout.</param>
     /// <remarks>
     /// <para>
-    /// The overflow extent starts at the content box and grows to cover each
+    /// The overflow extent starts at the padding box and grows to cover each
     /// child's margin box (or border box when the margin box is degenerate).
     /// Only right and bottom overflow is measured; content above or left of the
     /// origin does not create negative scroll range. The resulting
     /// <see cref="LayoutBox.ScrollWidth"/> and <see cref="LayoutBox.ScrollHeight"/>
-    /// are at least the content-box size.
+    /// are at least the padding-box (client) size.
     /// </para>
     /// <para>
     /// Non-scroll containers keep zero offsets. Scroll containers clamp the
@@ -1588,8 +1588,11 @@ public sealed partial class LayoutEngine
             maxBottom = MathF.Max(maxBottom, bounds.Bottom);
         }
 
-        box.ScrollWidth = MathF.Max(content.Width, maxRight - content.X);
-        box.ScrollHeight = MathF.Max(content.Height, maxBottom - content.Y);
+        // Scroll metrics are measured from the padding box, matching the
+        // client area that scrollbars are sized against. Measuring from the
+        // content box would silently drop padding-top/left from the range.
+        box.ScrollWidth = MathF.Max(box.PaddingBox.Width, maxRight - box.PaddingBox.X);
+        box.ScrollHeight = MathF.Max(box.PaddingBox.Height, maxBottom - box.PaddingBox.Y);
         box.IsScrollContainer = box.Style.IsScrollContainer;
 
         if (!box.IsScrollContainer)

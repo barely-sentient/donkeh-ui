@@ -636,6 +636,24 @@ public class BlockLayoutTests
     }
 
     [Fact]
+    public void ScrollMetricsIncludePaddingWhenContentOverflows()
+    {
+        var root = TestSupport.Node("div", "root");
+        var child = TestSupport.Node("div", "child");
+        root.Children = [child];
+
+        var result = Lay(
+            "#root { overflow-y: auto; height: 100px; padding: 10px; }"
+            + " #child { height: 200px; }",
+            root);
+        var box = TestSupport.Box(result, root);
+
+        Assert.True(box.IsScrollContainer);
+        Assert.Equal(210, box.ScrollHeight, 3);
+        Assert.Equal(90, box.ScrollHeight - box.ClientHeight, 3);
+    }
+
+    [Fact]
     public void ScrollOffsetIsClampedToTheOverflow()
     {
         var root = TestSupport.Node("div", "root");
