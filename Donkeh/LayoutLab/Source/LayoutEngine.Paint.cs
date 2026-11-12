@@ -4,6 +4,22 @@ namespace Donkeh.LayoutLab;
 
 public sealed partial class LayoutEngine
 {
+    /// <summary>One promoted positive-z item waiting to paint inside a stacking context.</summary>
+    private readonly record struct PromotedBox(
+        LayoutBox Box,
+        float Tx,
+        float Ty,
+        int ZIndex,
+        int Order);
+
+    /// <summary>Positive-z descendants collected for one stacking context.</summary>
+    private sealed class StackingContextFrame
+    {
+        public List<PromotedBox> Promoted { get; } = [];
+
+        public int NextOrder;
+    }
+
     /// <summary>
     /// Builds the frame's display list from a laid-out box tree, including the
     /// deferred fixed-position pass.
@@ -40,34 +56,31 @@ public sealed partial class LayoutEngine
         }
 
         _fixedBoxes.Clear();
-        _overlayBoxes.Clear();
+        _stackingContexts.Clear();
         _paintingFixed = false;
-        _paintingOverlays = false;
         PaintBox(root, 0, 0);
-
-        // Positioned boxes with a positive z-index (dropdown menus, popovers,
-        // tooltips) paint above later normal-flow siblings. Without this pass a
-        // menu opened inside an earlier grid cell is covered by the next cell.
-        _paintingOverlays = true;
-        _overlayBoxes.Sort(static (a, b) => a.Box.EffectiveZIndex.CompareTo(b.Box.EffectiveZIndex));
-
-        for (var i = 0; i < _overlayBoxes.Count; i++)
-        {
-            var overlay = _overlayBoxes[i];
-            PaintBox(overlay.Box, overlay.Tx, overlay.Ty);
-        }
-
-        _paintingOverlays = false;
 
         // Fixed boxes are positioned against the viewport and must not be
         // clipped by an ancestor scroll container. Paint them after the normal
-        // tree and overlays so modals, offcanvas panels and tooltips sit above
-        // the page.
+        // tree so modals, offcanvas panels and tooltips sit above the page.
         _paintingFixed = true;
 
         for (var i = 0; i < _fixedBoxes.Count; i++)
         {
-            PaintBox(_fixedBoxes[i], 0, 0);
+            var (box, inheritedOpacity) = _fixedBoxes[i];
+            var pushOpacity = inheritedOpacity < 0.9999f;
+
+            if (pushOpacity)
+            {
+                _instructions.AddPushOpacity(inheritedOpacity);
+            }
+
+            PaintBox(box, 0, 0);
+
+            if (pushOpacity)
+            {
+                _instructions.AddPopOpacity();
+            }
         }
 
         _paintingFixed = false;
@@ -92,6 +105,10 @@ public sealed partial class LayoutEngine
     /// <param name="ty">
     /// Accumulated vertical translation from ancestors, including their scroll
     /// offsets, in CSS pixels.
+    /// </param>
+    /// <param name="promoted">
+    /// <see langword="true"/> when a stacking-context frame is already painting
+    /// this box from its promoted list, so it must not be promoted again.
     /// </param>
     /// <remarks>
     /// <para>
@@ -131,7 +148,7 @@ public sealed partial class LayoutEngine
     /// renderer must not apply the scroll offset a second time.
     /// </para>
     /// </remarks>
-    private void PaintBox(LayoutBox box, float tx, float ty)
+    private void PaintBox(LayoutBox box, float tx, float ty, bool promoted = false)
     {
         if (box.Style.Display == Display.None)
         {
@@ -147,7 +164,7 @@ public sealed partial class LayoutEngine
             {
                 if (!_paintingFixed)
                 {
-                    _fixedBoxes.Add(box);
+                    _fixedBoxes.Add((box, InheritedOpacity(box)));
                     return;
                 }
 
@@ -160,19 +177,40 @@ public sealed partial class LayoutEngine
             }
         }
 
-        if (!_paintingOverlays
+        if (!promoted
             && !_paintingFixed
             && box.Style.HasZIndex
-            && box.Style.ZIndex > 0
-            && !(box.IsFixed && box.ContainingBlock is not null))
+            && box.Style.ZIndex > 0)
         {
-            _overlayBoxes.Add((box, tx, ty));
-            return;
+            var frame = _stackingContexts.Count > 0 ? _stackingContexts.Peek() : null;
+
+            if (frame is not null)
+            {
+                frame.Promoted.Add(new PromotedBox(
+                    box, tx, ty, box.Style.ZIndex, frame.NextOrder++));
+                return;
+            }
+        }
+
+        var ownsContext = ReferenceEquals(box, _root) || EstablishesStackingContext(box.Style);
+        StackingContextFrame? stackingContext = null;
+
+        if (ownsContext)
+        {
+            stackingContext = new StackingContextFrame();
+            _stackingContexts.Push(stackingContext);
         }
 
         if (box.IsContents)
         {
             PaintChildren(box, tx, ty);
+
+            if (stackingContext is not null)
+            {
+                PaintPromoted(stackingContext);
+                _stackingContexts.Pop();
+            }
+
             return;
         }
 
@@ -305,6 +343,11 @@ public sealed partial class LayoutEngine
 
         PaintChildren(box, contentTx, contentTy);
 
+        if (stackingContext is not null)
+        {
+            PaintPromoted(stackingContext);
+        }
+
         if (clipContents)
         {
             if (visible)
@@ -349,6 +392,77 @@ public sealed partial class LayoutEngine
         {
             _instructions.AddPopOpacity();
         }
+
+        if (stackingContext is not null)
+        {
+            _stackingContexts.Pop();
+        }
+    }
+
+    /// <summary>Paints the positive-z descendants of one stacking context in z order.</summary>
+    /// <param name="context">Frame whose promoted list is drained.</param>
+    /// <remarks>
+    /// Ties preserve collection order. Items are painted with
+    /// <c>promoted: true</c> so they do not re-enter the parent context; a
+    /// promoted box that establishes its own context pushes a nested frame while
+    /// it paints.
+    /// </remarks>
+    private void PaintPromoted(StackingContextFrame context)
+    {
+        if (context.Promoted.Count == 0)
+        {
+            return;
+        }
+
+        context.Promoted.Sort(static (a, b) =>
+        {
+            var byZ = a.ZIndex.CompareTo(b.ZIndex);
+            return byZ != 0 ? byZ : a.Order.CompareTo(b.Order);
+        });
+
+        for (var i = 0; i < context.Promoted.Count; i++)
+        {
+            var promoted = context.Promoted[i];
+            PaintBox(promoted.Box, promoted.Tx, promoted.Ty, promoted: true);
+        }
+
+        context.Promoted.Clear();
+    }
+
+    /// <summary>Returns whether a style establishes a stacking context.</summary>
+    /// <param name="style">Style to inspect.</param>
+    /// <returns><see langword="true"/> for positioned z-index boxes and the usual effect contexts.</returns>
+    private static bool EstablishesStackingContext(ComputedStyle style)
+    {
+        return (style.HasZIndex && style.ZIndex != 0)
+            || (style.Position != Position.Static && style.HasZIndex)
+            || style.Position is Position.Fixed or Position.Sticky
+            || style.Opacity < 0.9999f
+            || style.Transform is not null
+            || style.Filter is { IsNone: false }
+            || style.BackdropFilter is { IsNone: false }
+            || style.MixBlendMode != MixBlendMode.Normal
+            || style.Isolate;
+    }
+
+    /// <summary>Multiplies the opacity of a box's ancestors.</summary>
+    /// <param name="box">Box whose ancestor chain is walked.</param>
+    /// <returns>The inherited opacity in the range 0–1.</returns>
+    private static float InheritedOpacity(LayoutBox box)
+    {
+        var opacity = 1f;
+
+        for (var parent = box.Parent; parent is not null; parent = parent.Parent)
+        {
+            opacity *= Math.Clamp(parent.Style.Opacity, 0, 1);
+
+            if (opacity <= 0)
+            {
+                return 0;
+            }
+        }
+
+        return opacity;
     }
 
     /// <summary>
@@ -361,11 +475,11 @@ public sealed partial class LayoutEngine
     /// <remarks>
     /// <para>
     /// Three separate scans keep the common <c>z-index: 0</c> path allocation
-    /// free while still preserving document order within each layer. This is a
-    /// simplified stacking model: it orders a box's direct children by their
-    /// effective z-index but does not create stacking contexts, so a descendant
-    /// is always painted inside its parent's subtree and cannot rise above a
-    /// later sibling of that parent regardless of its own z-index.
+    /// free while still preserving document order within each layer. Positive-z
+    /// boxes are collected into the nearest open stacking-context frame and
+    /// painted after that context's normal content, so a positioned descendant
+    /// can rise above later normal-flow siblings without escaping an ancestor
+    /// context created by opacity, a transform or a filter.
     /// </para>
     /// <para>
     /// Children are visited in list order regardless of their own

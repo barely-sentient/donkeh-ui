@@ -473,6 +473,73 @@ public class PaintTests
     }
 
     [Fact]
+    public void PositiveZDescendantEscapesANormalFlowParent()
+    {
+        var root = TestSupport.Node("div", "root");
+        var outer = TestSupport.Node("div", "outer");
+        var inner = TestSupport.Node("div", "inner");
+        var sibling = TestSupport.Node("div", "sibling");
+        root.Children = [outer, sibling];
+        outer.Children = [inner];
+
+        var result = Lay(
+            "#inner { position: relative; z-index: 10; width: 10px; height: 10px;"
+            + " background: #ff0000; }"
+            + " #sibling { position: relative; z-index: 1; width: 10px; height: 10px;"
+            + " background: #0000ff; }",
+            root);
+
+        Assert.Equal([0xFF0000FFu, 0xFFFF0000u], Colors(result));
+    }
+
+    [Fact]
+    public void PositiveZDescendantCannotEscapeAnOpacityContext()
+    {
+        var root = TestSupport.Node("div", "root");
+        var outer = TestSupport.Node("div", "outer");
+        var inner = TestSupport.Node("div", "inner");
+        var sibling = TestSupport.Node("div", "sibling");
+        root.Children = [outer, sibling];
+        outer.Children = [inner];
+
+        var result = Lay(
+            "#outer { opacity: 0.5; }"
+            + " #inner { position: relative; z-index: 10; width: 10px; height: 10px;"
+            + " background: #ff0000; }"
+            + " #sibling { position: relative; z-index: 1; width: 10px; height: 10px;"
+            + " background: #0000ff; }",
+            root);
+
+        // The red box belongs to #outer's stacking context, which paints below
+        // the blue sibling even though the red box's own z-index is higher.
+        Assert.Equal([0xFFFF0000u, 0xFF0000FFu], Colors(result));
+    }
+
+    [Fact]
+    public void FixedBoxInheritsAnOpacityAncestor()
+    {
+        var root = TestSupport.Node("div", "root");
+        var fixedChild = TestSupport.Node("div", "fixed");
+        root.Children = [fixedChild];
+
+        var result = Lay(
+            "#root { opacity: 0.5; height: 100px; }"
+            + " #fixed { position: fixed; left: 0; top: 0; width: 10px; height: 10px;"
+            + " background: #0000ff; }",
+            root);
+
+        var codes = OpCodes(result);
+        var blue = codes.FindIndex(code => code == InstructionOpCode.DrawRect);
+        var push = codes.LastIndexOf(InstructionOpCode.PushOpacity);
+        var pop = codes.LastIndexOf(InstructionOpCode.PopOpacity);
+
+        Assert.True(push >= 0);
+        Assert.True(push < blue);
+        Assert.True(blue < pop);
+        Assert.Equal(2, codes.Count(code => code == InstructionOpCode.PushOpacity));
+    }
+
+    [Fact]
     public void BackgroundThenBorderThenTextThenChildren()
     {
         var root = TestSupport.Node("div", "root", "hi");

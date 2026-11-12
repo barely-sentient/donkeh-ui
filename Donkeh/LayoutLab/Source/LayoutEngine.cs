@@ -172,14 +172,11 @@ public sealed partial class LayoutEngine
     /// <summary>Holds per-node animation clocks and running states across frames.</summary>
     private readonly AnimationRuntime _animations;
 
-    /// <summary>Scratch list of fixed boxes deferred to the second paint pass.</summary>
-    private readonly List<LayoutBox> _fixedBoxes = [];
+    /// <summary>Fixed boxes deferred to the second paint pass, with inherited opacity.</summary>
+    private readonly List<(LayoutBox Box, float InheritedOpacity)> _fixedBoxes = [];
 
-    /// <summary>Positive z-index boxes deferred above the normal paint tree.</summary>
-    private readonly List<(LayoutBox Box, float Tx, float Ty)> _overlayBoxes = [];
-
-    /// <summary>True while the deferred positive z-index pass is running.</summary>
-    private bool _paintingOverlays;
+    /// <summary>Open stacking-context frames while building the display list.</summary>
+    private readonly Stack<StackingContextFrame> _stackingContexts = new();
 
     /// <summary>
     /// Pooled child lists indexed by flex/grid nesting depth. Each nested layout
