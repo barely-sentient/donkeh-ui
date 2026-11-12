@@ -206,6 +206,18 @@ public class TextTests
     }
 
     [Fact]
+    public void WrappingBreaksAtASpaceThatItselfDoesNotFit()
+    {
+        // "aa" is 20px and fits, while "aa " is 30px. The trailing space is a
+        // break opportunity, not content, so the line must still wrap.
+        var layout = Layout("aa bb", maxWidth: 25);
+
+        Assert.Equal(2, layout.Lines.Length);
+        Assert.Equal("aa", layout.Lines[0].Text);
+        Assert.Equal("bb", layout.Lines[1].Text);
+    }
+
+    [Fact]
     public void NoWrapKeepsEverythingOnOneLine()
     {
         var layout = Layout("aaaa bbbb cccc", whiteSpace: WhiteSpace.NoWrap, maxWidth: 20);

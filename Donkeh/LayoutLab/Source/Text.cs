@@ -733,8 +733,22 @@ public static class TextLayoutEngine
             }
 
             var candidateEnd = atEnd ? paragraph.Length : i + 1;
-            var candidate = paragraph[start..candidateEnd];
-            var width = measurer.Measure(candidate, in style).Width;
+            var measureEnd = candidateEnd;
+
+            // A trailing space is a break opportunity, not content. Excluding it
+            // from the fit test lets "aa bb" wrap at the space even when
+            // "aa " is wider than the line but "aa" fits.
+            if (!atEnd && c is ' ' or '\t')
+            {
+                while (measureEnd > start && paragraph[measureEnd - 1] is ' ' or '\t')
+                {
+                    measureEnd--;
+                }
+            }
+
+            var width = measurer.Measure(
+                paragraph.AsSpan(start, Math.Max(0, measureEnd - start)),
+                in style).Width;
 
             if (width <= maxWidth)
             {

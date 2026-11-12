@@ -67,9 +67,9 @@ public sealed class LayoutOptions
     /// <summary>Measured in CSS pixels. The default is a deterministic approximation.</summary>
     /// <remarks>
     /// When <see langword="null"/> the engine uses
-    /// <see cref="SimpleTextMeasurer.Instance"/>. Cached text layouts are keyed
-    /// by text, style and width, so swapping measurers on an existing engine can
-    /// reuse layouts produced by the previous measurer.
+    /// <see cref="SimpleTextMeasurer.Instance"/>. Cached text layouts include
+    /// the measurer instance in their key, so swapping measurers on an existing
+    /// engine cannot reuse layouts produced by the previous metrics.
     /// </remarks>
     public ITextMeasurer? TextMeasurer { get; set; }
 

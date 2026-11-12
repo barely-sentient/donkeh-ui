@@ -2249,6 +2249,8 @@ public sealed partial class LayoutEngine
     /// <see cref="int.MaxValue"/> for an unbounded width. The <c>white-space</c>,
     /// <c>overflow-wrap</c>, line-clamp and text-overflow values are part of the
     /// key because they change line breaking even when text and style are equal.
+    /// The measurer is keyed by identity so swapping it on an existing engine
+    /// cannot reuse layouts shaped with the previous metrics.
     /// </remarks>
     private readonly record struct TextLayoutKey(
         string Text,
@@ -2257,7 +2259,8 @@ public sealed partial class LayoutEngine
         WhiteSpace WhiteSpace,
         OverflowWrap OverflowWrap,
         int LineClamp,
-        TextOverflow Overflow);
+        TextOverflow Overflow,
+        ITextMeasurer Measurer);
 
     /// <summary>Builds the immutable text style used for measurement and painting.</summary>
     /// <param name="style">Computed style providing font and decoration settings.</param>
@@ -2328,7 +2331,8 @@ public sealed partial class LayoutEngine
             style.WhiteSpace,
             style.OverflowWrap,
             style.WebkitLineClamp,
-            style.TextOverflow);
+            style.TextOverflow,
+            _measurer);
 
         var cacheText = _options.EnableCaching && _options.CacheTextLayouts;
 

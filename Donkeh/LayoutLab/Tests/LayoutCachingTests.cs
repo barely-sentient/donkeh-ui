@@ -28,6 +28,19 @@ public sealed class LayoutCachingTests
         return new LayoutEngine(TestSupport.Build(css));
     }
 
+    private sealed class WideMeasurer : ITextMeasurer
+    {
+        public TextMetrics Measure(ReadOnlySpan<char> text, in TextStyle style)
+        {
+            return new TextMetrics(text.Length * 20, style.FontSize * 0.8f, style.FontSize * 0.2f);
+        }
+
+        public TextMetrics Measure(string text, in TextStyle style)
+        {
+            return Measure(text.AsSpan(), in style);
+        }
+    }
+
     [Fact]
     public void StyleInstancesAreReusedWhenNothingChanged()
     {
@@ -374,6 +387,23 @@ public sealed class LayoutCachingTests
         Assert.True(result.TryGetBox(root, out _));
         Assert.True(result.TryGetBox(child, out _));
         Assert.False(result.TryGetBox(grandchild, out _));
+    }
+
+    [Fact]
+    public void SwappingTheMeasurerInvalidatesCachedTextLayouts()
+    {
+        var engine = Engine("#root { width: 70px; }");
+        var root = TestSupport.Node("div", "root", "aa bb");
+        var options = Options();
+        options.TextMeasurer = TestSupport.FixedMeasurer.Instance;
+
+        var first = engine.Layout(root, options);
+        Assert.Single(TestSupport.Box(first, root).Text!.Lines);
+
+        options.TextMeasurer = new WideMeasurer();
+        var second = engine.Layout(root, options);
+
+        Assert.Equal(2, TestSupport.Box(second, root).Text!.Lines.Length);
     }
 
     [Fact]
