@@ -1,0 +1,78 @@
+name: Bug report
+description: Report something that renders, lays out or behaves incorrectly.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Ignite is in active development, so please
+        include enough detail to reproduce the problem deterministically.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What is wrong, in one or two sentences?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: HTML/CSS fixture or the smallest C# snippet that reproduces the issue.
+      render: html
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What should happen?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: What happens instead? Include screenshots or layout dumps if useful.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: NuGet version, tag or commit SHA.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, .NET SDK version, GPU/OpenGL version if relevant.
+      placeholder: "Windows 11, .NET 10.0.10, OpenGL 3.3"
+    validations:
+      required: true
+  - type: dropdown
+    id: layer
+    attributes:
+      label: Likely layer
+      description: If you know which module is involved, say so. Otherwise leave it as Unknown.
+      options:
+        - Unknown
+        - Parser
+        - Data / selector matching
+        - DataEngine
+        - LayoutLab
+        - UILab
+        - Windowing / GL renderer
+        - Inspector
+        - Demo / components
+    validations:
+      required: false
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional context
+      description: Benchmarks, allocation data, related issues, workarounds, etc.
+    validations:
+      required: false

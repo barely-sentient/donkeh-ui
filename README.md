@@ -103,7 +103,7 @@ renderer. `Donkeh.Inspector` provides the devtools panel.
 
 ```text
 .
-├── DonkehCSS.sln
+├── Donkeh.sln
 ├── README.md                        ← this file
 ├── .github/workflows/publish-nuget.yml
 └── Donkeh/
@@ -819,9 +819,9 @@ a good target for future coverage.
 ### Build and test
 
 ```powershell
-dotnet restore DonkehCSS.sln
-dotnet build DonkehCSS.sln -c Release
-dotnet test DonkehCSS.sln -c Release
+dotnet restore Donkeh.sln
+dotnet build Donkeh.sln -c Release
+dotnet test Donkeh.sln -c Release
 ```
 
 The solution currently runs **1,014 tests**: 42 parser/data/data-engine tests,
@@ -834,7 +834,7 @@ API documentation tools. To force generation for every project (including
 tests and benchmarks):
 
 ```powershell
-dotnet build DonkehCSS.sln -c Release -p:GenerateDocumentationFile=true
+dotnet build Donkeh.sln -c Release -p:GenerateDocumentationFile=true
 ```
 
 ---
@@ -918,7 +918,7 @@ dotnet test Donkeh/LayoutLab/Tests --filter "FullyQualifiedName~StyleResolutionT
 ### Coverage
 
 ```powershell
-dotnet test DonkehCSS.sln -c Release --collect:"XPlat Code Coverage"
+dotnet test Donkeh.sln -c Release --collect:"XPlat Code Coverage"
 ```
 
 `coverlet.collector` is already referenced by the test projects; results are
@@ -1103,8 +1103,8 @@ enabled by default.
 
 1. **Build and test first.**
    ```powershell
-   dotnet build DonkehCSS.sln -c Release
-   dotnet test DonkehCSS.sln -c Release
+   dotnet build Donkeh.sln -c Release
+   dotnet test Donkeh.sln -c Release
    ```
 2. **Keep layering intact.** `Donkeh.Parser` must stay dependency-free; do not
    make `Donkeh.Data` depend on layout or UI.

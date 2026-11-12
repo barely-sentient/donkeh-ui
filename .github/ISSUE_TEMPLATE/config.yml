@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Contributing guide
+    url: https://github.com/barely-sentient/ignite-ui/blob/main/.github/CONTRIBUTING.md
+    about: Read the build, test and coding standards before contributing.
+  - name: Discussions
+    url: https://github.com/barely-sentient/ignite-ui/discussions
+    about: Ask design questions or discuss larger changes.

@@ -1,0 +1,64 @@
+name: Feature request
+description: Propose new CSS, layout, UI or tooling behaviour.
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. Please describe the user-facing behaviour and
+        which layer you think owns it. Partial implementations are fine if the
+        remaining gaps are documented.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What can't you do today, or what is awkward?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+      description: What should the engine or UI do instead?
+    validations:
+      required: true
+  - type: textarea
+    id: css
+    attributes:
+      label: CSS / API surface
+      description: Selectors, properties, values or public API you expect.
+      render: css
+    validations:
+      required: false
+  - type: dropdown
+    id: layer
+    attributes:
+      label: Likely layer
+      options:
+        - Unknown
+        - Parser
+        - Data / selector matching
+        - DataEngine
+        - LayoutLab
+        - UILab
+        - Windowing / GL renderer
+        - Inspector
+        - Demo / components
+        - Tooling / docs
+    validations:
+      required: false
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds, existing specs, or other designs.
+    validations:
+      required: false
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional context
+      description: Links to specs, browser behaviour, screenshots, benchmarks, etc.
+    validations:
+      required: false
