@@ -141,6 +141,13 @@ input:focus { border-color: #0969da; }
 Mouse wheel scrolling walks up to the nearest scroll container and updates its
 `ScrollOffsetX/Y`; the next layout pass rebuilds the display list.
 
+### Window scrolling
+
+The application root behaves like a browser document by default: when its height
+is `auto` it fills the viewport, and when its overflow is `visible` it scrolls
+vertically. Explicit `overflow` and `height` rules still win, so an app that
+wants a content-sized or clipped root can opt out.
+
 ### Window drag regions
 
 `app-region: drag` (and the Chromium-compatible `-webkit-app-region: drag`)

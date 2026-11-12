@@ -2052,6 +2052,7 @@ public sealed partial class IgniteWindow : IDisposable
         var options = isApp ? _appOptions : _devToolsOptions;
         options.ViewportWidth = width;
         options.ViewportHeight = height;
+        options.RootScrolls = isApp;
         options.DevicePixelRatio = dpi;
         options.Context = context;
         options.TextMeasurer = _measurer;

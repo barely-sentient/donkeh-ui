@@ -615,6 +615,28 @@ public class BlockLayoutTests
         Assert.Equal(0, TestSupport.Box(result, inline).BorderBox.Y, 3);
     }
 
+    [Fact]
+    public void RootScrollsByDefaultWhenRequested()
+    {
+        var root = TestSupport.Node("div", "root");
+        var child = TestSupport.Node("div", "child");
+        root.Children = [child];
+
+        var options = TestSupport.Options(1000, 800);
+        options.TextMeasurer = TestSupport.FixedMeasurer.Instance;
+        options.RootScrolls = true;
+        var result = TestSupport.Layout(
+            TestSupport.Build("#child { height: 1200px; }"),
+            root,
+            options);
+        var box = TestSupport.Box(result, root);
+
+        Assert.Equal(800, box.BorderBox.Height, 3);
+        Assert.True(box.IsScrollContainer);
+        Assert.Equal(Overflow.Auto, box.Style.OverflowY);
+        Assert.Equal(1200, box.ScrollHeight, 3);
+    }
+
     // -------------------------------------------------------------- scrolling
 
     [Fact]

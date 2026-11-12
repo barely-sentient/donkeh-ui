@@ -975,6 +975,16 @@ public sealed partial class LayoutEngine
     /// </remarks>
     private void LayoutRootBox(LayoutBox root, Rect viewport)
     {
+        // Give an application root the browser's default window behaviour: it
+        // fills the viewport and scrolls vertically when its content overflows.
+        // An author rule that explicitly hides or clips overflow still wins.
+        if (_options.RootScrolls && root.Style.OverflowY == Overflow.Visible)
+        {
+            var style = root.Style.Clone();
+            style.OverflowY = Overflow.Auto;
+            root.Style = style;
+        }
+
         if (root.IsContents)
         {
             root.Margin = Thickness.Zero;
@@ -1004,7 +1014,7 @@ public sealed partial class LayoutEngine
             viewport.Width,
             viewport.Height,
             forcedBorderHeight: null,
-            fillHeight: false,
+            fillHeight: _options.RootScrolls && root.Style.Height.IsAuto,
             definiteContentHeight: null);
     }
 

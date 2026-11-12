@@ -31,6 +31,17 @@ public sealed class LayoutOptions
     /// <remarks>Basis for <c>vh</c>, <c>vmin</c> and <c>vmax</c>, and the initial containing block height.</remarks>
     public float ViewportHeight { get; set; } = 768;
 
+    /// <summary>
+    /// Gets or sets whether the root element gets the browser's default window
+    /// behaviour: viewport height when its height is auto, and vertical scrolling
+    /// when its overflow is visible.
+    /// </summary>
+    /// <remarks>
+    /// Off by default so the layout library can be used for embedded or
+    /// content-sized roots. The window host enables it for application trees.
+    /// </remarks>
+    public bool RootScrolls { get; set; }
+
     /// <summary>Gets or sets the device orientation reported to media and container queries.</summary>
     public Orientation Orientation { get; set; } = Orientation.Horizontal;
 
@@ -318,6 +329,7 @@ public sealed class LayoutOptions
         var hash = new HashCode();
         hash.Add(ViewportWidth);
         hash.Add(ViewportHeight);
+        hash.Add(RootScrolls);
         hash.Add(Orientation);
         hash.Add(RootFontSize);
         hash.Add(DefaultFontSize);
