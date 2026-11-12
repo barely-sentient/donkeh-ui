@@ -39,6 +39,7 @@ namespace Donkeh.Parser
                 "trigger"
             );
 
+            CssPropertyName("app-region");
             CssPropertyName("appearance");
 
             CssPropertyName("aspect-ratio");

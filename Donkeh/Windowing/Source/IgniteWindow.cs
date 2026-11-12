@@ -444,6 +444,15 @@ public sealed partial class IgniteWindow : IDisposable
     /// <summary>Audio or video element whose progress thumb is being dragged, if any.</summary>
     private ElementNode? _mediaSeekElement;
 
+    /// <summary>Whether the native window is being moved by an <c>app-region: drag</c> element.</summary>
+    private bool _windowDragging;
+
+    /// <summary>Screen-space pointer position when the window drag started.</summary>
+    private Vector2D<int> _windowDragStartScreen;
+
+    /// <summary>Native window position when the window drag started.</summary>
+    private Vector2D<int> _windowDragStartPosition;
+
     /// <summary>
     /// Creates the window controller, its text measurer and the initial CSS
     /// table. The native window is not created until <see cref="Run(Donkeh.UILab.Node, string)"/> is called.
@@ -3787,6 +3796,77 @@ public sealed partial class IgniteWindow : IDisposable
     }
 
     /// <summary>
+    /// Starts a native window drag when the press lands in an
+    /// <c>app-region: drag</c> area.
+    /// </summary>
+    private bool TryBeginWindowDrag(ElementNode? element)
+    {
+        if (_window is null || element is null || ResolveAppRegion(element) != AppRegion.Drag)
+        {
+            return false;
+        }
+
+        var point = new Vector2D<int>(
+            (int)MathF.Round(_mouseX),
+            (int)MathF.Round(_mouseY));
+
+        _windowDragStartScreen = _window.PointToScreen(point);
+        _windowDragStartPosition = _window.Position;
+        _windowDragging = true;
+        _pressed = null;
+        _pointerTarget = null;
+        SetActive(null);
+        return true;
+    }
+
+    /// <summary>Moves the window by the pointer delta accumulated since the drag began.</summary>
+    private void UpdateWindowDrag()
+    {
+        if (_window is null || !_windowDragging)
+        {
+            return;
+        }
+
+        var point = new Vector2D<int>(
+            (int)MathF.Round(_mouseX),
+            (int)MathF.Round(_mouseY));
+        var screen = _window.PointToScreen(point);
+        var deltaX = screen.X - _windowDragStartScreen.X;
+        var deltaY = screen.Y - _windowDragStartScreen.Y;
+
+        _window.Position = new Vector2D<int>(
+            _windowDragStartPosition.X + deltaX,
+            _windowDragStartPosition.Y + deltaY);
+    }
+
+    /// <summary>
+    /// Resolves the nearest explicit <c>app-region</c> on the hit element or its
+    /// ancestors. A closer <c>no-drag</c> region opts out of an enclosing drag
+    /// region.
+    /// </summary>
+    private AppRegion ResolveAppRegion(ElementNode element)
+    {
+        for (IgniteSupportedDomNode? node = element; node is not null; node = node.Parent)
+        {
+            if (node is not ElementNode current)
+            {
+                continue;
+            }
+
+            var layout = LayoutFor(current);
+
+            if (layout is not null
+                && layout.TryGetBox(current, out var box)
+                && box.Style.AppRegion != AppRegion.None)
+            {
+                return box.Style.AppRegion;
+            }
+        }
+
+        return AppRegion.None;
+    }
+
+    /// <summary>
     /// Handles a press on an audio or video transport bar. Returns
     /// <see langword="true"/> when the press landed on the bar and was consumed.
     /// </summary>
@@ -4163,6 +4243,12 @@ public sealed partial class IgniteWindow : IDisposable
         _devTools.PointerX = x;
         _devTools.PointerY = y;
 
+        if (_windowDragging)
+        {
+            UpdateWindowDrag();
+            return;
+        }
+
         if (_selectionDragging)
         {
             UpdateSelectionDrag(x, y);
@@ -4268,6 +4354,11 @@ public sealed partial class IgniteWindow : IDisposable
                 _inspectPressed = true;
                 return;
             }
+        }
+
+        if (button == MouseButton.Left && TryBeginWindowDrag(HitTest(_mouseX, _mouseY)))
+        {
+            return;
         }
 
         if (!IsShiftPressed())
@@ -4439,6 +4530,12 @@ public sealed partial class IgniteWindow : IDisposable
     {
         _devTools.PointerX = _mouseX;
         _devTools.PointerY = _mouseY;
+
+        if (_windowDragging)
+        {
+            _windowDragging = false;
+            return;
+        }
 
         if (_inspectPressed)
         {

@@ -334,6 +334,11 @@ public enum CssProperty : ushort
     Cursor,
     /// <summary><c>user-select</c>.</summary>
     UserSelect,
+    /// <summary>
+    /// <c>app-region</c> / <c>-webkit-app-region</c>; marks a native window-drag
+    /// region.
+    /// </summary>
+    AppRegion,
     /// <summary><c>will-change</c>; hints which properties may animate.</summary>
     WillChange,
     /// <summary><c>contain</c>; layout, paint and size containment hints.</summary>
@@ -564,6 +569,8 @@ public static class CssPropertyIds
             ("pointer-events", CssProperty.PointerEvents),
             ("cursor", CssProperty.Cursor),
             ("user-select", CssProperty.UserSelect),
+            ("app-region", CssProperty.AppRegion),
+            ("-webkit-app-region", CssProperty.AppRegion),
             ("will-change", CssProperty.WillChange),
             ("contain", CssProperty.Contain),
             ("animation", CssProperty.Animation),

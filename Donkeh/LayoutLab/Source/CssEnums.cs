@@ -706,6 +706,23 @@ public enum ClipPathKind : byte
     Url
 }
 
+/// <summary>
+/// The <c>app-region</c> (Chromium <c>-webkit-app-region</c>) value that marks
+/// part of the page as a window-drag region.
+/// </summary>
+public enum AppRegion : byte
+{
+    /// <summary>No special behaviour; the element is an ordinary hit target.</summary>
+    None,
+    /// <summary>The element can be dragged to move the native window.</summary>
+    Drag,
+    /// <summary>
+    /// The element is excluded from an enclosing drag region, so it keeps
+    /// normal pointer interaction.
+    /// </summary>
+    NoDrag
+}
+
 /// <summary>How a mask image contributes its alpha.</summary>
 public enum MaskMode : byte
 {

@@ -17,6 +17,7 @@ namespace Donkeh.Parser
             CssPropertyName("word-break");
             CssPropertyName("word-spacing");
             CssPropertyName("writing-mode");
+            CssPropertyName("-webkit-app-region");
         }
     }
 }

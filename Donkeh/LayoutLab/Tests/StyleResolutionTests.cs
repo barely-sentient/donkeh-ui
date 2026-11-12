@@ -998,6 +998,14 @@ public class StyleResolutionTests
     }
 
     [Fact]
+    public void AppRegionIsSupported()
+    {
+        Assert.Equal(AppRegion.None, new ComputedStyle().AppRegion);
+        Assert.Equal(AppRegion.Drag, TestSupport.Style("app-region: drag").AppRegion);
+        Assert.Equal(AppRegion.NoDrag, TestSupport.Style("-webkit-app-region: no-drag").AppRegion);
+    }
+
+    [Fact]
     public void IgnoredPropertiesDoNotBecomeUnsupported()
     {
         var style = TestSupport.Style(

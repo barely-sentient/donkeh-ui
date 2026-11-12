@@ -410,6 +410,16 @@ public sealed class ComputedStyle
     /// <summary>Gets or sets how the element blends with its backdrop.</summary>
     public MixBlendMode MixBlendMode { get; set; } = MixBlendMode.Normal;
 
+    /// <summary>
+    /// Gets or sets whether the element is a native window-drag region.
+    /// </summary>
+    /// <remarks>
+    /// This maps Chromium's <c>-webkit-app-region</c> to a standard
+    /// <c>app-region</c> property. It has no layout or paint effect; the host
+    /// window reads it during pointer routing.
+    /// </remarks>
+    public AppRegion AppRegion { get; set; } = AppRegion.None;
+
     /// <summary>Gets or sets whether the element forms an isolated stacking context.</summary>
     public bool Isolate { get; set; }
 
@@ -896,6 +906,7 @@ public sealed class ComputedStyle
         ClipPath = source.ClipPath;
         Mask = source.Mask;
         MixBlendMode = source.MixBlendMode;
+        AppRegion = source.AppRegion;
         Isolate = source.Isolate;
         OutlineWidth = source.OutlineWidth;
         OutlineStyle = source.OutlineStyle;

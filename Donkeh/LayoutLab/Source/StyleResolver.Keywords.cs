@@ -898,6 +898,22 @@ public sealed partial class StyleResolver
         return flow;
     }
 
+    /// <summary>Parses an <c>app-region</c> keyword.</summary>
+    /// <param name="value">The declaration value.</param>
+    /// <returns>
+    /// <see cref="AppRegion.Drag"/> for <c>drag</c>, <see cref="AppRegion.NoDrag"/>
+    /// for <c>no-drag</c>, and <see cref="AppRegion.None"/> for anything else.
+    /// </returns>
+    private static AppRegion ParseAppRegion(string value)
+    {
+        return value.Trim().ToLowerInvariant() switch
+        {
+            "drag" => AppRegion.Drag,
+            "no-drag" => AppRegion.NoDrag,
+            _ => AppRegion.None
+        };
+    }
+
     /// <summary>
     /// Parses a <c>mix-blend-mode</c> keyword.
     /// </summary>

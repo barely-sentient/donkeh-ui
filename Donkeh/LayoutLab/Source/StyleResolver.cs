@@ -1160,6 +1160,10 @@ public sealed partial class StyleResolver
                     : ScrollBehavior.Auto;
                 break;
 
+            case CssProperty.AppRegion:
+                style.AppRegion = ParseAppRegion(value);
+                break;
+
             case CssProperty.PointerEvents:
             case CssProperty.Cursor:
             case CssProperty.UserSelect:

@@ -141,6 +141,19 @@ input:focus { border-color: #0969da; }
 Mouse wheel scrolling walks up to the nearest scroll container and updates its
 `ScrollOffsetX/Y`; the next layout pass rebuilds the display list.
 
+### Window drag regions
+
+`app-region: drag` (and the Chromium-compatible `-webkit-app-region: drag`)
+marks an element and its descendants as a native window-drag region. Pressing
+inside it moves the window with the pointer. A closer `app-region: no-drag`
+opts a child back out, which is useful for buttons and other controls inside a
+custom title bar:
+
+```css
+.titlebar { app-region: drag; }
+.titlebar button { app-region: no-drag; }
+```
+
 ## Performance notes
 
 - Styles are cached per node revision, parent identity, viewport and renderer
