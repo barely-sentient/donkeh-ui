@@ -1,5 +1,12 @@
 # Ignite
 
+> [!WARNING]
+> **Ignite is still in development and is very much not stable.**
+> APIs, rendering behaviour and CSS coverage change frequently, several engine
+> areas are incomplete or approximated, and the demo is a moving target. Expect
+> bugs, regressions and breaking changes. Do not use this for production work
+> yet.
+
 Ignite is a **declarative-first UI framework for .NET 10**, It is not a CSS
 engine. It ships one. Around that engine it provides a React-like development
 flow (components, hooks, context and keyed reconciliation), built-in devtools
@@ -1047,6 +1054,8 @@ paint-only frame can reuse the previous layout.
 
 Current limitations worth knowing:
 
+- **Pre-release quality.** This is an active development build. Expect rough
+  edges, missing CSS surface and behaviour changes between commits.
 - **Not a browser.** There is no JavaScript, no full HTML parser and no
   network/CORS model. The host supplies the tree, text, images and conditions.
 - **Tables** implement `colspan`/`rowspan`, `border-collapse` and

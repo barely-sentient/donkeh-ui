@@ -108,6 +108,18 @@ public sealed class LayoutOptions
     public bool EnableCaching { get; set; } = true;
 
     /// <summary>
+    /// Gets or sets a host-owned counter that changes whenever interaction state
+    /// (<c>:hover</c>, <c>:active</c>, <c>:focus</c>, …) changes.
+    /// </summary>
+    /// <remarks>
+    /// Interaction state lives on the DOM nodes, but a state change on one node
+    /// can affect a different node through sibling or descendant selectors. The
+    /// style cache therefore includes this counter so a focused input can refresh
+    /// its sibling label without bumping every node's revision.
+    /// </remarks>
+    public long InteractionVersion { get; set; }
+
+    /// <summary>
     /// Reuses <see cref="LayoutBox"/> instances across layout passes. The box
     /// tree is mutated in place, so leave this off when a previous
     /// <see cref="LayoutResult"/> must remain an immutable snapshot.
@@ -349,6 +361,7 @@ public sealed class LayoutOptions
         hash.Add(ApplyScrollOffsets);
         hash.Add(MaxLayoutDepth);
         hash.Add(AnimationsEnabled);
+        hash.Add(InteractionVersion);
 
         if (ScrollOffsets is not null)
         {

@@ -225,6 +225,12 @@ public sealed partial class IgniteWindow : IDisposable
     /// <summary>Monotonic animation clock in seconds, sampled once per frame.</summary>
     private double _animationTimeSeconds;
 
+    /// <summary>
+    /// Bumped when :hover, :active or :focus state changes. Style caches include
+    /// it because a state change on one node can restyle a sibling or descendant.
+    /// </summary>
+    private long _interactionVersion;
+
     /// <summary>Animation clock value at the last app layout driven by an animation.</summary>
     private double _lastAnimationLayoutTime;
 
@@ -2072,6 +2078,7 @@ public sealed partial class IgniteWindow : IDisposable
         options.MergeDraws = true;
         options.CompactConstants = false;
         options.EnableCaching = true;
+        options.InteractionVersion = _interactionVersion;
         options.ReuseLayoutBoxes = reuseBoxes;
         options.SnapshotResults = !reuseBoxes;
         // The inspector renders live, constantly changing numbers. Caching
@@ -5659,6 +5666,7 @@ public sealed partial class IgniteWindow : IDisposable
             if (element is not null && element.IsFocusVisible != visible)
             {
                 element.IsFocusVisible = visible;
+                _interactionVersion++;
                 _needsLayout = true;
                 _lastDevToolsVersion = -1;
             }
@@ -5708,6 +5716,7 @@ public sealed partial class IgniteWindow : IDisposable
             _caretIndex = 0;
         }
 
+        _interactionVersion++;
         _needsLayout = true;
         _lastDevToolsVersion = -1;
     }
@@ -5913,6 +5922,7 @@ public sealed partial class IgniteWindow : IDisposable
             Invoke(element, "mouseover");
         }
 
+        _interactionVersion++;
         _needsLayout = true;
     }
 
@@ -5944,6 +5954,7 @@ public sealed partial class IgniteWindow : IDisposable
             _lastDevToolsVersion = -1;
         }
 
+        _interactionVersion++;
         _needsLayout = true;
     }
 
@@ -6300,8 +6311,11 @@ public sealed partial class IgniteWindow : IDisposable
             scrollY += box.ScrollOffsetY;
         }
 
-        var inside = isContents || painted.Contains(x, y);
+        var inside = (isContents || painted.Contains(x, y))
+            && box.Style.PointerEvents != PointerEvents.None;
 
+        // pointer-events: none makes this box transparent to input but still
+        // lets an explicitly interactive child opt back in, so keep descending.
         for (var i = box.Children.Count - 1; i >= 0; i--)
         {
             var hit = HitTestBox(box.Children[i], x, y, scrollX, scrollY, skipFixed);

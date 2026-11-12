@@ -158,6 +158,21 @@ public enum BoxSizing : byte
     BorderBox
 }
 
+/// <summary>The CSS <c>pointer-events</c> property.</summary>
+/// <remarks>
+/// <see cref="None"/> makes a box transparent to pointer input while leaving
+/// painting and layout untouched. It is commonly used for decorative overlays
+/// such as floating labels so the control underneath stays clickable.
+/// </remarks>
+public enum PointerEvents : byte
+{
+    /// <summary><c>pointer-events: auto</c>; the box receives pointer input.</summary>
+    Auto,
+
+    /// <summary><c>pointer-events: none</c>; the box and its subtree are transparent to pointer input.</summary>
+    None
+}
+
 /// <summary>The CSS <c>visibility</c> property.</summary>
 /// <remarks>
 /// Unlike <see cref="Display.None"/>, hidden boxes still occupy space; only

@@ -706,6 +706,7 @@ public sealed partial class LayoutEngine
         hash.Add(_options.RootFontSize);
         hash.Add(_options.DefaultFontSize);
         hash.Add(_options.DevicePixelRatio);
+        hash.Add(_options.InteractionVersion);
         hash.Add(_contextVersion);
         return hash.ToHashCode();
     }

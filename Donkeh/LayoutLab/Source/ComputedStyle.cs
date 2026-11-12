@@ -90,6 +90,13 @@ public sealed class ComputedStyle
     /// <summary>Gets or sets whether the box is painted. <see cref="Visibility.Hidden"/> still occupies layout space.</summary>
     public Visibility Visibility { get; set; } = Visibility.Visible;
 
+    /// <summary>Gets or sets whether the box participates in pointer hit testing.</summary>
+    /// <remarks>
+    /// The value is inherited; <see cref="PointerEvents.None"/> lets a decorative
+    /// overlay be skipped so the control underneath receives the pointer.
+    /// </remarks>
+    public PointerEvents PointerEvents { get; set; } = PointerEvents.Auto;
+
     /// <summary>Gets or sets whether a <c>z-index</c> was specified, distinguishing an explicit zero from <c>auto</c>.</summary>
     public bool HasZIndex { get; set; }
 
@@ -696,6 +703,7 @@ public sealed class ComputedStyle
         Direction = parent.Direction;
         WritingMode = parent.WritingMode;
         Visibility = parent.Visibility;
+        PointerEvents = parent.PointerEvents;
         BorderCollapse = parent.BorderCollapse;
         BorderSpacing = parent.BorderSpacing;
     }
@@ -838,6 +846,7 @@ public sealed class ComputedStyle
         Clear = source.Clear;
         BoxSizing = source.BoxSizing;
         Visibility = source.Visibility;
+        PointerEvents = source.PointerEvents;
         HasZIndex = source.HasZIndex;
         ZIndex = source.ZIndex;
         Opacity = source.Opacity;

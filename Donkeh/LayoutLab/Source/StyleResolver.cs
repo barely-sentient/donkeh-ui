@@ -1436,6 +1436,11 @@ public sealed partial class StyleResolver
                 break;
 
             case CssProperty.PointerEvents:
+                style.PointerEvents = value.Equals("none", StringComparison.OrdinalIgnoreCase)
+                    ? PointerEvents.None
+                    : PointerEvents.Auto;
+                break;
+
             case CssProperty.Cursor:
             case CssProperty.UserSelect:
             case CssProperty.WillChange:
