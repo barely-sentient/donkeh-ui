@@ -258,6 +258,26 @@ public class GridLayoutTests
     }
 
     [Fact]
+    public void StretchedItemMeasuresAtCellWidthBeforeRowSizing()
+    {
+        var root = TestSupport.Node("div", "root");
+        var a = TestSupport.Node("div", "a");
+        var b = TestSupport.Node("div", "b");
+        root.Children = [a, b];
+
+        var result = Lay(
+            "#root { display: grid; grid-template-columns: 300px; gap: 10px; }"
+            + " #a { aspect-ratio: 2; }"
+            + " #b { height: 10px; }",
+            root);
+
+        // The empty item has zero max-content width but stretches to 300px, so
+        // its aspect-ratio height is 150px and the next row starts after that.
+        Assert.Equal(150, TestSupport.Box(result, a).BorderBox.Height, 3);
+        Assert.Equal(160, TestSupport.Box(result, b).BorderBox.Y, 3);
+    }
+
+    [Fact]
     public void EmptyGridCollapsesAutoFitRows()
     {
         var root = TestSupport.Node("div", "root");

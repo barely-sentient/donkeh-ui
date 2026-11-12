@@ -230,7 +230,13 @@ public sealed partial class LayoutEngine
             var cellWidth = GridSpanSize(columnSizes, placement.Column, placement.ColumnSpan, columnGap);
             var available = MathF.Max(0, cellWidth - item.Margin.Horizontal);
             var maxContent = MeasureMaxContentWidth(item);
-            var width = MathF.Min(maxContent, available);
+
+            // A stretched auto-width item uses the whole cell, not its
+            // max-content width. Measuring it narrow understates its height and
+            // makes an aspect-ratio child overlap the next grid row.
+            var justify = EffectiveJustifySelf(item.Style, style);
+            var stretchWidth = justify == JustifySelf.Stretch && item.Style.Width.IsAuto;
+            var width = stretchWidth ? available : MathF.Min(maxContent, available);
 
             PrepareAndMeasureWidth(item, content.Width, width, false, false, false, edgesPrepared: true);
             LayoutPreparedBox(
