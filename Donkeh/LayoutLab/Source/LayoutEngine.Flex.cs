@@ -311,7 +311,7 @@ public sealed partial class LayoutEngine
                 var widthAuto = IsCrossSizeAuto(item.Style, row);
 
                 // A definite cross size on a column item (for example
-                // Bootstrap's .container { width: 100% }) is not a flex
+                // the host's .container { width: 100% }) is not a flex
                 // decision. Forcing the measured max-content width here would
                 // override the author's percentage against the container's
                 // definite width and leave rows and cards too narrow. Only an
@@ -442,7 +442,7 @@ public sealed partial class LayoutEngine
             var free = MathF.Max(0, mainAvailable - used);
 
             // Auto margins absorb free space before justify-content runs. This
-            // is what pushes Bootstrap's `.me-auto` nav and trailing form to
+            // is what pushes the host's `.me-auto` nav and trailing form to
             // opposite ends of a navbar.
             if (free > 0)
             {
@@ -902,7 +902,7 @@ public sealed partial class LayoutEngine
         var text = box.Children.Count > 0
             && (style.IsFlexContainer || style.IsGridContainer)
             ? null
-            : GetNodeText(box.Node);
+            : GetBoxText(box);
 
         var textHeight = 0f;
         var textWidth = 0f;
@@ -965,7 +965,7 @@ public sealed partial class LayoutEngine
                 var childBorder = ResolveBorders(child.Style, in childContext, available);
                 var childWidth = MeasureMaxContentWidth(child);
 
-                // A definite flex basis (Bootstrap's collapsed navbar uses
+                // A definite flex basis (the host's collapsed navbar uses
                 // flex-basis:100%) or width decides how much of the line the
                 // item occupies. Ignoring it makes the wrapper measure every
                 // child as one line and then clip the wrapped content.

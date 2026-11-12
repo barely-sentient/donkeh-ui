@@ -105,6 +105,7 @@ public sealed class LayoutBox
 
         IsContents = false;
         PseudoElementKind = PseudoElementKind.None;
+        OwnTextIsChild = false;
         ContainingBlock = null;
         StaticPosition = default;
         IsScrollContainer = false;
@@ -163,6 +164,18 @@ public sealed class LayoutBox
 
     /// <summary>Gets or sets which generated pseudo-element produced this box, if any.</summary>
     internal PseudoElementKind PseudoElementKind { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether the element's own text was materialised as a child
+    /// box so a generated <c>::before</c> can paint before it.
+    /// </summary>
+    /// <remarks>
+    /// Normally an element's text is not a box; the block/inline layout pass
+    /// emits it before its inline children. Generated <c>::before</c> content
+    /// must precede that text, so the text is boxed and this flag suppresses
+    /// the implicit text run.
+    /// </remarks>
+    internal bool OwnTextIsChild { get; set; }
 
     /// <summary>Gets a value indicating whether the box comes from <c>display: contents</c>.</summary>
     /// <remarks>Such a box owns no background, border or geometry of its own; its children are painted in its place.</remarks>

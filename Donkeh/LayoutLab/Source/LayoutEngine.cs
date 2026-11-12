@@ -928,6 +928,17 @@ public sealed partial class LayoutEngine
         return _options.TextProvider is { } provider ? provider(node) : node.TextContent;
     }
 
+    /// <summary>Returns the text a box contributes implicitly, honouring boxed text.</summary>
+    /// <param name="box">Box whose text is requested.</param>
+    /// <returns>
+    /// The node text, or <see langword="null"/> when the same text was already
+    /// materialised as a child box (for example so <c>::before</c> can precede it).
+    /// </returns>
+    private string? GetBoxText(LayoutBox box)
+    {
+        return box.OwnTextIsChild ? null : GetNodeText(box.Node);
+    }
+
     // -------------------------------------------------------------- box tree
 
     /// <summary>
@@ -1077,6 +1088,29 @@ public sealed partial class LayoutEngine
         if (before is not null)
         {
             box.Children.Insert(0, before);
+
+            // A normal block/inline box emits its own text before its child
+            // boxes. A generated ::before must paint before that text, so
+            // materialise the text as a real child immediately after ::before
+            // and suppress the implicit run. Flex/grid containers already did
+            // this above and use their own layout path.
+            if (!style.IsFlexContainer
+                && !style.IsGridContainer
+                && !string.IsNullOrEmpty(node.TextContent))
+            {
+                var textStyle = new ComputedStyle();
+                textStyle.CopyInheritedFromShared(style);
+                textStyle.Display = Display.Inline;
+
+                var textNode = GetOrCreateTextNode(node);
+                var textBox = new LayoutBox(textNode, textStyle, depth + 1, 0)
+                {
+                    Parent = box
+                };
+
+                box.Children.Insert(1, textBox);
+                box.OwnTextIsChild = true;
+            }
         }
 
         var after = BuildPseudoBox(node, style, box, childPositionedAncestor, depth + 1, PseudoElementKind.After);
@@ -2104,7 +2138,7 @@ public sealed partial class LayoutEngine
         var border = ResolveBorders(style, in context, 0);
         // A percentage width has no meaningful max-content value: resolve it
         // against the child's own content instead, otherwise a flex item such
-        // as Bootstrap's width:100% .form-control measures as zero and the
+        // as the host's width:100% .form-control measures as zero and the
         // container collapses around it.
         var width = style.Width.Unit == LengthUnit.Percent
             ? float.NaN
@@ -2147,7 +2181,7 @@ public sealed partial class LayoutEngine
         var text = box.Children.Count > 0
             && (box.Style.IsFlexContainer || box.Style.IsGridContainer)
             ? null
-            : GetNodeText(box.Node);
+            : GetBoxText(box);
 
         if (!string.IsNullOrEmpty(text))
         {
@@ -2170,7 +2204,7 @@ public sealed partial class LayoutEngine
         // A block container measures the widest line formed by its children.
         // Consecutive inline children share one line and therefore add up;
         // a block child contributes its own max-content width. Treating every
-        // child independently under-measures mixed content such as Bootstrap's
+        // child independently under-measures mixed content such as the host's
         // alert (a heading block followed by an inline text/link run), which
         // then wraps text and makes the alert too tall.
         var inlineRun = textWidth;
@@ -2220,7 +2254,7 @@ public sealed partial class LayoutEngine
         {
             // A single-line flex row also needs its column gaps in the
             // intrinsic width, otherwise the measured width is short by the
-            // gaps and a wrapping container (Bootstrap's .btn-toolbar) wraps a
+            // gaps and a wrapping container (the host's .btn-toolbar) wraps a
             // child onto the next line during the real layout pass.
             if (style.IsFlexContainer
                 && style.FlexDirection is FlexDirection.Row or FlexDirection.RowReverse
@@ -2293,7 +2327,7 @@ public sealed partial class LayoutEngine
         var text = box.Children.Count > 0
             && (box.Style.IsFlexContainer || box.Style.IsGridContainer)
             ? null
-            : GetNodeText(box.Node);
+            : GetBoxText(box);
         var style = box.Style;
         var textWidth = string.IsNullOrEmpty(text) ? 0 : MeasureTextMinWidth(text, style);
         var inlineFlow = style.Display is Display.Inline or Display.InlineBlock
@@ -2653,12 +2687,12 @@ public sealed partial class LayoutEngine
         }
 
         // A flex or grid container can own text directly (an element whose
-        // only children are text nodes, such as Bootstrap's .accordion-button).
+        // only children are text nodes, such as the host's .accordion-button).
         // There is no anonymous flex item to place, so lay the run out with the
         // block/inline path instead of silently dropping it.
         if (box.Children.Count == 0
             && (box.Style.IsFlexContainer || box.Style.IsGridContainer)
-            && !string.IsNullOrEmpty(GetNodeText(box.Node)))
+            && !string.IsNullOrEmpty(GetBoxText(box)))
         {
             return LayoutBlockChildren(box, content, definiteContentHeight);
         }
@@ -2686,7 +2720,7 @@ public sealed partial class LayoutEngine
     /// Block and inline formatting contexts overwrite this with the exact flow
     /// position. Flex, grid and table contexts do not place absolute children at
     /// all, so without the seed an absolute child without insets (the common
-    /// Bootstrap dropdown menu) would keep the default (0, 0) and paint at the
+    /// the host dropdown menu) would keep the default (0, 0) and paint at the
     /// viewport origin.
     /// </remarks>
     private static void InitializeOutOfFlowStaticPositions(LayoutBox box, Rect content)

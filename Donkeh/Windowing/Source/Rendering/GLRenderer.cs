@@ -130,6 +130,9 @@ public sealed unsafe class GLRenderer : IDisposable
     /// <summary>Saved transforms for nested transform pushes.</summary>
     private readonly Stack<Matrix3x2> _transforms = new();
 
+    /// <summary>Saved blend modes for nested blend-mode pushes.</summary>
+    private readonly Stack<MixBlendMode> _blends = new();
+
     /// <summary>
     /// The currently effective clip, always the intersection of every pushed
     /// rectangle. <see cref="ClipState.None"/> when nothing is pushed.
@@ -276,6 +279,7 @@ public sealed unsafe class GLRenderer : IDisposable
         _clips.Clear();
         _opacities.Clear();
         _transforms.Clear();
+        _blends.Clear();
         _clip = ClipState.None;
         _opacity = 1;
         _transform = Matrix3x2.Identity;
@@ -566,11 +570,12 @@ public sealed unsafe class GLRenderer : IDisposable
                     break;
 
                 case InstructionOpCode.PushBlendMode:
+                    _blends.Push(_blend);
                     _blend = (MixBlendMode)instruction.Payload;
                     break;
 
                 case InstructionOpCode.PopBlendMode:
-                    _blend = MixBlendMode.Normal;
+                    _blend = _blends.Count > 0 ? _blends.Pop() : MixBlendMode.Normal;
                     break;
 
                 case InstructionOpCode.SetScrollOffset:
@@ -1254,10 +1259,9 @@ public sealed unsafe class GLRenderer : IDisposable
     /// </para>
     /// <para>
     /// Once any clip in the chain is rounded, all descendants report
-    /// <see cref="ClipState.Rounded"/>, but the radii passed with the newest
-    /// push are stored as-is. An inner rectangular clip under a rounded ancestor
-    /// therefore stores zero radii and the shader's rounded test stops firing
-    /// for its subtree, so the ancestor's rounding is lost from that point on.
+    /// <see cref="ClipState.Rounded"/>. A rectangular clip pushed inside a
+    /// rounded ancestor keeps the ancestor's radii so the rounded test stays
+    /// active for the subtree; only an explicitly rounded push replaces them.
     /// </para>
     /// <para>
     /// Scissor state is not touched here; it is applied per run from the final
@@ -1269,9 +1273,16 @@ public sealed unsafe class GLRenderer : IDisposable
         _clips.Push(_clip);
         var next = _clip.Rect.Intersect(rect);
         var useRounded = rounded || _clip.Rounded;
+        // Preserve an ancestor's rounding when a rectangular clip is pushed
+        // inside a rounded one: zeroing the radii here discarded the ancestor's
+        // corners (see PushClip remarks). Keeping the ancestor radii keeps the
+        // rounded test active for the subtree.
+        var effectiveRadii = rounded
+            ? radii
+            : (useRounded ? _clip.Radii : Vector4.Zero);
         _clip = new ClipState(
             next,
-            useRounded ? radii : Vector4.Zero,
+            effectiveRadii,
             true,
             useRounded);
     }
@@ -1669,7 +1680,7 @@ public sealed unsafe class GLRenderer : IDisposable
     /// </remarks>
     private static Vector4 ColorOf(uint color, float opacity)
     {
-        var alpha = ((color >> 24) & 0xFF) / 255f * opacity;
+        var alpha = Math.Clamp(((color >> 24) & 0xFF) / 255f * opacity, 0, 1);
         return new Vector4(
             ((color >> 16) & 0xFF) / 255f,
             ((color >> 8) & 0xFF) / 255f,
