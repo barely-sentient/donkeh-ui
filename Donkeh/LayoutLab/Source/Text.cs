@@ -297,8 +297,8 @@ public static class TextLayoutEngine
     /// whitespace to single spaces. Spaces are preserved for
     /// <see cref="WhiteSpace.Pre"/>, <see cref="WhiteSpace.PreWrap"/> and
     /// <see cref="WhiteSpace.BreakSpaces"/>; <see cref="WhiteSpace.PreLine"/>
-    /// also keeps internal runs because hard-break paragraphs bypass the
-    /// collapsing step. Wrapping is disabled for
+    /// collapses whitespace within each line while still honouring newlines.
+    /// Wrapping is disabled for
     /// <see cref="WhiteSpace.NoWrap"/> and <see cref="WhiteSpace.Pre"/>.
     /// </para>
     /// <para>
@@ -310,8 +310,8 @@ public static class TextLayoutEngine
     /// Ellipsis handling only applies when a line exceeds a finite
     /// <paramref name="maxWidth"/>; the text is trimmed character by character
     /// until the ellipsis fits, which is O(n) measurements in the worst case.
-    /// It is applied by the unwrapped and band paths; lines produced by
-    /// <see cref="WrapParagraph"/> are emitted with clipping instead.
+    /// It is applied to every emitted line, including lines produced by
+    /// <see cref="WrapParagraph"/> when a single word cannot be broken.
     /// <see cref="TextAlign.Justify"/> and <see cref="TextAlign.MatchParent"/>
     /// are treated as start alignment; no inter-word distribution is performed.
     /// </para>
@@ -358,13 +358,20 @@ public static class TextLayoutEngine
         var hardBreaks = whiteSpace is WhiteSpace.Pre or WhiteSpace.PreWrap or WhiteSpace.PreLine
             or WhiteSpace.BreakSpaces;
 
-        var preserveSpaces = whiteSpace is WhiteSpace.Pre or WhiteSpace.PreWrap or WhiteSpace.BreakSpaces;
         var wrap = whiteSpace is not (WhiteSpace.NoWrap or WhiteSpace.Pre);
         var maxLines = lineClamp > 0 ? lineClamp : int.MaxValue;
 
         var paragraphs = hardBreaks
             ? text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n')
             : [CollapseWhitespace(text)];
+
+        if (whiteSpace == WhiteSpace.PreLine)
+        {
+            for (var i = 0; i < paragraphs.Length; i++)
+            {
+                paragraphs[i] = CollapseWhitespace(paragraphs[i]);
+            }
+        }
 
         foreach (var paragraph in paragraphs)
         {
@@ -388,7 +395,7 @@ public static class TextLayoutEngine
                 maxWidth,
                 lineHeight,
                 overflowWrap,
-                preserveSpaces,
+                textOverflow,
                 maxLines,
                 ref truncated);
         }
@@ -497,6 +504,14 @@ public static class TextLayoutEngine
         var paragraphs = hardBreaks
             ? text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n')
             : [CollapseWhitespace(text)];
+
+        if (whiteSpace == WhiteSpace.PreLine)
+        {
+            for (var i = 0; i < paragraphs.Length; i++)
+            {
+                paragraphs[i] = CollapseWhitespace(paragraphs[i]);
+            }
+        }
 
         foreach (var rawParagraph in paragraphs)
         {
@@ -664,7 +679,7 @@ public static class TextLayoutEngine
     /// <param name="maxWidth">The available width in CSS pixels.</param>
     /// <param name="lineHeight">The resolved line box height.</param>
     /// <param name="overflowWrap">Whether mid-word breaks are allowed.</param>
-    /// <param name="preserveSpaces">Whether whitespace-preserving mode requested that spaces be kept; currently not consulted.</param>
+    /// <param name="textOverflow">Whether an overlong line is clipped or shortened with an ellipsis.</param>
     /// <param name="maxLines">The line clamp, or <see cref="int.MaxValue"/> for unlimited.</param>
     /// <param name="truncated">Set when the clamp stops wrapping early.</param>
     /// <remarks>
@@ -683,7 +698,7 @@ public static class TextLayoutEngine
         float maxWidth,
         float lineHeight,
         OverflowWrap overflowWrap,
-        bool preserveSpaces,
+        TextOverflow textOverflow,
         int maxLines,
         ref bool truncated)
     {
@@ -695,6 +710,13 @@ public static class TextLayoutEngine
             if (lines.Count >= maxLines)
             {
                 truncated = true;
+                return;
+            }
+
+            // Every character has already been emitted (for example by the
+            // single-glyph fallback); don't append a trailing empty line.
+            if (paragraph.Length > 0 && start >= paragraph.Length)
+            {
                 return;
             }
 
@@ -719,7 +741,7 @@ public static class TextLayoutEngine
 
                 if (atEnd)
                 {
-                    EmitLine(lines, paragraph[start..candidateEnd].TrimEnd(), style, measurer, maxWidth, lineHeight, TextOverflow.Clip, maxLines, ref truncated);
+                    EmitLine(lines, paragraph[start..candidateEnd].TrimEnd(), style, measurer, maxWidth, lineHeight, textOverflow, maxLines, ref truncated);
                     return;
                 }
 
@@ -737,7 +759,7 @@ public static class TextLayoutEngine
                     measurer,
                     maxWidth,
                     lineHeight,
-                    TextOverflow.Clip,
+                    textOverflow,
                     maxLines,
                     ref truncated);
 
@@ -753,7 +775,10 @@ public static class TextLayoutEngine
                 continue;
             }
 
-            if (overflowWrap is OverflowWrap.Anywhere or OverflowWrap.BreakWord && i > start)
+            // The parentheses are required: `&&` binds tighter than `is ... or`,
+            // and without them Anywhere would also match when i == start, which
+            // emits an empty line and never advances.
+            if ((overflowWrap is OverflowWrap.Anywhere or OverflowWrap.BreakWord) && i > start)
             {
                 EmitLine(
                     lines,
@@ -762,7 +787,7 @@ public static class TextLayoutEngine
                     measurer,
                     maxWidth,
                     lineHeight,
-                    TextOverflow.Clip,
+                    textOverflow,
                     maxLines,
                     ref truncated);
 
@@ -796,7 +821,7 @@ public static class TextLayoutEngine
                     measurer,
                     maxWidth,
                     lineHeight,
-                    TextOverflow.Clip,
+                    textOverflow,
                     maxLines,
                     ref truncated);
 
@@ -815,7 +840,7 @@ public static class TextLayoutEngine
                 measurer,
                 maxWidth,
                 lineHeight,
-                TextOverflow.Clip,
+                textOverflow,
                 maxLines,
                 ref truncated);
         }

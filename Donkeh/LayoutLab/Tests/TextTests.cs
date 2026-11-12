@@ -279,6 +279,41 @@ public class TextTests
     }
 
     [Fact]
+    public void PreLineCollapsesInternalSpacesButHonoursNewlines()
+    {
+        var layout = Layout("  a   b \n c  d  ", whiteSpace: WhiteSpace.PreLine);
+
+        Assert.Equal(2, layout.Lines.Length);
+        Assert.Equal("a b", layout.Lines[0].Text);
+        Assert.Equal("c d", layout.Lines[1].Text);
+    }
+
+    [Fact]
+    public void OverflowWrapAnywhereWithAnUnbreakableGlyphAdvances()
+    {
+        // Each glyph is 10px wide but the container is only 5px. The old
+        // precedence bug emitted an empty line without advancing start.
+        var layout = Layout("abcd", maxWidth: 5, overflowWrap: OverflowWrap.Anywhere,
+            lineClamp: 10);
+
+        Assert.Equal(4, layout.Lines.Length);
+        Assert.All(layout.Lines, line => Assert.Single(line.Text));
+        Assert.Equal("abcd", string.Concat(layout.Lines.Select(line => line.Text)));
+    }
+
+    [Fact]
+    public void EllipsisAppliesToWrappedOversizedWords()
+    {
+        var layout = Layout("abcdef", maxWidth: 40, overflowWrap: OverflowWrap.Normal,
+            textOverflow: TextOverflow.Ellipsis);
+
+        Assert.Single(layout.Lines);
+        Assert.Equal("abc\u2026", layout.Lines[0].Text);
+        Assert.True(layout.Lines[0].IsTruncated);
+        Assert.True(layout.IsTruncated);
+    }
+
+    [Fact]
     public void BreakOpportunitiesIncludeHyphensAndSlashes()
     {
         var layout = Layout("aaaa-bbbb", maxWidth: 60);
