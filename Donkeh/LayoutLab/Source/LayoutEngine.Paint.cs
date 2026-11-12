@@ -163,7 +163,8 @@ public sealed partial class LayoutEngine
         if (!_paintingOverlays
             && !_paintingFixed
             && box.Style.HasZIndex
-            && box.Style.ZIndex > 0)
+            && box.Style.ZIndex > 0
+            && !(box.IsFixed && box.ContainingBlock is not null))
         {
             _overlayBoxes.Add((box, tx, ty));
             return;
