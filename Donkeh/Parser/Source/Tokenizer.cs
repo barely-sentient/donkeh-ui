@@ -174,6 +174,32 @@ namespace Donkeh.Parser
         }
 
         /// <summary>
+        /// Returns whether a colon starts a declaration rather than a pseudo-class.
+        /// </summary>
+        /// <param name="tokens">Tokens emitted so far.</param>
+        /// <param name="count">Number of valid tokens.</param>
+        /// <returns>
+        /// <see langword="true"/> when the previous token is a known property name
+        /// and the one before it opens a declaration block or follows a semicolon.
+        /// </returns>
+        /// <remarks>
+        /// The tokenizer is context-free, so <c>background-position:right</c> would
+        /// otherwise lex as the pseudo-class <c>:right</c> when the declaration
+        /// omits whitespace after the colon. Selectors keep their pseudo-class
+        /// tokens because a selector's type/class token is not preceded by
+        /// <c>{</c> or <c>;</c>.
+        /// </remarks>
+        private static bool IsDeclarationColon(ReadOnlySpan<Token> tokens, int count)
+        {
+            if (count < 2 || tokens[count - 1].Kind != TokenKind.PropertyName)
+            {
+                return false;
+            }
+
+            return tokens[count - 2].Kind is TokenKind.LeftCurlyBrace or TokenKind.SemiColon;
+        }
+
+        /// <summary>
         /// Runs the lexer over <paramref name="source"/>, optionally writing
         /// tokens into <paramref name="tokens"/>.
         /// </summary>
@@ -292,6 +318,13 @@ namespace Donkeh.Parser
                         break;
 
                     case ':':
+                        if (IsDeclarationColon(buffer, count))
+                        {
+                            i++;
+                            Emit(source, buffer, TokenKind.Colon, start, i, ref count);
+                            break;
+                        }
+
                         i = ScanPseudo(source, i, buffer, ref count);
                         break;
 

@@ -360,6 +360,12 @@ public class StyleResolutionTests
         var bootstrap = TestSupport.Style("background-position: right .75rem center; font-size: 16px");
         Assert.Equal(188, bootstrap.BackgroundPositionX.Resolve(in context, 200), 3);
         Assert.Equal(50, bootstrap.BackgroundPositionY.Resolve(in context, 100), 3);
+
+        // Minified declarations have no whitespace after the colon; `right` must
+        // still lex as a value, not as the pseudo-class `:right`.
+        var minified = TestSupport.Style("background-position:right .75rem center; font-size: 16px");
+        Assert.Equal(188, minified.BackgroundPositionX.Resolve(in context, 200), 3);
+        Assert.Equal(50, minified.BackgroundPositionY.Resolve(in context, 100), 3);
     }
 
     [Fact]
