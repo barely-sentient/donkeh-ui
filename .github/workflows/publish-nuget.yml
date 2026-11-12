@@ -18,11 +18,11 @@ env:
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
-  SOLUTION: IgniteCSS.sln
+  SOLUTION: Donkeh.sln
 
 jobs:
   publish:
-    name: Pack and publish all Ignite modules
+    name: Pack and publish all Donkeh modules
     runs-on: ubuntu-latest
     environment: production
 
