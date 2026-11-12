@@ -164,13 +164,13 @@ public sealed partial class LayoutEngine
         }
 
         var rowHeights = new float[rows.Count];
+        var spanRequirements = new List<(TableCellPlacement Placement, float Natural)>();
 
-        // Measurement pass: discover natural cell heights and grow the last row
-        // of each rowspan when the content needs more space.
+        // Measurement pass: discover each cell's natural height. Single-row
+        // cells set their row's baseline; rowspans are resolved afterwards so a
+        // tall span cannot be counted twice against later cells.
         for (var r = 0; r < rows.Count; r++)
         {
-            var y = content.Y + RowOffset(rowHeights, r, spacing);
-
             for (var i = 0; i < placements.Count; i++)
             {
                 var placement = placements[i];
@@ -194,19 +194,34 @@ public sealed partial class LayoutEngine
                 var natural = LayoutPreparedBox(
                     placement.Cell,
                     x,
-                    y,
+                    content.Y,
                     content.Width,
                     definiteContentHeight,
                     forcedBorderHeight: null,
                     fillHeight: false,
                     definiteContentHeight: null);
 
-                var rowSpanHeight = SpanSize(rowHeights, placement.Row, placement.RowSpan, spacing);
-
-                if (natural > rowSpanHeight)
+                if (placement.RowSpan <= 1)
                 {
-                    rowHeights[placement.Row + placement.RowSpan - 1] += natural - rowSpanHeight;
+                    rowHeights[placement.Row] = MathF.Max(rowHeights[placement.Row], natural);
                 }
+                else
+                {
+                    spanRequirements.Add((placement, natural));
+                }
+            }
+        }
+
+        // Grow the last row of a rowspan just enough for the cell's natural
+        // height; other cells in earlier rows keep their own heights.
+        for (var i = 0; i < spanRequirements.Count; i++)
+        {
+            var (placement, natural) = spanRequirements[i];
+            var available = SpanSize(rowHeights, placement.Row, placement.RowSpan, spacing);
+
+            if (natural > available)
+            {
+                rowHeights[placement.Row + placement.RowSpan - 1] += natural - available;
             }
         }
 
@@ -419,18 +434,6 @@ public sealed partial class LayoutEngine
         }
 
         return total;
-    }
-
-    private static float RowOffset(float[] heights, int row, float spacing)
-    {
-        var offset = spacing * row;
-
-        for (var r = 0; r < row && r < heights.Length; r++)
-        {
-            offset += heights[r];
-        }
-
-        return offset;
     }
 
     /// <summary>Halves a cell's border widths when the table collapses borders.</summary>

@@ -64,6 +64,8 @@ public sealed partial class LayoutEngine
         // clipped by an ancestor scroll container. Paint them after the normal
         // tree so modals, offcanvas panels and tooltips sit above the page.
         _paintingFixed = true;
+        var fixedContext = new StackingContextFrame();
+        _stackingContexts.Push(fixedContext);
 
         for (var i = 0; i < _fixedBoxes.Count; i++)
         {
@@ -83,6 +85,8 @@ public sealed partial class LayoutEngine
             }
         }
 
+        PaintPromoted(fixedContext);
+        _stackingContexts.Pop();
         _paintingFixed = false;
 
         if (_options.IncludeFrameMarkers)
