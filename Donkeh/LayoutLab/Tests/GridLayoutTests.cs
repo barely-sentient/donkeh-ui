@@ -258,6 +258,17 @@ public class GridLayoutTests
     }
 
     [Fact]
+    public void EmptyGridCollapsesAutoFitRows()
+    {
+        var root = TestSupport.Node("div", "root");
+        var result = Lay(
+            "#root { display: grid; grid-template-rows: repeat(auto-fit, 50px); }",
+            root);
+
+        Assert.Equal(0, TestSupport.Box(result, root).BorderBox.Height, 3);
+    }
+
+    [Fact]
     public void FrTracksKeepTheirMinimumContribution()
     {
         var (root, a, b, _) = Tree(2);

@@ -92,10 +92,32 @@ public sealed partial class LayoutEngine
 
         if (items.Count == 0)
         {
-            // Explicit rows still contribute height without in-flow items.
-            var emptyContributions = new float[rowExpansion.Tracks.Length];
+            // Explicit rows still contribute height without in-flow items, but
+            // every auto-fit copy is empty and must collapse away.
+            var emptyTracks = rowExpansion.Tracks;
+
+            if (rowExpansion.AutoRepeatFit
+                && rowExpansion.AutoRepeatStart >= 0
+                && rowExpansion.AutoRepeatCount > 0)
+            {
+                var keep = new List<GridTrack>(emptyTracks.Length);
+                var first = rowExpansion.AutoRepeatStart;
+                var last = first + rowExpansion.AutoRepeatCount * rowExpansion.AutoRepeatPatternLength;
+
+                for (var i = 0; i < emptyTracks.Length; i++)
+                {
+                    if (i < first || i >= last)
+                    {
+                        keep.Add(emptyTracks[i]);
+                    }
+                }
+
+                emptyTracks = keep.ToArray();
+            }
+
+            var emptyContributions = new float[emptyTracks.Length];
             var emptySizes = ResolveTrackSizes(
-                rowExpansion.Tracks,
+                emptyTracks,
                 definiteContentHeight ?? float.NaN,
                 emptyContributions,
                 emptyContributions,
