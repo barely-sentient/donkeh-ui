@@ -898,6 +898,47 @@ public sealed partial class LayoutEngine
             return MathF.Max(minHeight, MathF.Min(aspectHeight, maxHeight));
         }
 
+        // A replaced element with an auto height is sized by its intrinsic
+        // ratio. Flex column items use this measurement as their main size, so
+        // an <img> without this branch measured as zero content height and
+        // collapsed (for example a card image or a figure inside a flex column).
+        if (_options.IntrinsicSizeProvider?.Invoke(box.Node) is { } intrinsic
+            && intrinsic.Width > 0
+            && intrinsic.Height > 0)
+        {
+            var specified = style.Width.ResolveOr(in context, cbWidth, float.NaN);
+            float contentWidth;
+
+            if (float.IsFinite(specified))
+            {
+                var borderWidth = style.BoxSizing == BoxSizing.BorderBox
+                    ? specified
+                    : specified + padding.Horizontal + border.Horizontal;
+                contentWidth = MathF.Max(
+                    1,
+                    borderWidth - padding.Horizontal - border.Horizontal);
+            }
+            else
+            {
+                // Auto width: use the intrinsic width, bounded by the available
+                // content width and max-width so a max-width:100% image keeps its
+                // aspect ratio instead of reporting its unconstrained height.
+                var margin = style.Margin.Resolve(in context, cbWidth);
+                var available = MathF.Max(
+                    0,
+                    cbWidth - margin.Horizontal - padding.Horizontal - border.Horizontal);
+                var maxWidth = style.MaxWidth.IsAuto
+                    ? available
+                    : MathF.Min(
+                        available,
+                        style.MaxWidth.ResolveOr(in context, cbWidth, available));
+                contentWidth = MathF.Min(intrinsic.Width, MathF.Max(1, maxWidth));
+            }
+            var contentHeight = intrinsic.Height * (contentWidth / intrinsic.Width);
+            var replacedHeight = contentHeight + extra;
+            return MathF.Max(minHeight, MathF.Min(replacedHeight, maxHeight));
+        }
+
         var content = 0f;
         var text = box.Children.Count > 0
             && (style.IsFlexContainer || style.IsGridContainer)

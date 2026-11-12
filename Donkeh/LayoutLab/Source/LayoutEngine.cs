@@ -1556,9 +1556,17 @@ public sealed partial class LayoutEngine
             }
             else if (_options.IntrinsicSizeProvider?.Invoke(box.Node) is { } intrinsic)
             {
-                height = style.BoxSizing == BoxSizing.BorderBox
-                    ? intrinsic.Height
-                    : intrinsic.Height + verticalExtra;
+                // Intrinsic dimensions describe the replaced content box. Use
+                // the already-resolved width to preserve the intrinsic aspect
+                // ratio, then add padding/border to reach a border-box height.
+                var contentWidth = MathF.Max(
+                    1,
+                    box.BorderBox.Width - box.Padding.Horizontal - box.Border.Horizontal);
+                var contentHeight = intrinsic.Width > 0
+                    ? intrinsic.Height * (contentWidth / intrinsic.Width)
+                    : intrinsic.Height;
+
+                height = contentHeight + verticalExtra;
             }
             else if (fillHeight && float.IsFinite(cbHeight))
             {
