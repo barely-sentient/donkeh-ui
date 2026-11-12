@@ -1,13 +1,13 @@
-# Ignite
+# Donkeh
 
 > [!WARNING]
-> **Ignite is still in development and is very much not stable.**
+> **Donkeh is still in development and is very much not stable.**
 > APIs, rendering behaviour and CSS coverage change frequently, several engine
 > areas are incomplete or approximated, and the demo is a moving target. Expect
 > bugs, regressions and breaking changes. Do not use this for production work
 > yet.
 
-Ignite is a **declarative-first UI framework for .NET 10**, It is not a CSS
+Donkeh is a **declarative-first UI framework for .NET 10**, It is not a CSS
 engine. It ships one. Around that engine it provides a React-like development
 flow (components, hooks, context and keyed reconciliation), built-in devtools
 and performance profiling, and an "as close to a browser as possible" experience
@@ -18,7 +18,7 @@ matches selectors against a DOM-like tree, computes the cascade, lays out boxes
 (block, inline, flex, grid, table and floats), and renders a compact display
 list with OpenGL 3.3 through Silk.NET.
 
-Ignite is split into small, single-responsibility assemblies so a host can use
+Donkeh is split into small, single-responsibility assemblies so a host can use
 only the layers it needs: the dependency-free CSS parser, selector matcher and
 stylesheet compiler, a layout/paint engine, a declarative view layer, a native
 window host, and a devtools inspector.
@@ -63,13 +63,13 @@ renderer. `Donkeh.Inspector` provides the devtools panel.
 - [Design goals](#design-goals)
 - [Repository layout](#repository-layout)
 - [Modules](#modules)
-  - [Donkeh.Parser](#igniteparser)
-  - [Donkeh.Data](#ignitedata)
-  - [Donkeh.DataEngine](#ignitedataengine)
-  - [Donkeh.LayoutLab](#ignitelayoutlab)
-  - [Donkeh.UILab](#igniteuilab)
-  - [Donkeh.Windowing](#ignitewindowing)
-  - [Donkeh.Inspector](#igniteinspector)
+  - [Donkeh.Parser](#Donkehparser)
+  - [Donkeh.Data](#Donkehdata)
+  - [Donkeh.DataEngine](#Donkehdataengine)
+  - [Donkeh.LayoutLab](#Donkehlayoutlab)
+  - [Donkeh.UILab](#Donkehuilab)
+  - [Donkeh.Windowing](#Donkehwindowing)
+  - [Donkeh.Inspector](#Donkehinspector)
   - [Tooling projects](#tooling-projects)
 - [Getting started](#getting-started)
 - [End-to-end example](#end-to-end-example)
@@ -103,7 +103,7 @@ renderer. `Donkeh.Inspector` provides the devtools panel.
 
 ```text
 .
-├── IgniteCSS.sln
+├── DonkehCSS.sln
 ├── README.md                        ← this file
 ├── .github/workflows/publish-nuget.yml
 └── Donkeh/
@@ -240,7 +240,7 @@ arenas, and matches a DOM-like node against them without allocating.
 - Store interned selector token runs, rules and condition trees.
 - Store at-rule records (imports, namespaces, layers, scopes, keyframes,
   descriptors, margin boxes, charsets) for hosts and tooling.
-- Match selectors against `IgniteSupportedDomNode` with full cascade ordering
+- Match selectors against `DonkehSupportedDomNode` with full cascade ordering
   (specificity, source order, layers, conditions).
 - Cache condition evaluation per `(RendererContext, version)`.
 - Provide the mutable DOM adapter consumed by layout, UILab and tests.
@@ -254,7 +254,7 @@ arenas, and matches a DOM-like node against them without allocating.
 | `SelectorRecord` | A selector's token slice, specificity, flags and plan offsets. |
 | `Condition` | A condition prelude, its parent chain and compiled executor. |
 | `MatchedRule` | One matched declaration plus its specificity counts, returned by the matcher. |
-| `IgniteSupportedDomNode` | The DOM node the matcher, layout engine and UILab share. |
+| `DonkehSupportedDomNode` | The DOM node the matcher, layout engine and UILab share. |
 | `RendererContext` | Viewport/orientation snapshot used by media and container queries. |
 | `StreamContext` | Parser-side block/selector stack used by `CssStreamParser`. |
 | `AttributeFilter`, `SelectorPlan`, `SelectorAnalysis` | Pre-parsed attribute filters, compound plans and structural pseudo records. |
@@ -265,7 +265,7 @@ arenas, and matches a DOM-like node against them without allocating.
 using Donkeh.Data;
 using Donkeh.Data.Dom;
 
-var node = new IgniteSupportedDomNode { TagName = "div" };
+var node = new DonkehSupportedDomNode { TagName = "div" };
 node.Id = "card";
 node.AddClass("card");
 node.AddClass("card--featured");
@@ -575,7 +575,7 @@ using static Donkeh.UILab._;
 using static Donkeh.UILab.HtmlHelper;
 
 Node root = Main(new Props { ClassName = "page" },
-    H1(new Props(), Text("Ignite")),
+    H1(new Props(), Text("Donkeh")),
     P(new Props(), Text("Drawn with typed HTML helpers.")),
     Button(new Props
     {
@@ -645,7 +645,7 @@ Hooks are protected methods on `Component`: `State`, `StateWithUpdate`,
 
 ### Donkeh.Windowing
 
-**Summary.** The native host. `IgniteWindow` owns a Silk.NET window, the CSS
+**Summary.** The native host. `DonkehWindow` owns a Silk.NET window, the CSS
 table, a reusable `LayoutEngine`, input routing, text editing, scrolling, form
 controls, image/font caches, the OpenGL renderer and optional devtools.
 
@@ -665,7 +665,7 @@ controls, image/font caches, the OpenGL renderer and optional devtools.
 
 | Type | Purpose |
 | --- | --- |
-| `IgniteWindow` | Window, stylesheet, layout, input, paint and devtools host. |
+| `DonkehWindow` | Window, stylesheet, layout, input, paint and devtools host. |
 | `WindowSettings` | Width, height, title, VSync/frame cap, clear colour, MSAA samples, resizability, fullscreen/frameless/maximized, top-most, transparency, min/max size, icon, on-close callback and devtools dock. |
 | `AudioProps` / `AudioPlayer` | Declarative `<audio>` playback with optional controls, media events and a code-facing transport API. |
 | `VideoProps` / `VideoPlayer` | Declarative `<video>` playback through LibVLC with optional controls, decoded-frame textures, media events and a transport API. |
@@ -684,7 +684,7 @@ using Donkeh.UILab;
 using Donkeh.Windowing;
 using static Donkeh.UILab._;
 
-var window = new IgniteWindow(WindowSettings.Default with
+var window = new DonkehWindow(WindowSettings.Default with
 {
     Width = 1120,
     Height = 760,
@@ -750,7 +750,7 @@ headless GL harnesses (for example an offscreen framebuffer) would be welcome.
 
 **Summary.** The devtools panel and its state model. It renders a live DOM tree,
 a style editor, colour picker, animation browser and performance view, either
-inside an `IgniteWindow` or in a standalone window.
+inside an `DonkehWindow` or in a standalone window.
 
 **Responsibilities**
 
@@ -771,7 +771,7 @@ inside an `IgniteWindow` or in a standalone window.
 | `PerformanceStats` | Frame/layout/paint timing samples and rolling history. |
 | `DevToolsDock`, `DevToolsTab`, `StyleSheetRange` | Layout and navigation enums/records. |
 
-**Usage.** `IgniteWindow` hosts the inspector automatically when
+**Usage.** `DonkehWindow` hosts the inspector automatically when
 `WindowSettings` enables it. A standalone panel can share state:
 
 ```csharp
@@ -819,9 +819,9 @@ a good target for future coverage.
 ### Build and test
 
 ```powershell
-dotnet restore IgniteCSS.sln
-dotnet build IgniteCSS.sln -c Release
-dotnet test IgniteCSS.sln -c Release
+dotnet restore DonkehCSS.sln
+dotnet build DonkehCSS.sln -c Release
+dotnet test DonkehCSS.sln -c Release
 ```
 
 The solution currently runs **1,014 tests**: 42 parser/data/data-engine tests,
@@ -834,7 +834,7 @@ API documentation tools. To force generation for every project (including
 tests and benchmarks):
 
 ```powershell
-dotnet build IgniteCSS.sln -c Release -p:GenerateDocumentationFile=true
+dotnet build DonkehCSS.sln -c Release -p:GenerateDocumentationFile=true
 ```
 
 ---
@@ -848,16 +848,16 @@ using Donkeh.UILab;
 using Donkeh.Windowing;
 using static Donkeh.UILab._;
 
-var window = new IgniteWindow(WindowSettings.Default with
+var window = new DonkehWindow(WindowSettings.Default with
 {
     Width = 900,
     Height = 640,
-    Title = "Ignite"
+    Title = "Donkeh"
 });
 
 window.Run(
     H("main", new Props { ClassName = "page" },
-        H("h1", Text("Ignite")),
+        H("h1", Text("Donkeh")),
         H("p", Text("CSS-driven layout and painting."))),
     """
     .page { max-width: 720px; margin: 48px auto; font-family: sans-serif; }
@@ -918,7 +918,7 @@ dotnet test Donkeh/LayoutLab/Tests --filter "FullyQualifiedName~StyleResolutionT
 ### Coverage
 
 ```powershell
-dotnet test IgniteCSS.sln -c Release --collect:"XPlat Code Coverage"
+dotnet test DonkehCSS.sln -c Release --collect:"XPlat Code Coverage"
 ```
 
 `coverlet.collector` is already referenced by the test projects; results are
@@ -999,7 +999,7 @@ warnings (malformed tags, unknown `cref`s or mismatched `<param>` names).
 
 ## Performance model
 
-Ignite's steady-state rendering behaviour is built around a few invariants:
+Donkeh's steady-state rendering behaviour is built around a few invariants:
 
 1. **Everything is an id.** Strings are interned once; selectors, rules,
    conditions and attributes compare integers.
@@ -1103,8 +1103,8 @@ enabled by default.
 
 1. **Build and test first.**
    ```powershell
-   dotnet build IgniteCSS.sln -c Release
-   dotnet test IgniteCSS.sln -c Release
+   dotnet build DonkehCSS.sln -c Release
+   dotnet test DonkehCSS.sln -c Release
    ```
 2. **Keep layering intact.** `Donkeh.Parser` must stay dependency-free; do not
    make `Donkeh.Data` depend on layout or UI.
@@ -1123,6 +1123,6 @@ enabled by default.
 
 ---
 
-*Ignite is a declarative-first UI framework for .NET, not a WebView. It brings
+*Donkeh is a declarative-first UI framework for .NET, not a WebView. It brings
 the parts of the browser that matter ease of use, components and hooks, form
 controls, devtools and profiling*
