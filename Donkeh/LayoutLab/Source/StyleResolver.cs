@@ -1045,6 +1045,10 @@ public sealed partial class StyleResolver
                 style.TextAlign = ParseTextAlign(value);
                 break;
 
+            case CssProperty.TextIndent:
+                style.TextIndent = ParseLengthCached(valueId, value);
+                break;
+
             case CssProperty.VerticalAlign:
                 style.VerticalAlign = ParseLengthCached(valueId, value);
                 break;

@@ -736,6 +736,7 @@ public sealed partial class LayoutEngine
         hash.Add(style.LineHeight);
         hash.Add(style.LetterSpacing);
         hash.Add(style.TextAlign);
+        hash.Add(style.TextIndent);
         hash.Add(style.WhiteSpace);
         hash.Add(style.OverflowWrap);
         hash.Add(style.TextOverflow);
@@ -2430,6 +2431,7 @@ public sealed partial class LayoutEngine
         OverflowWrap OverflowWrap,
         int LineClamp,
         TextOverflow Overflow,
+        int Indent,
         ITextMeasurer Measurer);
 
     /// <summary>Builds the immutable text style used for measurement and painting.</summary>
@@ -2493,6 +2495,18 @@ public sealed partial class LayoutEngine
         var widthKey = float.IsFinite(maxWidth)
             ? Math.Max(0, (int)MathF.Ceiling(maxWidth * 4))
             : int.MaxValue;
+        var indentContext = CreateContext(style);
+        var firstLineIndent = style.TextIndent.ResolveOr(
+            in indentContext,
+            float.IsFinite(maxWidth) ? maxWidth : 0,
+            0);
+
+        if (!float.IsFinite(firstLineIndent))
+        {
+            firstLineIndent = 0;
+        }
+
+        var indentKey = Math.Max(0, (int)MathF.Ceiling(firstLineIndent * 4));
 
         var key = new TextLayoutKey(
             text,
@@ -2502,6 +2516,7 @@ public sealed partial class LayoutEngine
             style.OverflowWrap,
             style.WebkitLineClamp,
             style.TextOverflow,
+            indentKey,
             _measurer);
 
         var cacheText = _options.EnableCaching && _options.CacheTextLayouts;
@@ -2530,7 +2545,8 @@ public sealed partial class LayoutEngine
             style.WhiteSpace,
             style.OverflowWrap,
             style.WebkitLineClamp,
-            style.TextOverflow);
+            style.TextOverflow,
+            firstLineIndent);
 
         if (cacheText)
         {

@@ -269,6 +269,13 @@ public sealed class ComputedStyle
     /// <summary>Gets or sets the horizontal alignment of text lines; inherited.</summary>
     public TextAlign TextAlign { get; set; } = TextAlign.Start;
 
+    /// <summary>Gets or sets the first-line indentation; inherited.</summary>
+    /// <remarks>
+    /// Stored unresolved so percentages can be resolved against the containing
+    /// block width at layout time.
+    /// </remarks>
+    public CssLength TextIndent { get; set; } = CssLength.Zero;
+
     /// <summary>
     /// Gets or sets the inline vertical offset for an inline-level box.
     /// </summary>
@@ -696,6 +703,7 @@ public sealed class ComputedStyle
         LineHeight = parent.LineHeight;
         LetterSpacing = parent.LetterSpacing;
         TextAlign = parent.TextAlign;
+        TextIndent = parent.TextIndent;
         WhiteSpace = parent.WhiteSpace;
         OverflowWrap = parent.OverflowWrap;
         TextOverflow = parent.TextOverflow;
@@ -892,6 +900,7 @@ public sealed class ComputedStyle
         LineHeight = source.LineHeight;
         LetterSpacing = source.LetterSpacing;
         TextAlign = source.TextAlign;
+        TextIndent = source.TextIndent;
         VerticalAlign = source.VerticalAlign;
         WhiteSpace = source.WhiteSpace;
         TextOverflow = source.TextOverflow;

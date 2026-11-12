@@ -180,6 +180,8 @@ public enum CssProperty : ushort
     LetterSpacing,
     /// <summary><c>text-align</c>.</summary>
     TextAlign,
+    /// <summary><c>text-indent</c>.</summary>
+    TextIndent,
     /// <summary><c>vertical-align</c>.</summary>
     VerticalAlign,
     /// <summary><c>text-decoration</c>; shorthand for line, style, colour and thickness.</summary>
@@ -497,6 +499,7 @@ public static class CssPropertyIds
             ("line-height", CssProperty.LineHeight),
             ("letter-spacing", CssProperty.LetterSpacing),
             ("text-align", CssProperty.TextAlign),
+            ("text-indent", CssProperty.TextIndent),
             ("vertical-align", CssProperty.VerticalAlign),
             ("text-decoration", CssProperty.TextDecoration),
             ("text-decoration-line", CssProperty.TextDecorationLine),

@@ -1068,7 +1068,8 @@ units.
 
 **Painting.** Background colours/images/gradients, borders, corner radii,
 shadows (outer and inset), outlines, transforms, opacity, filters, clip paths,
-masks, blend modes, text decoration and images with `object-fit`.
+masks, blend modes, text decoration, first-line `text-indent` and images with
+`object-fit`.
 
 **Animation.** Keyframe animations with delay, iteration, direction and fill
 modes; layout-changing and paint-only animations are distinguished so a

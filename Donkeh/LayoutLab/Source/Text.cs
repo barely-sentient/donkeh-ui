@@ -207,6 +207,10 @@ public sealed class TextLine
     /// <summary>Gets or initialises the horizontal offset from the layout origin, in CSS pixels.</summary>
     public float X { get; init; }
 
+    /// <summary>Gets or initialises the first-line indent applied before alignment, in CSS pixels.</summary>
+    /// <remarks>Zero for every line except the first line of an indented block.</remarks>
+    public float Indent { get; init; }
+
     /// <summary>Gets or initialises the top offset from the layout origin, in CSS pixels.</summary>
     public float Y { get; init; }
 
@@ -289,6 +293,10 @@ public static class TextLayoutEngine
     /// <param name="overflowWrap">Whether an overlong word may be broken between characters.</param>
     /// <param name="lineClamp">The maximum number of lines; values of zero or less mean unlimited.</param>
     /// <param name="textOverflow">Whether an overflowing line is clipped or shortened with an ellipsis.</param>
+    /// <param name="firstLineIndent">
+    /// Extra inset applied to the first emitted line, in CSS pixels. It reduces
+    /// that line's available width so wrapping accounts for the indent.
+    /// </param>
     /// <returns>The positioned lines together with their overall size and truncation state.</returns>
     /// <remarks>
     /// <para>
@@ -343,7 +351,8 @@ public static class TextLayoutEngine
         WhiteSpace whiteSpace,
         OverflowWrap overflowWrap,
         int lineClamp,
-        TextOverflow textOverflow)
+        TextOverflow textOverflow,
+        float firstLineIndent = 0)
     {
         if (string.IsNullOrEmpty(text))
         {
@@ -382,9 +391,21 @@ public static class TextLayoutEngine
                 break;
             }
 
+            var indent = lines.Count == 0 ? MathF.Max(0, firstLineIndent) : 0;
+
             if (!wrap || !float.IsFinite(maxWidth) || maxWidth <= 0)
             {
-                AddLine(lines, paragraph, style, measurer, maxWidth, lineHeight, textOverflow, maxLines, ref truncated);
+                AddLine(
+                    lines,
+                    paragraph,
+                    style,
+                    measurer,
+                    maxWidth,
+                    lineHeight,
+                    textOverflow,
+                    maxLines,
+                    ref truncated,
+                    indent);
                 continue;
             }
 
@@ -398,7 +419,8 @@ public static class TextLayoutEngine
                 overflowWrap,
                 textOverflow,
                 maxLines,
-                ref truncated);
+                ref truncated,
+                indent);
         }
 
         if (lines.Count == 0)
@@ -418,14 +440,20 @@ public static class TextLayoutEngine
         {
             var line = lines[i];
             var lineWidth = line.Width;
-            width = MathF.Max(width, lineWidth);
-            var x = Align(lineWidth, maxWidth, style.Align, style.Direction);
+            var indent = line.Indent;
+            var available = float.IsFinite(maxWidth)
+                ? MathF.Max(0, maxWidth - indent)
+                : maxWidth;
+
+            width = MathF.Max(width, indent + lineWidth);
+            var x = indent + Align(lineWidth, available, style.Align, style.Direction);
             lines[i] = new TextLine
             {
                 Text = line.Text,
                 X = x,
                 Y = y,
                 Width = lineWidth,
+                Indent = indent,
                 Height = lineHeight,
                 Baseline = line.Baseline,
                 IsTruncated = line.IsTruncated
@@ -683,6 +711,7 @@ public static class TextLayoutEngine
     /// <param name="textOverflow">Whether an overlong line is clipped or shortened with an ellipsis.</param>
     /// <param name="maxLines">The line clamp, or <see cref="int.MaxValue"/> for unlimited.</param>
     /// <param name="truncated">Set when the clamp stops wrapping early.</param>
+    /// <param name="firstLineIndent">Indent applied to the first emitted line only.</param>
     /// <remarks>
     /// Break opportunities are spaces, tabs, hyphens, slashes, the soft hyphen
     /// and the end of the text. When a candidate is too wide the last good break
@@ -701,10 +730,12 @@ public static class TextLayoutEngine
         OverflowWrap overflowWrap,
         TextOverflow textOverflow,
         int maxLines,
-        ref bool truncated)
+        ref bool truncated,
+        float firstLineIndent = 0)
     {
         var start = 0;
         var lastBreak = -1;
+        var lineIndent = MathF.Max(0, firstLineIndent);
 
         for (var i = 0; i <= paragraph.Length; i++)
         {
@@ -750,13 +781,23 @@ public static class TextLayoutEngine
                 paragraph.AsSpan(start, Math.Max(0, measureEnd - start)),
                 in style).Width;
 
-            if (width <= maxWidth)
+            if (width <= MathF.Max(0, maxWidth - lineIndent))
             {
                 lastBreak = candidateEnd;
 
                 if (atEnd)
                 {
-                    EmitLine(lines, paragraph[start..candidateEnd].TrimEnd(), style, measurer, maxWidth, lineHeight, textOverflow, maxLines, ref truncated);
+                    EmitLine(
+                        lines,
+                        paragraph[start..candidateEnd].TrimEnd(),
+                        style,
+                        measurer,
+                        maxWidth,
+                        lineHeight,
+                        textOverflow,
+                        maxLines,
+                        ref truncated,
+                        lineIndent);
                     return;
                 }
 
@@ -776,8 +817,10 @@ public static class TextLayoutEngine
                     lineHeight,
                     textOverflow,
                     maxLines,
-                    ref truncated);
+                    ref truncated,
+                    lineIndent);
 
+                lineIndent = 0;
                 start = lastBreak;
 
                 while (start < paragraph.Length && paragraph[start] is ' ' or '\t')
@@ -804,8 +847,10 @@ public static class TextLayoutEngine
                     lineHeight,
                     textOverflow,
                     maxLines,
-                    ref truncated);
+                    ref truncated,
+                    lineIndent);
 
+                lineIndent = 0;
                 start = i;
                 lastBreak = -1;
                 i = start - 1;
@@ -821,7 +866,7 @@ public static class TextLayoutEngine
                 {
                     var test = paragraph[start..end];
 
-                    if (measurer.Measure(test, in style).Width > maxWidth)
+                    if (measurer.Measure(test, in style).Width > MathF.Max(0, maxWidth - lineIndent))
                     {
                         break;
                     }
@@ -838,8 +883,10 @@ public static class TextLayoutEngine
                     lineHeight,
                     textOverflow,
                     maxLines,
-                    ref truncated);
+                    ref truncated,
+                    lineIndent);
 
+                lineIndent = 0;
                 start = end;
                 lastBreak = -1;
                 i = start - 1;
@@ -857,7 +904,8 @@ public static class TextLayoutEngine
                 lineHeight,
                 textOverflow,
                 maxLines,
-                ref truncated);
+                ref truncated,
+                lineIndent);
         }
     }
 
@@ -871,6 +919,7 @@ public static class TextLayoutEngine
     /// <param name="overflow">The overflow mode.</param>
     /// <param name="maxLines">The line clamp, or <see cref="int.MaxValue"/> for unlimited.</param>
     /// <param name="truncated">Set when the clamp stops emission.</param>
+    /// <param name="indent">Indent applied before alignment, in CSS pixels.</param>
     private static void AddLine(
         List<TextLine> lines,
         string text,
@@ -880,7 +929,8 @@ public static class TextLayoutEngine
         float lineHeight,
         TextOverflow overflow,
         int maxLines,
-        ref bool truncated)
+        ref bool truncated,
+        float indent = 0)
     {
         if (lines.Count >= maxLines)
         {
@@ -888,7 +938,17 @@ public static class TextLayoutEngine
             return;
         }
 
-        EmitLine(lines, text, style, measurer, maxWidth, lineHeight, overflow, maxLines, ref truncated);
+        EmitLine(
+            lines,
+            text,
+            style,
+            measurer,
+            maxWidth,
+            lineHeight,
+            overflow,
+            maxLines,
+            ref truncated,
+            indent);
     }
 
     /// <summary>Creates and appends a <see cref="TextLine"/> with no horizontal placement.</summary>
@@ -901,6 +961,7 @@ public static class TextLayoutEngine
     /// <param name="overflow">The overflow mode.</param>
     /// <param name="maxLines">The line clamp, or <see cref="int.MaxValue"/> for unlimited.</param>
     /// <param name="truncated">Set when the clamp or ellipsis truncates content.</param>
+    /// <param name="indent">Indent applied before alignment, in CSS pixels.</param>
     /// <remarks>
     /// <see cref="TextLine.X"/> and <see cref="TextLine.Y"/> stay at zero here;
     /// the caller assigns them once the full line count is known. Ellipsis
@@ -915,7 +976,8 @@ public static class TextLayoutEngine
         float lineHeight,
         TextOverflow overflow,
         int maxLines,
-        ref bool truncated)
+        ref bool truncated,
+        float indent = 0)
     {
         if (lines.Count >= maxLines)
         {
@@ -923,13 +985,16 @@ public static class TextLayoutEngine
             return;
         }
 
+        var available = float.IsFinite(maxWidth)
+            ? MathF.Max(0, maxWidth - indent)
+            : maxWidth;
         var width = measurer.Measure(text, in style).Width;
 
-        if (overflow == TextOverflow.Ellipsis && float.IsFinite(maxWidth) && width > maxWidth)
+        if (overflow == TextOverflow.Ellipsis && float.IsFinite(available) && width > available)
         {
             var ellipsis = "\u2026";
             var ellipsisWidth = measurer.Measure(ellipsis, in style).Width;
-            var target = MathF.Max(0, maxWidth - ellipsisWidth);
+            var target = MathF.Max(0, available - ellipsisWidth);
             var end = text.Length;
 
             while (end > 0 && measurer.Measure(text.AsSpan(0, end), in style).Width > target)
@@ -946,6 +1011,7 @@ public static class TextLayoutEngine
         {
             Text = text,
             Width = width,
+            Indent = indent,
             Height = lineHeight,
             Baseline = lineHeight * 0.8f,
             IsTruncated = truncated
