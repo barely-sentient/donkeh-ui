@@ -106,6 +106,73 @@ var theme = UseContext(AppContext.Theme);
 return H("div", Text(theme));
 ```
 
+## Routing
+
+`AppRouter` owns a page path and publishes it through `Router.Path` and
+`Router.SetPage`. `AppRoutes` picks the first matching `Route`; `Link` updates the
+page without browser navigation. Import `Donkeh.UILab.Routing` for the short
+factories.
+
+```csharp
+using Donkeh.UILab;
+using static Donkeh.UILab._;
+using static Donkeh.UILab.Routing;
+
+var app = AppRouter("/",
+    AppRoutes(
+        Route("/", H("h1", Text("Home"))),
+        Route("/about", H("p", Text("About"))),
+        Route("/docs/*", Text("Docs section")),
+        Route("*", Text("Not found"))));
+
+renderer.Mount(app);
+```
+
+`Route` supports exact paths, trailing `/*` prefixes and a `*` catch-all. Use the
+props form when you need a fallback or active-link classes:
+
+```csharp
+C<AppRouter>(new AppRouterProps
+{
+    InitialPath = "/",
+    Children =
+    [
+        C<AppRoutes>(new AppRoutesProps
+        {
+            Fallback = Text("Not found"),
+            Children =
+            [
+                C<Route>(new RouteProps { Path = "/", Children = [Text("Home")] }),
+                C<Route>(new RouteProps { Path = "/about", Children = [Text("About")] })
+            ]
+        })
+    ]
+});
+```
+
+Navigate from anywhere under the router:
+
+```csharp
+public sealed class SaveButton : Component
+{
+    public override Node Render()
+    {
+        var setPage = UseContext(Router.SetPage);
+        return H("button", Text("Done")).OnClick(() => setPage("/done"));
+    }
+}
+```
+
+Links render an `<a>`, call `Router.SetPage` on click and add the `active` class
+while their path is the current section:
+
+```csharp
+Link("/about", Text("About"));
+```
+
+`AppRouter` does not touch the URL bar or browser history. A host can persist the
+path or drive navigation by publishing its own `Router.SetPage` provider.
+
 ## Lists, fragments and keys
 
 ```csharp

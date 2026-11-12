@@ -542,6 +542,7 @@ offers components, hooks, context and stylesheet attachment.
 | `Component` / `Component<TProps>` | Lifecycle and typed props. |
 | `Renderer` | `Mount`, `Flush`, `FindComponent<T>`, `Version`, `AutoFlush`. |
 | `Ref<T>`, `Context<T>` | Mutable refs and context values. |
+| `AppRouter`, `AppRoutes`, `Route`, `Link` | In-app path routing with context-driven navigation. |
 | `Stylesheet` / `StylesheetAttribute` | CSS loading and embedded-resource declarations. |
 
 **Usage**
@@ -617,6 +618,26 @@ Hooks are protected methods on `Component`: `State`, `StateWithUpdate`,
 `UseContext`. Lifecycle overrides are `OnMount`, `OnUpdate`, `OnUnmount` and
 `ShouldRender`.
 
+Routing is built on the same context system:
+
+```csharp
+using static Donkeh.UILab.Routing;
+
+var app = AppRouter("/",
+    AppRoutes(
+        Route("/", H("h1", Text("Home"))),
+        Route("/about", H("p", Text("About"))),
+        Route("/docs/*", Text("Docs")),
+        Route("*", Text("Not found"))));
+
+renderer.Mount(app);
+```
+
+`Link("/about", Text("About"))` changes the page through `Router.SetPage`.
+Components can navigate directly with
+`var setPage = UseContext(Router.SetPage);`. See
+[Donkeh.UILab](Donkeh/UILab/Source/README.md#routing) for the full API.
+
 **Remarks**
 
 - Hooks must run in the **same order every render**; the runtime enforces this
@@ -640,6 +661,7 @@ Hooks are protected methods on `Component`: `State`, `StateWithUpdate`,
 | --- | --- | --- | --- |
 | `Donkeh/UILab/Tests` | `BuilderTests` | 6 | Attribute interning, nested children, props/events, empty attributes, text folding, mixed content, fragments. |
 | `Donkeh/UILab/Tests` | `ComponentTests` | 7 | In-place state patching, keyed reorder reuse, effects updating state, context, no-op state, unchanged-child revisions, functional updates. |
+| `Donkeh/UILab/Tests` | `RouterTests` | 17 | Route matching, wildcard and fallback routes, link activation, `SetPage` navigation, path normalisation. |
 
 ---
 
@@ -824,8 +846,8 @@ dotnet build Donkeh.sln -c Release
 dotnet test Donkeh.sln -c Release
 ```
 
-The solution currently runs **1,014 tests**: 42 parser/data/data-engine tests,
-959 layout tests and 13 UILab tests.
+The solution currently runs **over 1,100 tests** across the parser/data,
+layout and UILab test projects.
 
 Library projects enable `GenerateDocumentationFile`, so the build emits an
 `.xml` file beside every assembly and `dotnet pack` includes it in the NuGet
@@ -893,7 +915,7 @@ var result = engine.Layout(documentRoot, new LayoutOptions
 | --- | --- | ---: | --- |
 | `Donkeh/Parser/Tests` | xUnit | 42 | `Donkeh.Parser`, `Donkeh.Data`, `Donkeh.DataEngine` |
 | `Donkeh/LayoutLab/Tests` | xUnit | 959 | `Donkeh.LayoutLab` (plus `Donkeh.Data` / `Donkeh.DataEngine` integration) |
-| `Donkeh/UILab/Tests` | xUnit | 13 | `Donkeh.UILab` |
+| `Donkeh/UILab/Tests` | xUnit | 30 | `Donkeh.UILab` |
 
 ### Module → test matrix
 
@@ -903,7 +925,7 @@ var result = engine.Layout(documentRoot, new LayoutOptions
 | `Donkeh.Data` | `MatchingTests`, `InteractionPseudoTests` | `StyleResolutionTests`, `LayoutCachingTests`, `BootstrapCompatibilityTests`. |
 | `Donkeh.DataEngine` | `DataEngineTests`, `MediaConditionTests` | Every LayoutLab fixture builds its stylesheet through `DataEngine`. |
 | `Donkeh.LayoutLab` | 26 classes, 959 tests | `UILab` tests assert layout-facing node revisions. |
-| `Donkeh.UILab` | `BuilderTests`, `ComponentTests` | — |
+| `Donkeh.UILab` | `BuilderTests`, `ComponentTests`, `RouterTests` | — |
 | `Donkeh.Windowing` | none (requires GPU/window) | Consumes LayoutLab output; manual verification. |
 | `Donkeh.Inspector` | none | Manual verification; `ColorPreview` is unit-testable. |
 
