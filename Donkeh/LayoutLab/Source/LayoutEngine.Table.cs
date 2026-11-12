@@ -70,11 +70,18 @@ public sealed partial class LayoutEngine
             ? 0
             : MathF.Max(0, style.BorderSpacing.ResolveOr(in context, content.Width, 0));
 
-        // Halving each cell border once, before either measurement pass, keeps
-        // adjacent collapsed edges from doubling and avoids halving twice.
+        // In collapsed mode every cell paints its top and left edge; internal
+        // right/bottom edges are made transparent because the next cell paints
+        // the same physical line. This keeps one crisp border instead of two
+        // half-width lines.
         for (var i = 0; i < placements.Count; i++)
         {
-            ApplyCollapsedCellStyle(placements[i].Cell, collapse, content.Width);
+            var placement = placements[i];
+            ApplyCollapsedCellStyle(
+                placement.Cell,
+                collapse,
+                lastColumn: placement.Column + placement.ColumnSpan >= columnCount,
+                lastRow: placement.Row + placement.RowSpan >= rows.Count);
         }
 
         var widths = new float[columnCount];
@@ -436,29 +443,39 @@ public sealed partial class LayoutEngine
         return total;
     }
 
-    /// <summary>Halves a cell's border widths when the table collapses borders.</summary>
-    private void ApplyCollapsedCellStyle(LayoutBox cell, bool collapse, float cbWidth)
+    /// <summary>Suppresses internal cell edges when the table collapses borders.</summary>
+    /// <param name="cell">Cell whose style may be cloned.</param>
+    /// <param name="collapse">Whether the table uses <c>border-collapse: collapse</c>.</param>
+    /// <param name="lastColumn">Whether the cell ends at the table's right edge.</param>
+    /// <param name="lastRow">Whether the cell ends at the table's bottom edge.</param>
+    /// <remarks>
+    /// Layout keeps the full border width; only the painted colour of shared
+    /// right/bottom edges becomes transparent, because the next cell paints its
+    /// own left/top border at the same physical line.
+    /// </remarks>
+    private void ApplyCollapsedCellStyle(
+        LayoutBox cell,
+        bool collapse,
+        bool lastColumn,
+        bool lastRow)
     {
-        if (!collapse)
+        if (!collapse || (lastColumn && lastRow))
         {
             return;
         }
 
-        var style = cell.Style;
-        var context = CreateContext(style);
-        var widths = style.BorderWidth.Resolve(in context, cbWidth);
+        var clone = cell.Style.Clone();
 
-        if (widths.Top <= 0 && widths.Right <= 0 && widths.Bottom <= 0 && widths.Left <= 0)
+        if (!lastColumn)
         {
-            return;
+            clone.BorderColorRight = CssColor.Transparent;
         }
 
-        var clone = style.Clone();
-        clone.BorderWidth = new CssLength4(
-            CssLength.Px(widths.Top * 0.5f),
-            CssLength.Px(widths.Right * 0.5f),
-            CssLength.Px(widths.Bottom * 0.5f),
-            CssLength.Px(widths.Left * 0.5f));
+        if (!lastRow)
+        {
+            clone.BorderColorBottom = CssColor.Transparent;
+        }
+
         cell.Style = clone;
     }
 

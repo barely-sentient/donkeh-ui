@@ -115,14 +115,14 @@ public class TableLayoutTests
 
         var result = Lay(
             TableCss
-            + " #root { width: 204px; border-collapse: collapse; border-spacing: 10px; }"
+            + " #root { width: 208px; border-collapse: collapse; border-spacing: 10px; }"
             + " #a, #b { width: 100px; height: 20px; border: 2px solid #000; }",
             root);
 
-        // Each collapsed edge paints half, so the border box is 102px wide and
-        // the next cell starts immediately after it.
-        Assert.Equal(102, TestSupport.Box(result, a).BorderBox.Width, 3);
-        Assert.Equal(102, TestSupport.Box(result, b).BorderBox.X, 3);
+        // Shared internal edges are painted once by the following cell, so the
+        // full 2px border remains and the next cell starts immediately after it.
+        Assert.Equal(104, TestSupport.Box(result, a).BorderBox.Width, 3);
+        Assert.Equal(104, TestSupport.Box(result, b).BorderBox.X, 3);
     }
 
     [Fact]
