@@ -238,5 +238,58 @@ namespace Donkeh.UILab
         /// fresh Silk.NET OpenGL context scoped to that element's bounds.
         /// </summary>
         public Delegate? OnCanvasContext { get; init; }
+
+        /// <summary>
+        /// Gets or sets whether an <c>audio</c> element paints its built-in
+        /// transport controls.
+        /// </summary>
+        public bool? Controls { get; init; }
+
+        /// <summary>Gets or sets whether an <c>audio</c> element starts playing automatically.</summary>
+        public bool? AutoPlay { get; init; }
+
+        /// <summary>Alias for <see cref="AutoPlay"/>.</summary>
+        public bool? Autoplay
+        {
+            get => AutoPlay;
+            init => AutoPlay = value;
+        }
+
+        /// <summary>Gets or sets whether an <c>audio</c> element loops when it reaches the end.</summary>
+        public bool? Loop { get; init; }
+
+        /// <summary>Gets or sets whether an <c>audio</c> element starts muted.</summary>
+        public bool? Muted { get; init; }
+
+        /// <summary>
+        /// Gets or sets the initial <c>audio</c> volume in the range 0 to 1.
+        /// </summary>
+        public float? Volume { get; init; }
+
+        /// <summary>
+        /// Gets or sets the initial <c>audio</c> playback rate. One is normal speed.
+        /// </summary>
+        public float? PlaybackRate { get; init; }
+
+        /// <summary>Handler for the <c>play</c> event of an <c>audio</c> element.</summary>
+        public Action? OnPlay { get; init; }
+
+        /// <summary>Handler for the <c>pause</c> event of an <c>audio</c> element.</summary>
+        public Action? OnPause { get; init; }
+
+        /// <summary>Handler for the <c>ended</c> event of an <c>audio</c> element.</summary>
+        public Action? OnEnded { get; init; }
+
+        /// <summary>
+        /// Handler for the <c>timeupdate</c> event of an <c>audio</c> element. The
+        /// argument is the current playback position in seconds.
+        /// </summary>
+        public Action<float>? OnTimeUpdate { get; init; }
+
+        /// <summary>
+        /// Handler invoked when an <c>audio</c> element's player has been created.
+        /// The argument is the window-side <c>AudioPlayer</c> control surface.
+        /// </summary>
+        public Delegate? OnAudioReady { get; init; }
     }
 }

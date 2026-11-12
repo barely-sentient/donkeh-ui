@@ -631,6 +631,7 @@ controls, image/font caches, the OpenGL renderer and optional devtools.
 | --- | --- |
 | `IgniteWindow` | Window, stylesheet, layout, input, paint and devtools host. |
 | `WindowSettings` | Width, height, title, VSync/frame cap, clear colour, MSAA samples, resizability, fullscreen/frameless/maximized, top-most, transparency, min/max size, icon, on-close callback and devtools dock. |
+| `AudioProps` / `AudioPlayer` | Declarative `<audio>` playback with optional controls, media events and a code-facing transport API. |
 | `GLRenderer` | Batched OpenGL consumer of `InstructionBuffer` + `ConstantPool`. |
 | `FontManager` | System TrueType discovery, face/atlas caches, metrics. |
 | `TrueTypeTextMeasurer` | `ITextMeasurer` adapter over `FontManager`. |

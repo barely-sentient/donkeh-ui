@@ -209,6 +209,12 @@ namespace Donkeh.UILab
         /// </summary>
         public Delegate? CanvasContextHandler { get; set; }
 
+        /// <summary>
+        /// Handler invoked when the host creates an audio player for an
+        /// <c>audio</c> element. <see langword="null"/> for other elements.
+        /// </summary>
+        public Delegate? AudioReadyHandler { get; set; }
+
         /// <summary>The tag name this element was created with.</summary>
         /// <value>
         /// The original case-preserved tag text, or an empty string when the
@@ -400,6 +406,61 @@ namespace Donkeh.UILab
             if (props.OnCanvasContext is { } canvasContext)
             {
                 CanvasContextHandler = canvasContext;
+            }
+
+            if (props.Controls is true)
+            {
+                AddStringAttribute("controls", string.Empty);
+            }
+
+            if (props.AutoPlay is true)
+            {
+                AddStringAttribute("autoplay", string.Empty);
+            }
+
+            if (props.Loop is true)
+            {
+                AddStringAttribute("loop", string.Empty);
+            }
+
+            if (props.Muted is true)
+            {
+                AddStringAttribute("muted", string.Empty);
+            }
+
+            if (props.Volume is { } volume)
+            {
+                AddStringAttribute("volume", volume.ToString(CultureInfo.InvariantCulture));
+            }
+
+            if (props.PlaybackRate is { } playbackRate)
+            {
+                AddStringAttribute("playbackrate", playbackRate.ToString(CultureInfo.InvariantCulture));
+            }
+
+            if (props.OnPlay is { } onPlay)
+            {
+                On("play", onPlay);
+            }
+
+            if (props.OnPause is { } onPause)
+            {
+                On("pause", onPause);
+            }
+
+            if (props.OnEnded is { } onEnded)
+            {
+                On("ended", onEnded);
+            }
+
+            if (props.OnTimeUpdate is { } onTimeUpdate)
+            {
+                On("timeupdate", onTimeUpdate);
+            }
+
+            if (props.OnAudioReady is { } audioReady)
+            {
+                AudioReadyHandler = audioReady;
             }
         }
 

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Numerics;
 using Donkeh.Data;
 using Donkeh.Data.Dom;
@@ -68,6 +69,15 @@ public sealed partial class IgniteWindow : IDisposable
 
     /// <summary>Reentrancy guard for min/max size clamping in <see cref="OnResize"/>.</summary>
     private bool _clampingSize;
+
+    /// <summary>Shared audio engine and per-element players, created on demand.</summary>
+    private AudioHost? _audioHost;
+
+    /// <summary>Previous playing state per audio element, used to raise play/pause events.</summary>
+    private readonly Dictionary<ElementNode, bool> _audioWasPlaying = [];
+
+    /// <summary>Scratch set of audio elements present in the current layout.</summary>
+    private readonly HashSet<ElementNode> _audioLive = [];
 
     /// <summary>Author stylesheets in cascade order; the last one wins on ties.</summary>
     private readonly List<string> _stylesheets = [];
@@ -421,6 +431,9 @@ public sealed partial class IgniteWindow : IDisposable
 
     /// <summary>Active thumb drag on a native scrollbar, if any.</summary>
     private ScrollbarDrag? _scrollDrag;
+
+    /// <summary>Audio element whose progress thumb is being dragged, if any.</summary>
+    private ElementNode? _audioSeekElement;
 
     /// <summary>
     /// Creates the window controller, its text measurer and the initial CSS
@@ -999,6 +1012,129 @@ public sealed partial class IgniteWindow : IDisposable
     }
 
     /// <summary>
+    /// Creates or updates one audio player per <c>audio</c> element, dispatches
+    /// its media events and keeps the controls repainting while it plays.
+    /// </summary>
+    private void SyncAudioElements()
+    {
+        if (_layoutResult?.Root is null)
+        {
+            return;
+        }
+
+        _audioLive.Clear();
+
+        foreach (var box in EnumerateLayoutBoxes(_layoutResult.Root))
+        {
+            if (box.Node is not ElementNode element
+                || !string.Equals(element.Tag, "audio", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var source = GetAttribute(element, "src");
+
+            if (string.IsNullOrWhiteSpace(source))
+            {
+                continue;
+            }
+
+            _audioLive.Add(element);
+
+            var options = new AudioElementOptions(
+                source,
+                element.TryGetAttribute("autoplay", out var ignoredAutoplay),
+                element.TryGetAttribute("loop", out var ignoredLoop),
+                element.TryGetAttribute("muted", out var ignoredMuted),
+                ReadFloatAttribute(element, "volume", 1f),
+                ReadFloatAttribute(element, "playbackrate", 1f));
+
+            _audioHost ??= new AudioHost();
+            var known = _audioHost.GetPlayer(element) is not null;
+            var player = _audioHost.Ensure(element, options);
+
+            if (player is null)
+            {
+                continue;
+            }
+
+            if (!known && element.AudioReadyHandler is { } ready)
+            {
+                try { ready.DynamicInvoke(player); }
+                catch { }
+            }
+
+            var ended = _audioHost.ConsumeEnded(element);
+
+            if (ended)
+            {
+                Invoke(element, "ended");
+                _audioWasPlaying[element] = false;
+            }
+
+            var playing = player.IsPlaying;
+
+            if (!ended
+                && _audioWasPlaying.TryGetValue(element, out var wasPlaying)
+                && wasPlaying != playing)
+            {
+                Invoke(element, playing ? "play" : "pause");
+            }
+
+            _audioWasPlaying[element] = playing;
+
+            if (playing)
+            {
+                _needsPaint = true;
+
+                if (element.TryGetEventHandler("timeupdate", out var handler)
+                    && handler is Action<float> timeUpdate)
+                {
+                    try { timeUpdate(player.Time); }
+                    catch { }
+                }
+            }
+        }
+
+        _audioHost?.Prune(_audioLive);
+
+        if (_audioSeekElement is not null && !_audioLive.Contains(_audioSeekElement))
+        {
+            _audioSeekElement = null;
+        }
+
+        if (_audioWasPlaying.Count > 0)
+        {
+            List<ElementNode>? stale = null;
+
+            foreach (var element in _audioWasPlaying.Keys)
+            {
+                if (!_audioLive.Contains(element))
+                {
+                    (stale ??= []).Add(element);
+                }
+            }
+
+            if (stale is not null)
+            {
+                foreach (var element in stale)
+                {
+                    _audioWasPlaying.Remove(element);
+                }
+            }
+        }
+    }
+
+    /// <summary>Reads a float attribute with an invariant fallback.</summary>
+    private static float ReadFloatAttribute(ElementNode element, string name, float fallback)
+    {
+        return element.TryGetAttribute(name, out var value)
+            && float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : fallback;
+    }
+
+    /// <summary>
     /// Walks the current layout tree and lets every <c>canvas</c> element render
     /// into its own bounds using a fresh Silk.NET OpenGL context.
     /// </summary>
@@ -1150,6 +1286,7 @@ public sealed partial class IgniteWindow : IDisposable
         LastUpdateMilliseconds = Stopwatch.GetElapsedTime(flushStart).TotalMilliseconds;
 
         UpdateDevTools(delta);
+        SyncAudioElements();
 
         var size = _window.Size;
         var framebuffer = _window.FramebufferSize;
@@ -3010,6 +3147,13 @@ public sealed partial class IgniteWindow : IDisposable
                     HtmlDefaults.AttributeLength(element, "width", 300),
                     HtmlDefaults.AttributeLength(element, "height", 150));
 
+            case "audio":
+                return element.TryGetAttribute("controls", out var ignoredAudioControls)
+                    ? new Size(
+                        HtmlDefaults.AttributeLength(element, "width", 300),
+                        HtmlDefaults.AttributeLength(element, "height", 54))
+                    : new Size(0, 0);
+
             case "video":
             case "iframe":
             case "object":
@@ -3301,7 +3445,222 @@ public sealed partial class IgniteWindow : IDisposable
             case "meter":
                 PaintProgress(box, instructions, constants, element);
                 break;
+
+            case "audio":
+                PaintAudioControls(box, element, instructions, constants);
+                break;
         }
+    }
+
+    /// <summary>
+    /// Paints the optional transport bar of an <c>audio</c> element: a
+    /// play/pause button, a clickable progress bar and elapsed/total time.
+    /// </summary>
+    private void PaintAudioControls(
+        LayoutBox box,
+        ElementNode element,
+        InstructionBuffer instructions,
+        ConstantPool constants)
+    {
+        if (!element.TryGetAttribute("controls", out var ignoredControls))
+        {
+            return;
+        }
+
+        var (bar, button, progress) = GetAudioControlRects(box);
+
+        if (bar.Width <= 0 || bar.Height <= 0)
+        {
+            return;
+        }
+
+        var player = _audioHost?.GetPlayer(element);
+        var playing = player?.IsPlaying == true;
+        var time = player?.Time ?? 0;
+        var duration = player?.Duration ?? 0;
+
+        instructions.AddDrawRect(bar, 0xFFF6F8FA);
+        instructions.AddDrawRect(new Rect(bar.X, bar.Y, bar.Width, 1), 0xFFD0D7DE);
+
+        var iconStyle = TextStyle.Default with
+        {
+            FontFamily = box.Style.FontFamily,
+            FontSize = MathF.Max(10, button.Height * 0.8f),
+            LineHeight = button.Height,
+            Color = 0xFF212529
+        };
+        var icon = constants.AddText(playing ? "❚❚" : "▶", iconStyle);
+        instructions.Add(Instruction.DrawText(button, icon));
+
+        instructions.AddDrawRect(progress, 0xFFD0D7DE);
+
+        var fraction = duration > 0 ? Math.Clamp(time / duration, 0f, 1f) : 0f;
+
+        if (fraction > 0)
+        {
+            instructions.AddDrawRect(
+                new Rect(progress.X, progress.Y, progress.Width * fraction, progress.Height),
+                0xFF0969DA);
+        }
+
+        var thumbSize = MathF.Max(8f, progress.Height * 2.5f);
+        instructions.AddDrawRect(
+            new Rect(
+                progress.X + progress.Width * fraction - thumbSize / 2f,
+                progress.Y - (thumbSize - progress.Height) / 2f,
+                thumbSize,
+                thumbSize),
+            0xFF0969DA);
+
+        var label = $"{FormatAudioTime(time)} / {FormatAudioTime(duration)}";
+        var labelStyle = TextStyle.Default with
+        {
+            FontFamily = box.Style.FontFamily,
+            FontSize = 11,
+            LineHeight = bar.Height,
+            Color = 0xFF57606A
+        };
+        var labelId = constants.AddText(label, labelStyle);
+        var labelX = progress.X + progress.Width + 8;
+        var labelWidth = MathF.Max(0, bar.X + bar.Width - labelX - 8);
+
+        if (labelWidth > 0)
+        {
+            instructions.Add(Instruction.DrawText(
+                new Rect(labelX, bar.Y, labelWidth, bar.Height),
+                labelId));
+        }
+    }
+
+    /// <summary>Computes the transport-bar, button and progress rects for an audio box.</summary>
+    private static (Rect Bar, Rect Button, Rect Progress) GetAudioControlRects(LayoutBox box)
+    {
+        var rect = PaintedBorderBox(box);
+        var barHeight = MathF.Min(rect.Height, 48f);
+        var bar = new Rect(rect.X, rect.Y + rect.Height - barHeight, rect.Width, barHeight);
+        var buttonSize = MathF.Min(24f, MathF.Max(12f, barHeight - 12f));
+        var button = new Rect(
+            rect.X + 12f,
+            bar.Y + (barHeight - buttonSize) / 2f,
+            buttonSize,
+            buttonSize);
+        var progressX = button.X + button.Width + 12f;
+        const float labelWidth = 96f;
+        var progressWidth = MathF.Max(0f, rect.X + rect.Width - 12f - labelWidth - progressX);
+        var progress = new Rect(progressX, bar.Y + barHeight / 2f - 2f, progressWidth, 4f);
+        return (bar, button, progress);
+    }
+
+    /// <summary>Formats a duration as <c>m:ss</c> for the audio control bar.</summary>
+    private static string FormatAudioTime(float seconds)
+    {
+        if (float.IsNaN(seconds) || seconds <= 0)
+        {
+            return "0:00";
+        }
+
+        var total = (int)seconds;
+        return $"{total / 60}:{total % 60:00}";
+    }
+
+    /// <summary>
+    /// Handles a press on an audio element's transport bar. Returns
+    /// <see langword="true"/> when the press landed on the bar and was consumed.
+    /// </summary>
+    private bool TryHandleAudioPointer(ElementNode element, float x, float y)
+    {
+        if (!element.TryGetAttribute("controls", out var ignoredControls))
+        {
+            return false;
+        }
+
+        var layout = LayoutFor(element);
+
+        if (layout is null || !layout.TryGetBox(element, out var box))
+        {
+            return false;
+        }
+
+        var (bar, button, progress) = GetAudioControlRects(box);
+
+        if (x < bar.X || x > bar.X + bar.Width || y < bar.Y || y > bar.Y + bar.Height)
+        {
+            return false;
+        }
+
+        var player = _audioHost?.GetPlayer(element);
+
+        if (player is null)
+        {
+            return true;
+        }
+
+        if (x >= button.X && x <= button.X + button.Width
+            && y >= button.Y && y <= button.Y + button.Height)
+        {
+            if (player.IsPlaying)
+            {
+                player.Pause();
+            }
+            else
+            {
+                player.Play();
+            }
+        }
+        else if (progress.Width > 0
+            && x >= progress.X && x <= progress.X + progress.Width)
+        {
+            _audioSeekElement = element;
+            SeekAudioFromX(element, player, progress, x);
+        }
+
+        _needsPaint = true;
+        return true;
+    }
+
+    /// <summary>Continues a thumb drag on an audio progress bar.</summary>
+    private void UpdateAudioSeekDrag(float x)
+    {
+        if (_audioSeekElement is null)
+        {
+            return;
+        }
+
+        var layout = LayoutFor(_audioSeekElement);
+
+        if (layout is null || !layout.TryGetBox(_audioSeekElement, out var box))
+        {
+            return;
+        }
+
+        var player = _audioHost?.GetPlayer(_audioSeekElement);
+
+        if (player is null)
+        {
+            return;
+        }
+
+        var (_, _, progress) = GetAudioControlRects(box);
+        SeekAudioFromX(_audioSeekElement, player, progress, x);
+        _needsPaint = true;
+    }
+
+    /// <summary>Maps a horizontal pointer position to a seek operation.</summary>
+    private static void SeekAudioFromX(ElementNode element, AudioPlayer player, Rect progress, float x)
+    {
+        if (progress.Width <= 0)
+        {
+            return;
+        }
+
+        var duration = player.Duration;
+
+        if (duration <= 0)
+        {
+            return;
+        }
+
+        player.Seek(Math.Clamp((x - progress.X) / progress.Width, 0f, 1f) * duration);
     }
 
     /// <summary>
@@ -3616,6 +3975,12 @@ public sealed partial class IgniteWindow : IDisposable
             return;
         }
 
+        if (_audioSeekElement is not null)
+        {
+            UpdateAudioSeekDrag(x);
+            return;
+        }
+
         if (_pointerTarget is not null)
         {
             UpdateCursor(_pointerTarget);
@@ -3727,6 +4092,13 @@ public sealed partial class IgniteWindow : IDisposable
         }
 
         var element = HitTest(_mouseX, _mouseY);
+
+        if (element is { Tag: "audio" } && TryHandleAudioPointer(element, _mouseX, _mouseY))
+        {
+            _pressed = element;
+            SetActive(element);
+            return;
+        }
 
         if (_openSelect is not null)
         {
@@ -3876,6 +4248,15 @@ public sealed partial class IgniteWindow : IDisposable
                 SelectInspectElement(inspectHit);
             }
 
+            return;
+        }
+
+        if (_audioSeekElement is not null)
+        {
+            _audioSeekElement = null;
+            _pressed = null;
+            SetActive(null);
+            _needsPaint = true;
             return;
         }
 
