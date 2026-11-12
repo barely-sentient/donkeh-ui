@@ -1049,8 +1049,9 @@ Current limitations worth knowing:
 
 - **Not a browser.** There is no JavaScript, no full HTML parser and no
   network/CORS model. The host supplies the tree, text, images and conditions.
-- **Tables** do not implement `colspan`/`rowspan`, `border-collapse` or
-  `border-spacing`.
+- **Tables** implement `colspan`/`rowspan`, `border-collapse` and
+  `border-spacing`; remaining gaps are `caption-side` and full collapsing-border
+  corner resolution.
 - **Stacking** is approximated by ordering direct children; descendants cannot
   escape an ancestor's paint subtree, and a transformed ancestor is not modelled
   as the containing block for fixed descendants.

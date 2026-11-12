@@ -770,7 +770,7 @@ public sealed class ComputedStyle
     /// Creates a shallow copy for the animation runtime. Animation tracks only
     /// replace individual computed properties, so the custom-property map and
     /// animation list can stay shared with the base style. Copying the map on
-    /// every animated frame is expensive because Bootstrap inherits a large
+    /// every animated frame is expensive because the host inherits a large
     /// set of <c>--bs-*</c> variables to every element.
     /// </summary>
     /// <returns>A new style whose reference-typed members alias the original's.</returns>

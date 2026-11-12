@@ -3548,7 +3548,7 @@ public sealed partial class IgniteWindow : IDisposable
 
     /// <summary>
     /// Custom painter for app content that CSS alone cannot express: spinners, the
-    /// Bootstrap toggler icon and native-looking form controls.
+    /// the host toggler icon and native-looking form controls.
     /// </summary>
     /// <param name="box">The box being painted.</param>
     /// <param name="instructions">Display list to append to.</param>
@@ -3564,21 +3564,6 @@ public sealed partial class IgniteWindow : IDisposable
 
         if (box.Node is not ElementNode element)
         {
-            return;
-        }
-
-        if (element.HasClass("spinner-border"))
-        {
-            PaintSpinner(box, instructions);
-            return;
-        }
-
-        // Bootstrap draws its hamburger from an SVG data URI, which the engine
-        // does not decode. Draw the three bars directly so the toggler does not
-        // appear as an empty pill.
-        if (element.HasClass("navbar-toggler-icon"))
-        {
-            PaintTogglerIcon(box, instructions);
             return;
         }
 
@@ -3950,102 +3935,6 @@ public sealed partial class IgniteWindow : IDisposable
         SeekMedia(element, Math.Clamp((x - progress.X) / progress.Width, 0f, 1f));
     }
 
-    /// <summary>
-    /// Draws a Bootstrap-style spinner as a 270° arc of small quads.
-    /// </summary>
-    /// <param name="box">The spinner's layout box.</param>
-    /// <param name="instructions">Display list to append to.</param>
-    /// <remarks>
-    /// The rotation is derived from the shared animation clock and the element's
-    /// <c>animation-duration</c> when it names a spinner animation, defaulting to
-    /// 0.75 s. The arc is only repositioned when something repaints the element,
-    /// normally the matching CSS animation.
-    /// </remarks>
-    private void PaintSpinner(LayoutBox box, InstructionBuffer instructions)
-    {
-        var rect = PaintedBorderBox(box);
-
-        if (rect.Width <= 0 || rect.Height <= 0)
-        {
-            return;
-        }
-
-        var size = MathF.Min(rect.Width, rect.Height);
-        var thickness = MathF.Max(2f, size * 0.125f);
-        var radius = size / 2f - thickness / 2f;
-        var centerX = rect.X + rect.Width / 2f;
-        var centerY = rect.Y + rect.Height / 2f;
-        var color = box.Style.Color == ComputedStyle.CurrentColor
-            ? 0xFF212529u
-            : box.Style.Color;
-        var duration = 0.75f;
-
-        if (box.Style.Animations is { Count: > 0 } animations)
-        {
-            for (var i = 0; i < animations.Count; i++)
-            {
-                if (animations[i].Name.Contains("spinner", StringComparison.OrdinalIgnoreCase)
-                    && animations[i].Duration > 0)
-                {
-                    duration = animations[i].Duration;
-                    break;
-                }
-            }
-        }
-
-        var spin = (float)(_animationTimeSeconds % duration) / duration * MathF.PI * 2f;
-        const int segments = 40;
-        var sweep = MathF.PI * 1.5f;
-
-        for (var i = 0; i <= segments; i++)
-        {
-            var angle = spin + sweep * i / segments;
-            var x = centerX + MathF.Cos(angle) * radius;
-            var y = centerY + MathF.Sin(angle) * radius;
-            instructions.AddDrawRect(
-                new Rect(x - thickness / 2f, y - thickness / 2f, thickness, thickness),
-                color);
-        }
-    }
-
-    /// <summary>
-    /// Draws the three bars of a collapsed navbar toggler, standing in for the SVG
-    /// data URI the engine cannot decode.
-    /// </summary>
-    /// <param name="box">The icon's layout box.</param>
-    /// <param name="instructions">Display list to append to.</param>
-    /// <remarks>
-    /// Uses the content box, falling back to the border box minus borders when the
-    /// content box is empty, so the icon still appears for a zero-padding element.
-    /// </remarks>
-    private static void PaintTogglerIcon(LayoutBox box, InstructionBuffer instructions)
-    {
-        var rect = box.ContentBox;
-
-        if (rect.IsEmpty)
-        {
-            rect = box.BorderBox.Deflate(box.Style.BorderWidth.Left.Value, box.Style.BorderWidth.Right.Value,
-                box.Style.BorderWidth.Top.Value, box.Style.BorderWidth.Bottom.Value);
-        }
-
-        if (rect.IsEmpty)
-        {
-            return;
-        }
-
-        var horizontalInset = rect.Width * 0.18f;
-        var barWidth = MathF.Max(1, rect.Width - horizontalInset * 2);
-        var barHeight = MathF.Max(1.5f, rect.Height * 0.08f);
-        var x = rect.X + horizontalInset;
-
-        for (var i = 0; i < 3; i++)
-        {
-            var centerY = rect.Y + rect.Height * (0.28f + i * 0.22f);
-            instructions.AddDrawRect(
-                new Rect(x, centerY - barHeight * 0.5f, barWidth, barHeight),
-                0xFFB0B0B0);
-        }
-    }
 
     /// <summary>
     /// Draws the accent mark of a checked checkbox (rounded square) or radio
@@ -4872,7 +4761,7 @@ public sealed partial class IgniteWindow : IDisposable
 
         // Browsers apply a root scroll-behavior to the viewport. The engine has
         // no viewport scroller, so the outermost scrollable container stands in
-        // for it (this keeps Bootstrap's :root rule effective). Hidden overflow
+        // for it (this keeps the host's :root rule effective). Hidden overflow
         // boxes are scroll containers too, but they cannot actually scroll, so
         // they do not make a nested container less "outermost" here.
         for (var parent = scroll.Parent; parent is not null; parent = parent.Parent)

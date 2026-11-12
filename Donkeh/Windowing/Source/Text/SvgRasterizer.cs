@@ -8,7 +8,7 @@ namespace Donkeh.Windowing;
 /// </summary>
 /// <remarks>
 /// <para>
-/// This is deliberately focused on the subset Bootstrap and similar component
+/// This is deliberately focused on the subset the host and similar component
 /// libraries use for icons: paths, rectangles, circles, ellipses, polygons,
 /// polylines and lines with fill or stroke. It is not a general SVG renderer and
 /// does not implement filters, masks, text, gradients or embedded images.

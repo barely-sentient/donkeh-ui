@@ -694,7 +694,7 @@ public sealed partial class LayoutEngine
             // background-size controls the image's own draw rect. The renderer
             // draws a texture over the instruction rectangle, so resolving the
             // size here keeps a 1em icon from being stretched across the whole
-            // element (Bootstrap's .btn-close and .accordion-button::after both
+            // element (the host's .btn-close and .accordion-button::after both
             // rely on this).
             var drawArea = area;
 
@@ -713,7 +713,7 @@ public sealed partial class LayoutEngine
                 // background-position is resolved against the free space, so a
                 // percentage of 100 keeps the image's right edge flush with the
                 // area and calc(100% - 0.75rem) leaves a right inset (used by
-                // Bootstrap's form-select chevron).
+                // the host's form-select chevron).
                 var freeX = MathF.Max(0, area.Width - width);
                 var freeY = MathF.Max(0, area.Height - height);
                 var positionX = style.BackgroundPositionX.ResolveOr(in imageContext, freeX, 0);
@@ -863,7 +863,7 @@ public sealed partial class LayoutEngine
 
     /// <summary>
     /// Paints the zero-content border triangle used for CSS carets, such as
-    /// Bootstrap's <c>.dropdown-toggle::after</c>.
+    /// the host's <c>.dropdown-toggle::after</c>.
     /// </summary>
     /// <param name="box">Box whose border is being painted.</param>
     /// <param name="rect">Border box in paint coordinates.</param>

@@ -41,7 +41,7 @@ public sealed partial class LayoutEngine
     private float LayoutBlockChildren(LayoutBox box, Rect content, float definiteContentHeight)
     {
         var children = box.Children;
-        var text = GetNodeText(box.Node);
+        var text = GetBoxText(box);
         var hasText = !string.IsNullOrEmpty(text) && ShouldLayoutText(box.Style, text);
         var textConsumed = !hasText;
         var floatContext = box.FloatContext ?? new FloatContext();
@@ -50,6 +50,13 @@ public sealed partial class LayoutEngine
         var previousMargin = 0f;
         var hasFlow = false;
         var index = 0;
+
+        // Flex and grid items are blockified, so `float` is ignored inside
+        // them. Treating a floated pseudo-element (such as a breadcrumb
+        // separator) as a float here pushed it onto its own line and, worse,
+        // left the inline scan unable to advance, which looped forever.
+        var ignoreFloat = box.Parent?.Style.IsFlexContainer == true
+            || box.Parent?.Style.IsGridContainer == true;
 
         while (true)
         {
@@ -61,7 +68,7 @@ public sealed partial class LayoutEngine
 
                 while (index < children.Count
                     && !children[index].IsOutOfFlow
-                    && children[index].Style.Float == Float.None
+                    && (ignoreFloat || children[index].Style.Float == Float.None)
                     && IsInlineLevel(children[index]))
                 {
                     index++;
@@ -99,7 +106,7 @@ public sealed partial class LayoutEngine
                 continue;
             }
 
-            if (child.Style.Float != Float.None)
+            if (child.Style.Float != Float.None && !ignoreFloat)
             {
                 LayoutFloatChild(child, content, flowY, floatContext, definiteContentHeight);
                 hasFlow = true;
@@ -113,7 +120,7 @@ public sealed partial class LayoutEngine
 
                 while (index < children.Count
                     && !children[index].IsOutOfFlow
-                    && children[index].Style.Float == Float.None
+                    && (ignoreFloat || children[index].Style.Float == Float.None)
                     && IsInlineLevel(children[index]))
                 {
                     index++;
