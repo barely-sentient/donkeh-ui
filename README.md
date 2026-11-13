@@ -688,7 +688,7 @@ controls, image/font caches, the OpenGL renderer and optional devtools.
 | Type | Purpose |
 | --- | --- |
 | `DonkehWindow` | Window, stylesheet, layout, input, paint and devtools host. |
-| `WindowSettings` | Width, height, title, VSync/frame cap, clear colour, MSAA samples, resizability, fullscreen/frameless/maximized, top-most, transparency, min/max size, icon, on-close callback and devtools dock. |
+| `WindowSettings` | Width, height, title, VSync/frame cap, clear colour, MSAA samples, resizability, fullscreen/frameless/maximized, top-most, transparency, window corner radius, min/max size, icon, on-close callback and devtools dock. |
 | `AudioProps` / `AudioPlayer` | Declarative `<audio>` playback with optional controls, media events and a code-facing transport API. |
 | `VideoProps` / `VideoPlayer` | Declarative `<video>` playback through LibVLC with optional controls, decoded-frame textures, media events and a transport API. |
 | `GLRenderer` | Batched OpenGL consumer of `InstructionBuffer` + `ConstantPool`. |
@@ -723,6 +723,13 @@ window.Run(
     .app { padding: 32px; }
     """);
 ```
+
+Frameless windows can be rounded directly from CSS: a non-zero
+`border-radius` on the root element masks the native window to that shape and
+clears the area outside it to transparent, so the desktop shows through the
+corners. `WindowSettings.CornerRadius` overrides the CSS radius (or pins it to
+`CornerRadius.Zero` for a square frameless window). Full-screen windows ignore
+both.
 
 **Rendering pipeline.** `GLRenderer` consumes the instruction opcodes:
 

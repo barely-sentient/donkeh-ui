@@ -916,6 +916,15 @@ public sealed partial class IgniteWindow : IDisposable
         if (_settings.FullScreen) windowState = WindowState.Fullscreen;
         else if (_settings.Maximized) windowState = WindowState.Maximized;
 
+        // Rounded windows need the compositor to read the framebuffer alpha, or
+        // the cleared corners would be drawn as an opaque colour. Frameless
+        // windows opt in automatically because their shape is entirely managed
+        // by the app and CSS border-radius is the natural way to express it.
+        var transparentFramebuffer =
+            _settings.Transparent
+            || _settings.Frameless
+            || (_settings.CornerRadius.HasValue && !_settings.CornerRadius.Value.IsZero);
+
         var options = WindowOptions.Default with
         {
             Size = new Vector2D<int>(width, height),
@@ -930,7 +939,7 @@ public sealed partial class IgniteWindow : IDisposable
                 : _settings.Resizable ? WindowBorder.Resizable : WindowBorder.Fixed,
             WindowState = windowState,
             TopMost = _settings.TopMost,
-            TransparentFramebuffer = _settings.Transparent,
+            TransparentFramebuffer = transparentFramebuffer,
             API = new GraphicsAPI(
                 ContextAPI.OpenGL,
                 ContextProfile.Core,
@@ -1639,7 +1648,8 @@ public sealed partial class IgniteWindow : IDisposable
             width,
             height,
             dpi,
-            Color(clear));
+            Color(clear),
+            ResolveWindowCorners(width, height));
 
         if (_layoutResult is not null)
         {
@@ -6470,6 +6480,59 @@ public sealed partial class IgniteWindow : IDisposable
     private static string? GetAttribute(ElementNode element, string name)
     {
         return element.TryGetAttribute(name, out var value) ? value : null;
+    }
+
+    /// <summary>
+    /// Resolves the corner shape used to mask the native window for this frame.
+    /// </summary>
+    /// <param name="width">Client width in CSS pixels.</param>
+    /// <param name="height">Client height in CSS pixels.</param>
+    /// <returns>
+    /// The radii to apply, or <see cref="CornerRadius.Zero"/> for a square
+    /// window.
+    /// </returns>
+    /// <remarks>
+    /// An explicit <see cref="WindowSettings.CornerRadius"/> wins. Otherwise a
+    /// frameless window derives its shape from the root element's resolved
+    /// <c>border-radius</c>, which lets a stylesheet own the window geometry.
+    /// Radii are clamped to half the smaller window dimension, matching the CSS
+    /// rule that stops opposite corners from overlapping. Full-screen windows
+    /// are never rounded.
+    /// </remarks>
+    private CornerRadius ResolveWindowCorners(int width, int height)
+    {
+        if (_settings.FullScreen)
+        {
+            return CornerRadius.Zero;
+        }
+
+        CornerRadius corners;
+
+        if (_settings.CornerRadius.HasValue)
+        {
+            corners = _settings.CornerRadius.Value;
+        }
+        else if (_settings.Frameless && _layoutResult?.Root is { } root)
+        {
+            corners = root.Radius;
+        }
+        else
+        {
+            return CornerRadius.Zero;
+        }
+
+        if (corners.IsZero)
+        {
+            return CornerRadius.Zero;
+        }
+
+        var max = MathF.Min(width, height) * 0.5f;
+
+        return new CornerRadius(
+            Math.Clamp(corners.TopLeft, 0, max),
+            Math.Clamp(corners.TopRight, 0, max),
+            Math.Clamp(corners.BottomRight, 0, max),
+            Math.Clamp(corners.BottomLeft, 0, max));
     }
 
     /// <summary>Converts a packed 0xAARRGGBB colour to normalized RGBA components.</summary>

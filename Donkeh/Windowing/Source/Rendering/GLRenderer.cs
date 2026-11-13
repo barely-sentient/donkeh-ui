@@ -139,6 +139,17 @@ public sealed unsafe class GLRenderer : IDisposable
     /// </summary>
     private ClipState _clip = ClipState.None;
 
+    /// <summary>
+    /// The rounded window mask applied to every content run in the frame, or
+    /// <see cref="WindowMaskState.None"/> for a square window.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="_clip"/>, this is not part of the CSS clip stack. It
+    /// stays fixed for the whole frame so nested clips cannot distort the
+    /// window's corners.
+    /// </remarks>
+    private WindowMaskState _windowMask = WindowMaskState.None;
+
     /// <summary>Accumulated opacity multiplier in the range 0 to 1.</summary>
     private float _opacity = 1;
 
@@ -245,6 +256,10 @@ public sealed unsafe class GLRenderer : IDisposable
     /// <param name="clearColor">
     /// Straight-alpha RGBA clear colour with components in the range 0 to 1.
     /// </param>
+    /// <param name="windowCorners">
+    /// Corner radii that mask the native window, in CSS pixels. The default,
+    /// <see cref="CornerRadius.Zero"/>, keeps the window square.
+    /// </param>
     /// <remarks>
     /// <para>
     /// This resets all batching state: the run counter, the current run, the
@@ -258,6 +273,13 @@ public sealed unsafe class GLRenderer : IDisposable
     /// RGB with <c>(One, OneMinusSrcAlpha)</c> for alpha, matching the default
     /// <see cref="MixBlendMode.Normal"/> path in <see cref="ApplyBlend"/>.
     /// </para>
+    /// <para>
+    /// When <paramref name="windowCorners"/> is non-zero the framebuffer is
+    /// cleared to transparent instead of <paramref name="clearColor"/>, and
+    /// every run is masked to the rounded shape in the fragment shaders. The
+    /// corners therefore show the desktop through an alpha-blended native
+    /// window, and the app's own rounded surface paints the visible background.
+    /// </para>
     /// <para>Must be called before the first <see cref="Render(LayoutResult)"/> of a frame.</para>
     /// </remarks>
     public void BeginFrame(
@@ -266,7 +288,8 @@ public sealed unsafe class GLRenderer : IDisposable
         int viewportWidth,
         int viewportHeight,
         float dpi,
-        Vector4 clearColor)
+        Vector4 clearColor,
+        CornerRadius windowCorners = default)
     {
         _framebufferWidth = Math.Max(1, framebufferWidth);
         _framebufferHeight = Math.Max(1, framebufferHeight);
@@ -281,6 +304,7 @@ public sealed unsafe class GLRenderer : IDisposable
         _transforms.Clear();
         _blends.Clear();
         _clip = ClipState.None;
+        _windowMask = WindowMaskState.None;
         _opacity = 1;
         _transform = Matrix3x2.Identity;
         _blend = MixBlendMode.Normal;
@@ -296,8 +320,36 @@ public sealed unsafe class GLRenderer : IDisposable
             BlendingFactor.OneMinusSrcAlpha,
             BlendingFactor.One,
             BlendingFactor.OneMinusSrcAlpha);
-        _gl.ClearColor(clearColor.X, clearColor.Y, clearColor.Z, clearColor.W);
+
+        // Clamp here as well as in the window host so a direct renderer caller
+        // cannot create opposite corners that overlap or a negative field.
+        var maxRadius = MathF.Min(_viewportWidth, _viewportHeight) * 0.5f;
+        var corners = new CornerRadius(
+            Math.Clamp(windowCorners.TopLeft, 0, maxRadius),
+            Math.Clamp(windowCorners.TopRight, 0, maxRadius),
+            Math.Clamp(windowCorners.BottomRight, 0, maxRadius),
+            Math.Clamp(windowCorners.BottomLeft, 0, maxRadius));
+
+        if (corners.IsZero)
+        {
+            _gl.ClearColor(clearColor.X, clearColor.Y, clearColor.Z, clearColor.W);
+            _gl.Clear(ClearBufferMask.ColorBufferBit);
+            return;
+        }
+
+        // A rounded window must not leave an opaque clear rectangle behind the
+        // shape. Clear to transparent and let the app paint its own rounded
+        // surface (normally the root element background); the content mask
+        // below keeps every later draw inside the same anti-aliased outline.
+        // Painting the clear colour here as well would show through the
+        // content's own corner anti-aliasing as a light fringe.
+        _gl.ClearColor(0, 0, 0, 0);
         _gl.Clear(ClearBufferMask.ColorBufferBit);
+
+        _windowMask = new WindowMaskState(
+            new Rect(0, 0, _viewportWidth, _viewportHeight),
+            ToRadii(corners),
+            true);
     }
 
     /// <summary>Consumes one layout result.</summary>
@@ -1372,6 +1424,7 @@ public sealed unsafe class GLRenderer : IDisposable
     /// </remarks>
     private bool MatchesState(DrawRun run) =>
         run.Clip.Equals(_clip)
+        && run.WindowMask.Equals(_windowMask)
         && run.Transform.Equals(_transform)
         && run.Blend == _blend;
 
@@ -1399,11 +1452,11 @@ public sealed unsafe class GLRenderer : IDisposable
         if (_runCount < _runs.Count)
         {
             run = _runs[_runCount];
-            run.Reset(textured, texture, alphaTexture, _clip, _transform, _blend);
+            run.Reset(textured, texture, alphaTexture, _clip, _windowMask, _transform, _blend);
         }
         else
         {
-            run = new DrawRun(textured, texture, alphaTexture, _clip, _transform, _blend);
+            run = new DrawRun(textured, texture, alphaTexture, _clip, _windowMask, _transform, _blend);
             _runs.Add(run);
         }
 
@@ -1463,7 +1516,7 @@ public sealed unsafe class GLRenderer : IDisposable
             if (!run.IsTextured)
             {
                 _shapeProgram.Use();
-                SetCommonUniforms(_shapeProgram, run.Clip, run.Transform);
+                SetCommonUniforms(_shapeProgram, run.Clip, run.WindowMask, run.Transform);
 
                 _gl.BindVertexArray(_shapeVao);
                 _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _instanceVbo);
@@ -1482,7 +1535,7 @@ public sealed unsafe class GLRenderer : IDisposable
                 }
 
                 _textureProgram.Use();
-                SetCommonUniforms(_textureProgram, run.Clip, run.Transform);
+                SetCommonUniforms(_textureProgram, run.Clip, run.WindowMask, run.Transform);
                 _textureProgram.Uniform1("uAlphaTexture", run.AlphaTexture ? 1 : 0);
                 _textureProgram.Uniform1("uTexture", 0);
                 _gl.ActiveTexture(TextureUnit.Texture0);
@@ -1632,6 +1685,7 @@ public sealed unsafe class GLRenderer : IDisposable
     /// The program whose uniforms are written; it must already be in use.
     /// </param>
     /// <param name="clip">The clip for the run being drawn.</param>
+    /// <param name="windowMask">The window mask for the run being drawn.</param>
     /// <param name="transform">The accumulated CSS-pixel affine transform for the run.</param>
     /// <remarks>
     /// <para>
@@ -1647,10 +1701,16 @@ public sealed unsafe class GLRenderer : IDisposable
     /// <para>
     /// An unclipped run receives a very large rectangle (±1e7) and zero radii
     /// instead of an enabled/disabled flag, so the fragment shader's clip test
-    /// is always evaluated and the branches stay uniform across runs.
+    /// is always evaluated and the branches stay uniform across runs. The window
+    /// mask uses the same convention: zero radii disable the rounded window
+    /// test, so square windows keep the same shader path.
     /// </para>
     /// </remarks>
-    private void SetCommonUniforms(ShaderProgram program, in ClipState clip, Matrix3x2 transform)
+    private void SetCommonUniforms(
+        ShaderProgram program,
+        in ClipState clip,
+        in WindowMaskState windowMask,
+        Matrix3x2 transform)
     {
         program.Uniform2("uViewport", _viewportWidth, _viewportHeight);
         program.Uniform3("uTransform0", transform.M11, transform.M21, transform.M31);
@@ -1665,6 +1725,27 @@ public sealed unsafe class GLRenderer : IDisposable
         {
             program.Uniform4("uClipRect", -1e7f, -1e7f, 2e7f, 2e7f);
             program.Uniform4("uClipRadii", 0, 0, 0, 0);
+        }
+
+        if (windowMask.HasMask)
+        {
+            program.Uniform4(
+                "uWindowRect",
+                windowMask.Rect.X,
+                windowMask.Rect.Y,
+                windowMask.Rect.Width,
+                windowMask.Rect.Height);
+            program.Uniform4(
+                "uWindowRadii",
+                windowMask.Radii.X,
+                windowMask.Radii.Y,
+                windowMask.Radii.Z,
+                windowMask.Radii.W);
+        }
+        else
+        {
+            program.Uniform4("uWindowRect", 0, 0, _viewportWidth, _viewportHeight);
+            program.Uniform4("uWindowRadii", 0, 0, 0, 0);
         }
     }
 
@@ -1889,6 +1970,7 @@ public sealed unsafe class GLRenderer : IDisposable
         /// <param name="texture">The sampled texture for textured runs.</param>
         /// <param name="alphaTexture">Whether coverage comes from a single channel.</param>
         /// <param name="clip">The clip active when the run started.</param>
+        /// <param name="windowMask">The window mask active when the run started.</param>
         /// <param name="transform">The transform active when the run started.</param>
         /// <param name="blend">The blend mode active when the run started.</param>
         public DrawRun(
@@ -1896,10 +1978,11 @@ public sealed unsafe class GLRenderer : IDisposable
             uint texture,
             bool alphaTexture,
             ClipState clip,
+            WindowMaskState windowMask,
             Matrix3x2 transform,
             MixBlendMode blend)
         {
-            Reset(textured, texture, alphaTexture, clip, transform, blend);
+            Reset(textured, texture, alphaTexture, clip, windowMask, transform, blend);
         }
 
         /// <summary>Reinitialises the run for a new batch and drops its geometry.</summary>
@@ -1907,6 +1990,7 @@ public sealed unsafe class GLRenderer : IDisposable
         /// <param name="texture">The sampled texture for textured runs.</param>
         /// <param name="alphaTexture">Whether coverage comes from a single channel.</param>
         /// <param name="clip">The clip active when the run starts.</param>
+        /// <param name="windowMask">The window mask active when the run starts.</param>
         /// <param name="transform">The transform active when the run starts.</param>
         /// <param name="blend">The blend mode active when the run starts.</param>
         /// <remarks>
@@ -1918,6 +2002,7 @@ public sealed unsafe class GLRenderer : IDisposable
             uint texture,
             bool alphaTexture,
             ClipState clip,
+            WindowMaskState windowMask,
             Matrix3x2 transform,
             MixBlendMode blend)
         {
@@ -1925,6 +2010,7 @@ public sealed unsafe class GLRenderer : IDisposable
             Texture = texture;
             AlphaTexture = alphaTexture;
             Clip = clip;
+            WindowMask = windowMask;
             Transform = transform;
             Blend = blend;
             Shapes.Clear();
@@ -1952,6 +2038,9 @@ public sealed unsafe class GLRenderer : IDisposable
         /// <summary>Gets the clip that was active when the run started.</summary>
         public ClipState Clip { get; private set; }
 
+        /// <summary>Gets the window mask that was active when the run started.</summary>
+        public WindowMaskState WindowMask { get; private set; }
+
         /// <summary>
         /// Gets the CSS-pixel affine transform that was active when the run
         /// started.
@@ -1972,6 +2061,25 @@ public sealed unsafe class GLRenderer : IDisposable
         /// triangle-strip order; empty for solid runs.
         /// </summary>
         public List<TexturedVertex> Vertices { get; } = [];
+    }
+
+    /// <summary>
+    /// The rounded shape of the native window, applied independently of the CSS
+    /// clip stack.
+    /// </summary>
+    /// <remarks>
+    /// Value equality lets <see cref="MatchesState"/> keep runs recorded with
+    /// different window shapes in separate batches. The rectangle and radii are
+    /// in CSS pixels and the shader evaluates the distance field against the
+    /// transformed screen position.
+    /// </remarks>
+    private readonly record struct WindowMaskState(Rect Rect, Vector4 Radii, bool HasMask)
+    {
+        /// <summary>The square, unmasked state used for ordinary windows.</summary>
+        public static readonly WindowMaskState None = new(
+            new Rect(0, 0, 0, 0),
+            Vector4.Zero,
+            false);
     }
 
     /// <summary>
@@ -2207,6 +2315,8 @@ public sealed unsafe class GLRenderer : IDisposable
 
         uniform vec4 uClipRect;
         uniform vec4 uClipRadii;
+        uniform vec4 uWindowRect;
+        uniform vec4 uWindowRadii;
         out vec4 fragColor;
 
         float sdRoundBox(vec2 p, vec2 b, vec4 r)
@@ -2237,9 +2347,28 @@ public sealed unsafe class GLRenderer : IDisposable
             return false;
         }
 
+        float windowCoverage(vec2 p)
+        {
+            if (uWindowRadii.x + uWindowRadii.y + uWindowRadii.z + uWindowRadii.w <= 0.0)
+            {
+                return 1.0;
+            }
+
+            vec2 center = uWindowRect.xy + uWindowRect.zw * 0.5;
+            float d = sdRoundBox(p - center, uWindowRect.zw * 0.5, uWindowRadii);
+            return 1.0 - smoothstep(-1.0, 1.0, d);
+        }
+
         void main()
         {
             if (clipped(vScreen))
+            {
+                discard;
+            }
+
+            float windowAlpha = windowCoverage(vScreen);
+
+            if (windowAlpha <= 0.001)
             {
                 discard;
             }
@@ -2299,7 +2428,7 @@ public sealed unsafe class GLRenderer : IDisposable
                 discard;
             }
 
-            fragColor = vec4(vColor.rgb, vColor.a * alpha);
+            fragColor = vec4(vColor.rgb, vColor.a * alpha * windowAlpha);
         }
         """;
 
@@ -2366,6 +2495,8 @@ public sealed unsafe class GLRenderer : IDisposable
         uniform int uAlphaTexture;
         uniform vec4 uClipRect;
         uniform vec4 uClipRadii;
+        uniform vec4 uWindowRect;
+        uniform vec4 uWindowRadii;
 
         out vec4 fragColor;
 
@@ -2397,9 +2528,28 @@ public sealed unsafe class GLRenderer : IDisposable
             return false;
         }
 
+        float windowCoverage(vec2 p)
+        {
+            if (uWindowRadii.x + uWindowRadii.y + uWindowRadii.z + uWindowRadii.w <= 0.0)
+            {
+                return 1.0;
+            }
+
+            vec2 center = uWindowRect.xy + uWindowRect.zw * 0.5;
+            float d = sdRoundBox(p - center, uWindowRect.zw * 0.5, uWindowRadii);
+            return 1.0 - smoothstep(-1.0, 1.0, d);
+        }
+
         void main()
         {
             if (clipped(vScreen))
+            {
+                discard;
+            }
+
+            float windowAlpha = windowCoverage(vScreen);
+
+            if (windowAlpha <= 0.001)
             {
                 discard;
             }
@@ -2418,7 +2568,7 @@ public sealed unsafe class GLRenderer : IDisposable
                 discard;
             }
 
-            fragColor = color;
+            fragColor = vec4(color.rgb, color.a * windowAlpha);
         }
         """;
 }

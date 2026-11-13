@@ -1,4 +1,5 @@
 using Donkeh.Inspector;
+using Donkeh.LayoutLab;
 using Silk.NET.Maths;
 
 namespace Donkeh.Windowing
@@ -140,7 +141,10 @@ namespace Donkeh.Windowing
         /// <remarks>
         /// Because zero is a sentinel, transparent black cannot be requested
         /// through this field. The colour is cleared every frame before the
-        /// instruction list is drawn.
+        /// instruction list is drawn. When <see cref="CornerRadius"/> produces a
+        /// rounded window, the clear colour is skipped and the framebuffer is
+        /// cleared to transparent instead, so the corners show the desktop and
+        /// the root element paints the visible window surface.
         /// </remarks>
         public uint ClearColor;
 
@@ -318,9 +322,34 @@ namespace Donkeh.Windowing
         /// </summary>
         /// <remarks>
         /// Support varies by platform and compositor; the request is forwarded
-        /// to the native window options.
+        /// to the native window options. Frameless windows and windows with an
+        /// explicit non-zero <see cref="CornerRadius"/> enable a transparent
+        /// framebuffer automatically so rounded window corners can show the
+        /// desktop instead of the clear colour.
         /// </remarks>
         public bool Transparent;
+
+        /// <summary>
+        /// Rounds the native window to these corner radii, in CSS pixels.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <see langword="null"/> (the default) derives the radii from the root
+        /// element's CSS <c>border-radius</c> on frameless windows, so a
+        /// stylesheet can shape the window without any host code. Set this field
+        /// to force a shape independently of CSS, or to
+        /// <see cref="Donkeh.LayoutLab.CornerRadius.Zero"/> to keep a frameless
+        /// window square.
+        /// </para>
+        /// <para>
+        /// The content, overlays and inspector are clipped to the rounded
+        /// window, and the area outside the shape is cleared to transparent.
+        /// Full-screen windows ignore the setting. The native window must have a
+        /// transparent framebuffer for the corners to be visible; the host
+        /// requests one automatically for frameless windows and explicit radii.
+        /// </para>
+        /// </remarks>
+        public CornerRadius? CornerRadius;
 
         /// <summary>
         /// Gets a new settings value containing the desktop defaults.
