@@ -49,14 +49,23 @@ public sealed class BuilderTests
     [Fact]
     public void Props_OnScrollRegistersScrollHandler()
     {
-        var invoked = 0;
-        var tree = H("div", new Props { OnScroll = () => invoked++ });
+        var appliedX = 0f;
+        var appliedY = 0f;
+        var tree = H("div", new Props
+        {
+            OnScroll = (x, y) =>
+            {
+                appliedX = x;
+                appliedY = y;
+            },
+        });
 
         Assert.True(tree.TryGetEventHandler("scroll", out var handler));
 
-        ((Action)handler!)();
+        ((Action<float, float>)handler!)(12f, -48f);
 
-        Assert.Equal(1, invoked);
+        Assert.Equal(12f, appliedX);
+        Assert.Equal(-48f, appliedY);
     }
 
     [Fact]

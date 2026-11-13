@@ -171,10 +171,12 @@ namespace Donkeh.UILab
         /// Gets or sets the handler for the <c>scroll</c> event.
         /// </summary>
         /// <remarks>
+        /// The two arguments are the horizontal and vertical scroll delta in CSS
+        /// pixels that was actually applied, positive when scrolling right or down.
         /// The event targets the element under the mouse when the wheel scroll is
         /// applied, and propagates to the nearest ancestor with a handler.
         /// </remarks>
-        public Action? OnScroll { get; init; }
+        public Action<float, float>? OnScroll { get; init; }
 
         /// <summary>
         /// Gets or sets the handler for the <c>paste</c> event. The handler receives

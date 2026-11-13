@@ -4972,9 +4972,10 @@ public sealed partial class DonkehWindow : IDisposable
     /// </para>
     /// <para>
     /// After the offset changes, a <c>scroll</c> event is dispatched to the element
-    /// under the pointer (<see cref="_mouseX"/>, <see cref="_mouseY"/>). The handler
-    /// lookup walks ancestors, so a container that owns the scroll can listen even
-    /// when the pointer is over one of its children.
+    /// under the pointer (<see cref="_mouseX"/>, <see cref="_mouseY"/>) with the
+    /// horizontal and vertical delta that was actually applied, in CSS pixels. The
+    /// handler lookup walks ancestors, so a container that owns the scroll can
+    /// listen even when the pointer is over one of its children.
     /// </para>
     /// </remarks>
     private void OnScroll(float vertical, float horizontal)
@@ -5009,11 +5010,14 @@ public sealed partial class DonkehWindow : IDisposable
 
         if (dx != 0 || dy != 0)
         {
-            ScrollBy(scroll, dx, dy);
+            var (appliedX, appliedY) = ScrollBy(scroll, dx, dy);
 
-            // Target the element under the pointer and let the handler walk up
-            // the tree, matching how the other input events bubble.
-            Invoke(HitTest(_mouseX, _mouseY), "scroll");
+            if (appliedX != 0 || appliedY != 0)
+            {
+                // Target the element under the pointer and let the handler walk
+                // up the tree, matching how the other input events bubble.
+                Invoke(HitTest(_mouseX, _mouseY), "scroll", appliedX, appliedY);
+            }
         }
     }
 
@@ -5028,7 +5032,12 @@ public sealed partial class DonkehWindow : IDisposable
     /// pending target rather than the current offset, so a fast train of wheel
     /// events accumulates instead of fighting the interpolation.
     /// </remarks>
-    private void ScrollBy(LayoutBox scroll, float dx, float dy)
+    /// <returns>
+    /// The horizontal and vertical delta actually applied after clamping to the
+    /// scrollable range, in CSS pixels. Both are zero when the container is already
+    /// at the requested edge.
+    /// </returns>
+    private (float X, float Y) ScrollBy(LayoutBox scroll, float dx, float dy)
     {
         var node = scroll.Node;
 
@@ -5042,7 +5051,12 @@ public sealed partial class DonkehWindow : IDisposable
         var maxX = MathF.Max(0, scroll.ScrollWidth - scroll.ClientWidth);
         var maxY = MathF.Max(0, scroll.ScrollHeight - scroll.ClientHeight);
 
-        ScrollTo(scroll, Math.Clamp(baseX + dx, 0, maxX), Math.Clamp(baseY + dy, 0, maxY));
+        var targetX = Math.Clamp(baseX + dx, 0, maxX);
+        var targetY = Math.Clamp(baseY + dy, 0, maxY);
+
+        ScrollTo(scroll, targetX, targetY);
+
+        return (targetX - baseX, targetY - baseY);
     }
 
     /// <summary>
@@ -6312,7 +6326,7 @@ public sealed partial class DonkehWindow : IDisposable
     /// Hover is stored on the whole ancestor chain because CSS <c>:hover</c> matches
     /// every ancestor of the pointed element, not just the leaf. A no-op move keeps
     /// the previous chain. Both events are dispatched through
-    /// <see cref="Invoke"/>, which walks up to the
+    /// <see cref="Invoke(ElementNode?, string, string?)"/>, which walks up to the
     /// nearest handler.
     /// </remarks>
     private void SetHovered(ElementNode? element)
@@ -6862,6 +6876,53 @@ public sealed partial class DonkehWindow : IDisposable
                     else
                     {
                         handler.DynamicInvoke(value);
+                    }
+                }
+                catch
+                {
+                    // A host event must not tear down the frame loop.
+                }
+
+                return;
+            }
+
+            node = node.Parent;
+        }
+    }
+
+    /// <summary>
+    /// Dispatches a DOM-style event carrying two numeric values to the nearest
+    /// handler at or above an element.
+    /// </summary>
+    /// <param name="element">The target, or <see langword="null"/> for no dispatch.</param>
+    /// <param name="eventName">The handler key, such as <c>scroll</c>.</param>
+    /// <param name="x">The first value, typically a horizontal delta.</param>
+    /// <param name="y">The second value, typically a vertical delta.</param>
+    /// <remarks>
+    /// The parent walk and exception handling match the other
+    /// <see cref="Invoke(ElementNode?, string, string?)"/> overload: only the nearest
+    /// handler runs, so an event never fires twice, and a throwing handler cannot
+    /// tear down the frame loop.
+    /// </remarks>
+    private static void Invoke(ElementNode? element, string eventName, float x, float y)
+    {
+        IgniteSupportedDomNode? node = element;
+
+        while (node is not null)
+        {
+            if (node is ElementNode current
+                && current.TryGetEventHandler(eventName, out var handler)
+                && handler is not null)
+            {
+                try
+                {
+                    if (handler is Action<float, float> action)
+                    {
+                        action(x, y);
+                    }
+                    else
+                    {
+                        handler.DynamicInvoke(x, y);
                     }
                 }
                 catch
