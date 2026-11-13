@@ -633,7 +633,11 @@ namespace Donkeh.Data
                         node);
 
                 case PseudoClassKind.Root:
-                    return node.Parent is null;
+                    // Fragments and text nodes are transparent to the CSS tree, so
+                    // the first real element inside a root fragment is still the
+                    // document's root element. UILab mounts routed content inside
+                    // provider fragments, which must not hide :root.
+                    return ParentElement(node) is null;
 
                 case PseudoClassKind.Empty:
                     // Text is folded into TextContent by the view layer, so an

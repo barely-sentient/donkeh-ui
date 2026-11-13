@@ -1182,6 +1182,48 @@ public class StyleResolutionTests
     }
 
     [Fact]
+    public void CalcSubtractionResolvesInheritedCustomProperties()
+    {
+        var style = Child(
+            "--titlebar-height: 33px;",
+            "width: calc(var(--titlebar-height) - 1px);"
+            + " height: calc(var(--titlebar-height) - 1px);");
+
+        var context = new LengthContext();
+        Assert.Equal(32, style.Width.Resolve(in context), 3);
+        Assert.Equal(32, style.Height.Resolve(in context), 3);
+    }
+
+    [Fact]
+    public void RootCustomPropertiesReachContentBelowAFragment()
+    {
+        const string css = """
+            :root { --titlebar-height: 28px; }
+            .frame button {
+                width: calc(var(--titlebar-height) - 1px);
+                height: calc(var(--titlebar-height) - 1px);
+                line-height: calc(var(--titlebar-height) - 2px);
+            }
+            """;
+
+        // Routed UILab content is mounted under a root fragment. The fragment is
+        // transparent to selectors, so the first element must still match :root.
+        var root = new IgniteSupportedDomNode { IsFragment = true };
+        var frame = TestSupport.Node("div", classes: "frame");
+        var button = TestSupport.Node("button");
+        frame.Children = [button];
+        root.Children = [frame];
+
+        var result = TestSupport.Layout(TestSupport.Build(css), root);
+        var style = TestSupport.Box(result, button).Style;
+        var context = new LengthContext();
+
+        Assert.Equal(27, style.Width.Resolve(in context), 3);
+        Assert.Equal(27, style.Height.Resolve(in context), 3);
+        Assert.Equal(26, style.LineHeight.Resolve(in context, 27), 3);
+    }
+
+    [Fact]
     public void InheritedTextPropertiesFlowToChildren()
     {
         var style = Child(

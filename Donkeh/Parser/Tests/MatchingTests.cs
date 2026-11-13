@@ -348,6 +348,34 @@ public class MatchingTests
     }
 
     [Fact]
+    public void RootPseudoClassSeesThroughFragments()
+    {
+        var table = Build(":root { color: root; }");
+
+        var fragment = new IgniteSupportedDomNode { IsFragment = true };
+        var element = new IgniteSupportedDomNode { TagName = "div" };
+        fragment.Children = [element];
+
+        var matches = table.MatchRules(element);
+
+        Assert.Single(matches);
+        Assert.Equal("root", Value(matches[0]));
+    }
+
+    [Fact]
+    public void RootPseudoClassRejectsNestedElements()
+    {
+        var table = Build(":root { color: root; }");
+
+        var root = new IgniteSupportedDomNode { TagName = "html" };
+        var child = new IgniteSupportedDomNode { TagName = "body" };
+        root.Children = [child];
+
+        Assert.Single(table.MatchRules(root));
+        Assert.Empty(table.MatchRules(child));
+    }
+
+    [Fact]
     public void MatchesOfTypePseudoClasses()
     {
         var table = Build(
