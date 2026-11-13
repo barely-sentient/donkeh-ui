@@ -742,13 +742,16 @@ public sealed class ComputedStyle
     /// <param name="context">The length context used for the font size and units.</param>
     /// <returns>The line height in CSS pixels.</returns>
     /// <remarks>
-    /// A unitless number multiplies the resolved font size. Other units are
-    /// resolved with the font size as the percentage basis and fall back to
-    /// <c>1.2 x font size</c> when no basis is available.
+    /// A unitless number multiplies the resolved font size. Other units and
+    /// <c>calc()</c> expressions are resolved with the font size as the
+    /// percentage basis and fall back to <c>1.2 x font size</c> when no basis
+    /// is available. Expression trees are stored with a
+    /// <see cref="LengthUnit.Number"/> unit, so the unit test must not treat
+    /// <c>line-height: calc(...)</c> as a unitless multiplier.
     /// </remarks>
     public float ResolveLineHeight(in LengthContext context)
     {
-        if (LineHeight.Unit == LengthUnit.Number)
+        if (!LineHeight.IsExpression && LineHeight.Unit == LengthUnit.Number)
         {
             return LineHeight.Value * ResolveFontSize(in context);
         }

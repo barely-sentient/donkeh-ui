@@ -405,6 +405,17 @@ public class ComputedStyleTests
     }
 
     [Fact]
+    public void ResolveLineHeightEvaluatesCalcExpressions()
+    {
+        var context = new LengthContext(fontSize: 20, percentBasis: 200);
+
+        Assert.Equal(48, new ComputedStyle
+        {
+            LineHeight = CssValueParser.ParseLength("calc(28px + 20px)")
+        }.ResolveLineHeight(context), 3);
+    }
+
+    [Fact]
     public void ResolveBorderAndOutlineColorReplaceTheSentinel()
     {
         var style = new ComputedStyle { Color = 0xFF00FF00 };

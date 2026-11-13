@@ -1220,7 +1220,7 @@ public class StyleResolutionTests
 
         Assert.Equal(27, style.Width.Resolve(in context), 3);
         Assert.Equal(27, style.Height.Resolve(in context), 3);
-        Assert.Equal(26, style.LineHeight.Resolve(in context, 27), 3);
+        Assert.Equal(26, style.ResolveLineHeight(in context), 3);
     }
 
     [Fact]
