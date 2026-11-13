@@ -359,6 +359,11 @@ namespace Donkeh.UILab
                 On("mouseout", onMouseOut);
             }
 
+            if (props.OnScroll is { } onScroll)
+            {
+                On("scroll", onScroll);
+            }
+
             if (props.OnPaste is { } onPaste)
             {
                 On("paste", onPaste);

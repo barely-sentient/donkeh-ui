@@ -4970,6 +4970,12 @@ public sealed partial class DonkehWindow : IDisposable
     /// result is clamped to the scrollable range to keep the opposite direction
     /// responsive.
     /// </para>
+    /// <para>
+    /// After the offset changes, a <c>scroll</c> event is dispatched to the element
+    /// under the pointer (<see cref="_mouseX"/>, <see cref="_mouseY"/>). The handler
+    /// lookup walks ancestors, so a container that owns the scroll can listen even
+    /// when the pointer is over one of its children.
+    /// </para>
     /// </remarks>
     private void OnScroll(float vertical, float horizontal)
     {
@@ -5004,6 +5010,10 @@ public sealed partial class DonkehWindow : IDisposable
         if (dx != 0 || dy != 0)
         {
             ScrollBy(scroll, dx, dy);
+
+            // Target the element under the pointer and let the handler walk up
+            // the tree, matching how the other input events bubble.
+            Invoke(HitTest(_mouseX, _mouseY), "scroll");
         }
     }
 

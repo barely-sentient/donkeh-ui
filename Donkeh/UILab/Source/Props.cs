@@ -168,6 +168,15 @@ namespace Donkeh.UILab
         public Action? OnMouseOut { get; init; }
 
         /// <summary>
+        /// Gets or sets the handler for the <c>scroll</c> event.
+        /// </summary>
+        /// <remarks>
+        /// The event targets the element under the mouse when the wheel scroll is
+        /// applied, and propagates to the nearest ancestor with a handler.
+        /// </remarks>
+        public Action? OnScroll { get; init; }
+
+        /// <summary>
         /// Gets or sets the handler for the <c>paste</c> event. The handler receives
         /// the pasted text.
         /// </summary>

@@ -47,6 +47,19 @@ public sealed class BuilderTests
     }
 
     [Fact]
+    public void Props_OnScrollRegistersScrollHandler()
+    {
+        var invoked = 0;
+        var tree = H("div", new Props { OnScroll = () => invoked++ });
+
+        Assert.True(tree.TryGetEventHandler("scroll", out var handler));
+
+        ((Action)handler!)();
+
+        Assert.Equal(1, invoked);
+    }
+
+    [Fact]
     public void TextOnlyChildrenAreFoldedIntoTextContent()
     {
         var renderer = new Renderer();
