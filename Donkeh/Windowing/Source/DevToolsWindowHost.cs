@@ -9,11 +9,11 @@ namespace Donkeh.Windowing;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <see cref="IgniteWindow"/> creates one host lazily when the inspector is
+/// <see cref="DonkehWindow"/> creates one host lazily when the inspector is
 /// visible and docked to <see cref="DevToolsDock.Window"/>, then calls
 /// <see cref="Open"/>/<see cref="Close"/> as that state changes. Each open
 /// launches a dedicated background STA thread that owns a second
-/// <see cref="IgniteWindow"/> and exits when the window closes; the thread is
+/// <see cref="DonkehWindow"/> and exits when the window closes; the thread is
 /// never joined and this type has no disposal step.
 /// </para>
 /// <para>
@@ -26,7 +26,7 @@ namespace Donkeh.Windowing;
 /// </para>
 /// </remarks>
 /// <seealso cref="DevToolsState"/>
-/// <seealso cref="IgniteWindow"/>
+/// <seealso cref="DonkehWindow"/>
 internal sealed class DevToolsWindowHost
 {
     /// <summary>The native-window thread, or <see langword="null"/> before opening.</summary>
@@ -144,7 +144,7 @@ internal sealed class DevToolsWindowHost
                 EnableDevTools = false
             };
 
-            var window = new IgniteWindow(settings)
+            var window = new DonkehWindow(settings)
             {
                 SharedDevToolsState = state
             };

@@ -37,7 +37,7 @@ namespace Donkeh.Windowing;
 /// keeps selection correct inside scrolled containers.
 /// </para>
 /// </remarks>
-public sealed partial class IgniteWindow
+public sealed partial class DonkehWindow
 {
     // A translucent blue works on both the light app and the dark inspector.
     /// <summary>

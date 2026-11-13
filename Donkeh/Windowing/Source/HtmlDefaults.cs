@@ -9,7 +9,7 @@ namespace Donkeh.Windowing;
 /// <remarks>
 /// <para>
 /// <see cref="Css"/> is parsed before every author sheet when
-/// <see cref="IgniteWindow"/> rebuilds its styles, so ordinary author rules win
+/// <see cref="DonkehWindow"/> rebuilds its styles, so ordinary author rules win
 /// the cascade by source order even when specificity is equal. The inspector
 /// stylesheet is appended after the author sheets.
 /// </para>
@@ -20,7 +20,7 @@ namespace Donkeh.Windowing;
 /// <c>display</c> declarations in <see cref="Css"/>.
 /// </para>
 /// </remarks>
-/// <seealso cref="IgniteWindow"/>
+/// <seealso cref="DonkehWindow"/>
 public static class HtmlDefaults
 {
     /// <summary>

@@ -16,7 +16,7 @@ namespace Donkeh.Windowing
     /// <para>
     /// Every call re-scans attributes and re-reads resources; nothing is cached.
     /// Load once at startup and keep the returned string;
-    /// <see cref="IgniteWindow"/> does this when it seeds its author sheets and
+    /// <see cref="DonkehWindow"/> does this when it seeds its author sheets and
     /// parses the text after the user-agent sheet. The methods are stateless and
     /// thread-safe on their own, but the returned text still has to be parsed on
     /// the UI thread.

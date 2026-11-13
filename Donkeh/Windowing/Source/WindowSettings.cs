@@ -4,7 +4,7 @@ using Silk.NET.Maths;
 
 namespace Donkeh.Windowing
 {
-    /// <summary>Creation options for an <see cref="IgniteWindow"/>.</summary>
+    /// <summary>Creation options for an <see cref="DonkehWindow"/>.</summary>
     /// <remarks>
     /// <para>
     /// This is a mutable struct, so it can be composed with an object initializer
@@ -21,11 +21,11 @@ namespace Donkeh.Windowing
     /// <para>
     /// Settings are copied when the window is constructed. Changing a copy
     /// afterwards has no effect on the live window, and some values are only
-    /// applied when <see cref="IgniteWindow.Run(Donkeh.UILab.Node, string)"/>
+    /// applied when <see cref="DonkehWindow.Run(Donkeh.UILab.Node, string)"/>
     /// creates the native window.
     /// </para>
     /// </remarks>
-    /// <seealso cref="IgniteWindow"/>
+    /// <seealso cref="DonkehWindow"/>
     public struct WindowSettings
     {
         /// <summary>Creates settings with sensible desktop defaults.</summary>
@@ -80,9 +80,10 @@ namespace Donkeh.Windowing
 
         /// <summary>Remove the native title bar and border.</summary>
         /// <remarks>
-        /// When set, the window is created with a hidden border and
-        /// <see cref="Resizable"/> is ignored, because a frameless window has no
-        /// native resize affordance.
+        /// When set, the window is created with a hidden border. If
+        /// <see cref="Resizable"/> is also set, the window host provides its own
+        /// resize handles along the client edges and corners; otherwise the window
+        /// is fixed.
         /// </remarks>
         public bool Frameless;
 
@@ -161,8 +162,11 @@ namespace Donkeh.Windowing
 
         /// <summary>Whether the user can resize the window.</summary>
         /// <remarks>
-        /// Ignored when <see cref="Frameless"/> is set, since the hidden border
-        /// takes over the resize behaviour.
+        /// Decorated windows use the native border. Frameless windows use an
+        /// invisible six-CSS-pixel handle along each client edge; corners support
+        /// diagonal resizing. The handles respect <see cref="MinWidth"/>,
+        /// <see cref="MinHeight"/>, <see cref="MaxWidth"/> and
+        /// <see cref="MaxHeight"/>.
         /// </remarks>
         public bool Resizable;
 
@@ -302,19 +306,19 @@ namespace Donkeh.Windowing
         /// <remarks>
         /// Use it for non-GPU cleanup. It runs on the frame thread; throwing is
         /// swallowed so a faulty handler cannot stall teardown. This is the
-        /// settings-level equivalent of <see cref="IgniteWindow.Closed"/>.
+        /// settings-level equivalent of <see cref="DonkehWindow.Closed"/>.
         /// </remarks>
-        public Action<IgniteWindow>? OnClose;
+        public Action<DonkehWindow>? OnClose;
 
         /// <summary>Alias for <see cref="OnClose"/>.</summary>
-        public Action<IgniteWindow>? OnClosed
+        public Action<DonkehWindow>? OnClosed
         {
             get => OnClose;
             set => OnClose = value;
         }
 
         /// <summary>Alias for <see cref="OnClose"/>.</summary>
-        public Action<IgniteWindow>? Closing
+        public Action<DonkehWindow>? Closing
         {
             get => OnClose;
             set => OnClose = value;

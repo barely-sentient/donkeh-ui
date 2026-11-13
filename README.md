@@ -749,6 +749,10 @@ region is shaped as well, so decorated windows and systems without per-pixel
 framebuffer transparency still show the rounded outline. Full-screen and
 maximized windows ignore both.
 
+Frameless windows are resizable when `WindowSettings.Resizable` is `true`: the
+host adds an invisible six-pixel resize handle to each client edge and supports
+diagonal corner resizing, respecting the configured minimum and maximum size.
+
 **Rendering pipeline.** `GLRenderer` consumes the instruction opcodes:
 
 | Instruction | OpenGL path |

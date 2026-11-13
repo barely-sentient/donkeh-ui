@@ -182,6 +182,16 @@ custom title bar:
 .titlebar button { app-region: no-drag; }
 ```
 
+### Frameless resizing
+
+Frameless windows have no native resize border, so the host implements one when
+`WindowSettings.Resizable` is `true`. A six-CSS-pixel invisible handle sits along
+every client edge; corners combine two edges and show the appropriate diagonal
+cursor. The resize interaction runs before page hit testing, so it still works
+when a drag region or the inspector covers the whole client area. It respects
+`MinWidth`, `MinHeight`, `MaxWidth` and `MaxHeight`, and is disabled for
+maximized and full-screen windows.
+
 ## Performance notes
 
 - Styles are cached per node revision, parent identity, viewport and renderer

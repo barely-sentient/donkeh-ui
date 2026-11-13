@@ -9,7 +9,7 @@ namespace Donkeh.Windowing
     /// transport operations.
     /// </summary>
     /// <remarks>
-    /// Instances are created by <see cref="IgniteWindow"/> and handed to
+    /// Instances are created by <see cref="DonkehWindow"/> and handed to
     /// <see cref="AudioProps.OnReady"/>. All members are safe to call from the
     /// frame thread; the actual decoding runs on the audio engine's thread.
     /// </remarks>

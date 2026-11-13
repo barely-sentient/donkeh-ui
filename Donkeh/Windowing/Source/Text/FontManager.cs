@@ -21,7 +21,7 @@ namespace Donkeh.Windowing;
 /// pixel size in one or more <see cref="FontAtlas"/> textures.
 /// </para>
 /// <para>
-/// The manager is not thread-safe. <see cref="IgniteWindow"/> uses a single
+/// The manager is not thread-safe. <see cref="DonkehWindow"/> uses a single
 /// instance from its frame thread for both layout
 /// (<see cref="Measure(ReadOnlySpan{char}, in TextStyle)"/>) and painting
 /// (<see cref="GetGlyph"/>), so measured advances and drawn glyphs come from the

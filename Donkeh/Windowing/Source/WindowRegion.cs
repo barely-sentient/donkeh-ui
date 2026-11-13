@@ -23,7 +23,7 @@ namespace Donkeh.Windowing
     /// <c>SetWindowRgn</c> call.
     /// </para>
     /// </remarks>
-    /// <seealso cref="IgniteWindow"/>
+    /// <seealso cref="DonkehWindow"/>
     internal static class WindowRegion
     {
         /// <summary>Win32 window rectangle, in physical screen pixels.</summary>

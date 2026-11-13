@@ -53,7 +53,7 @@ namespace Donkeh.Windowing;
 /// <seealso cref="WindowSettings"/>
 /// <seealso cref="Donkeh.LayoutLab.LayoutEngine"/>
 /// <seealso cref="GLRenderer"/>
-public sealed partial class IgniteWindow : IDisposable
+public sealed partial class DonkehWindow : IDisposable
 {
     // Attribute names are probed for almost every control operation, so they
     // are interned once instead of being allocated per lookup.
@@ -471,6 +471,9 @@ public sealed partial class IgniteWindow : IDisposable
     /// <summary>Audio or video element whose progress thumb is being dragged, if any.</summary>
     private ElementNode? _mediaSeekElement;
 
+    /// <summary>Width in CSS pixels of the invisible frameless resize handle.</summary>
+    private const int FramelessResizeBorder = 6;
+
     /// <summary>Whether the native window is being moved by an <c>app-region: drag</c> element.</summary>
     private bool _windowDragging;
 
@@ -479,6 +482,21 @@ public sealed partial class IgniteWindow : IDisposable
 
     /// <summary>Native window position when the window drag started.</summary>
     private Vector2D<int> _windowDragStartPosition;
+
+    /// <summary>Whether a frameless window edge is currently being dragged.</summary>
+    private bool _windowResizing;
+
+    /// <summary>Edges held by the active frameless resize interaction.</summary>
+    private WindowResizeEdges _resizeEdges;
+
+    /// <summary>Screen-space pointer position when the resize started.</summary>
+    private Vector2D<int> _resizeStartScreen;
+
+    /// <summary>Native window position when the resize started.</summary>
+    private Vector2D<int> _resizeStartPosition;
+
+    /// <summary>Client size when the resize started.</summary>
+    private Vector2D<int> _resizeStartSize;
 
     /// <summary>
     /// Creates the window controller, its text measurer and the initial CSS
@@ -495,7 +513,7 @@ public sealed partial class IgniteWindow : IDisposable
     /// GPU resources, so it is safe to call before a graphics context exists.
     /// </remarks>
     /// <seealso cref="WindowSettings"/>
-    public IgniteWindow(WindowSettings settings)
+    public DonkehWindow(WindowSettings settings)
     {
         _settings = settings;
         _measurer = new TrueTypeTextMeasurer(_fonts);
@@ -518,7 +536,7 @@ public sealed partial class IgniteWindow : IDisposable
     /// textures or register extra input callbacks. The handler receives the
     /// window that finished initializing.
     /// </remarks>
-    public event Action<IgniteWindow>? Loaded;
+    public event Action<DonkehWindow>? Loaded;
 
     /// <summary>Raised once per frame before pending UI work is flushed.</summary>
     /// <remarks>
@@ -527,7 +545,7 @@ public sealed partial class IgniteWindow : IDisposable
     /// about to render and the seconds elapsed since the previous frame. Handlers
     /// run on the frame thread; blocking here stalls the window.
     /// </remarks>
-    public event Action<IgniteWindow, double>? BeforeFrame;
+    public event Action<DonkehWindow, double>? BeforeFrame;
 
     /// <summary>Raised when the native window closes.</summary>
     /// <remarks>
@@ -536,7 +554,7 @@ public sealed partial class IgniteWindow : IDisposable
     /// receives the window being closed. Use it for non-GPU cleanup; do not issue
     /// draw calls.
     /// </remarks>
-    public event Action<IgniteWindow>? Closed;
+    public event Action<DonkehWindow>? Closed;
 
     /// <summary>Gets the underlying Silk.NET window.</summary>
     /// <value>
@@ -3906,6 +3924,238 @@ public sealed partial class IgniteWindow : IDisposable
     }
 
     /// <summary>
+    /// Starts a manual resize when the press lands on an edge or corner of a
+    /// frameless, resizable window.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> when a resize interaction began and the press was
+    /// consumed.
+    /// </returns>
+    /// <remarks>
+    /// The window follows the pointer edge for the whole drag, so the pointer
+    /// remains inside the client area and no native mouse capture is required.
+    /// </remarks>
+    private bool TryBeginFramelessResize()
+    {
+        if (_window is null)
+        {
+            return false;
+        }
+
+        var edges = HitTestFramelessResize(_mouseX, _mouseY);
+
+        if (edges == WindowResizeEdges.None)
+        {
+            return false;
+        }
+
+        var point = new Vector2D<int>(
+            (int)MathF.Round(_mouseX),
+            (int)MathF.Round(_mouseY));
+
+        _resizeStartScreen = _window.PointToScreen(point);
+        _resizeStartPosition = _window.Position;
+        _resizeStartSize = _window.Size;
+        _resizeEdges = edges;
+        _windowResizing = true;
+        _pressed = null;
+        _pointerTarget = null;
+        SetActive(null);
+        SetCursor(ToStandardCursor(edges));
+        return true;
+    }
+
+    /// <summary>
+    /// Moves the edge or edges held by the active frameless resize interaction.
+    /// </summary>
+    /// <remarks>
+    /// The screen-space delta is applied to the window bounds captured when the
+    /// drag began. Left and top drags move the window origin as well as its size,
+    /// and every axis is clamped to the configured minimum and maximum before it
+    /// is applied. The window position is updated before the size so a left/top
+    /// drag does not visibly slide the content twice.
+    /// </remarks>
+    private void UpdateFramelessResize()
+    {
+        if (_window is null || !_windowResizing)
+        {
+            return;
+        }
+
+        var point = new Vector2D<int>(
+            (int)MathF.Round(_mouseX),
+            (int)MathF.Round(_mouseY));
+        var screen = _window.PointToScreen(point);
+        var deltaX = screen.X - _resizeStartScreen.X;
+        var deltaY = screen.Y - _resizeStartScreen.Y;
+
+        var minWidth = _settings.MinWidth > 0 ? _settings.MinWidth : 1;
+        var minHeight = _settings.MinHeight > 0 ? _settings.MinHeight : 1;
+        var maxWidth = _settings.MaxWidth > 0 ? _settings.MaxWidth : int.MaxValue;
+        var maxHeight = _settings.MaxHeight > 0 ? _settings.MaxHeight : int.MaxValue;
+
+        var x = _resizeStartPosition.X;
+        var y = _resizeStartPosition.Y;
+        var width = _resizeStartSize.X;
+        var height = _resizeStartSize.Y;
+
+        if ((_resizeEdges & WindowResizeEdges.Left) != 0)
+        {
+            width = Math.Clamp(_resizeStartSize.X - deltaX, minWidth, maxWidth);
+            x = _resizeStartPosition.X + (_resizeStartSize.X - width);
+        }
+        else if ((_resizeEdges & WindowResizeEdges.Right) != 0)
+        {
+            width = Math.Clamp(_resizeStartSize.X + deltaX, minWidth, maxWidth);
+        }
+
+        if ((_resizeEdges & WindowResizeEdges.Top) != 0)
+        {
+            height = Math.Clamp(_resizeStartSize.Y - deltaY, minHeight, maxHeight);
+            y = _resizeStartPosition.Y + (_resizeStartSize.Y - height);
+        }
+        else if ((_resizeEdges & WindowResizeEdges.Bottom) != 0)
+        {
+            height = Math.Clamp(_resizeStartSize.Y + deltaY, minHeight, maxHeight);
+        }
+
+        var position = _window.Position;
+        var size = _window.Size;
+
+        if (position.X != x || position.Y != y)
+        {
+            _window.Position = new Vector2D<int>(x, y);
+        }
+
+        if (size.X != width || size.Y != height)
+        {
+            _window.Size = new Vector2D<int>(width, height);
+        }
+    }
+
+    /// <summary>Ends the active frameless resize interaction.</summary>
+    /// <remarks>
+    /// The cursor is refreshed from the final pointer position; if the pointer is
+    /// still over an edge it keeps the appropriate resize shape, otherwise it
+    /// returns to the element cursor or the arrow.
+    /// </remarks>
+    private void EndFramelessResize()
+    {
+        if (!_windowResizing)
+        {
+            return;
+        }
+
+        _windowResizing = false;
+        _resizeEdges = WindowResizeEdges.None;
+        UpdateCursor(HitTest(_mouseX, _mouseY));
+    }
+
+    /// <summary>
+    /// Determines which frameless resize edges, if any, are under the pointer.
+    /// </summary>
+    /// <param name="x">Pointer X in client CSS pixels.</param>
+    /// <param name="y">Pointer Y in client CSS pixels.</param>
+    /// <returns>The edge flags under the pointer, or <see cref="WindowResizeEdges.None"/>.</returns>
+    /// <remarks>
+    /// The handles are only active for normal (not maximized or full-screen)
+    /// frameless windows whose <see cref="WindowSettings.Resizable"/> flag is set.
+    /// The border is six CSS pixels wide and corners combine two flags.
+    /// </remarks>
+    private WindowResizeEdges HitTestFramelessResize(float x, float y)
+    {
+        if (_window is null
+            || !_settings.Frameless
+            || !_settings.Resizable
+            || _settings.FullScreen
+            || _window.WindowState != WindowState.Normal)
+        {
+            return WindowResizeEdges.None;
+        }
+
+        var size = _window.Size;
+        var edges = WindowResizeEdges.None;
+
+        if (x <= FramelessResizeBorder)
+        {
+            edges |= WindowResizeEdges.Left;
+        }
+        else if (x >= size.X - FramelessResizeBorder)
+        {
+            edges |= WindowResizeEdges.Right;
+        }
+
+        if (y <= FramelessResizeBorder)
+        {
+            edges |= WindowResizeEdges.Top;
+        }
+        else if (y >= size.Y - FramelessResizeBorder)
+        {
+            edges |= WindowResizeEdges.Bottom;
+        }
+
+        return edges;
+    }
+
+    /// <summary>Maps a set of frameless resize edges to the closest native cursor.</summary>
+    /// <param name="edges">The active edge flags.</param>
+    /// <returns>
+    /// A diagonal cursor for corners, a horizontal or vertical cursor for single
+    /// edges, or the arrow when no edge is active.
+    /// </returns>
+    private static StandardCursor ToStandardCursor(WindowResizeEdges edges)
+    {
+        var left = (edges & WindowResizeEdges.Left) != 0;
+        var right = (edges & WindowResizeEdges.Right) != 0;
+        var top = (edges & WindowResizeEdges.Top) != 0;
+        var bottom = (edges & WindowResizeEdges.Bottom) != 0;
+
+        if ((left || right) && (top || bottom))
+        {
+            return left == top
+                ? StandardCursor.NwseResize
+                : StandardCursor.NeswResize;
+        }
+
+        if (left || right)
+        {
+            return StandardCursor.HResize;
+        }
+
+        return top || bottom ? StandardCursor.VResize : StandardCursor.Arrow;
+    }
+
+    /// <summary>
+    /// Polls the attached mice for the left button, used to recover from a
+    /// release that arrived outside the client area.
+    /// </summary>
+    /// <returns><see langword="true"/> when any attached mouse reports the left button down.</returns>
+    private bool IsLeftMouseButtonDown()
+    {
+        if (_input is null)
+        {
+            return false;
+        }
+
+        foreach (var mouse in _input.Mice)
+        {
+            try
+            {
+                if (mouse.IsButtonPressed(MouseButton.Left))
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+                // Treat an unavailable button state as released.
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Resolves the nearest explicit <c>app-region</c> on the hit element or its
     /// ancestors. A closer <c>no-drag</c> region opts out of an enclosing drag
     /// region.
@@ -4219,6 +4469,20 @@ public sealed partial class IgniteWindow : IDisposable
             return;
         }
 
+        if (_windowResizing)
+        {
+            // A release can be missed when the pointer leaves the client area
+            // during a fast drag; polling the button ends the interaction.
+            if (!IsLeftMouseButtonDown())
+            {
+                EndFramelessResize();
+                return;
+            }
+
+            UpdateFramelessResize();
+            return;
+        }
+
         if (_selectionDragging)
         {
             UpdateSelectionDrag(x, y);
@@ -4314,6 +4578,14 @@ public sealed partial class IgniteWindow : IDisposable
     {
         _devTools.PointerX = _mouseX;
         _devTools.PointerY = _mouseY;
+
+        // Resize handles sit above the page, so the outer few pixels remain
+        // reachable even when a drag region or an inspector pick target covers
+        // the whole client area.
+        if (button == MouseButton.Left && TryBeginFramelessResize())
+        {
+            return;
+        }
 
         if (_devTools.InspectMode)
         {
@@ -4502,6 +4774,12 @@ public sealed partial class IgniteWindow : IDisposable
     {
         _devTools.PointerX = _mouseX;
         _devTools.PointerY = _mouseY;
+
+        if (_windowResizing)
+        {
+            EndFramelessResize();
+            return;
+        }
 
         if (_windowDragging)
         {
@@ -5897,6 +6175,19 @@ public sealed partial class IgniteWindow : IDisposable
     /// </remarks>
     private void UpdateCursor(ElementNode? element)
     {
+        // A captured pointer keeps the target's cursor; otherwise the frameless
+        // resize border wins over element cursors so the edge is discoverable.
+        if (_pointerTarget is null && !_windowResizing)
+        {
+            var edges = HitTestFramelessResize(_mouseX, _mouseY);
+
+            if (edges != WindowResizeEdges.None)
+            {
+                SetCursor(ToStandardCursor(edges));
+                return;
+            }
+        }
+
         var cursor = Cursor.Auto;
 
         if (element is not null
@@ -6834,4 +7125,24 @@ public sealed partial class IgniteWindow : IDisposable
     /// <param name="Box">The scroll container whose scrollbar was hit.</param>
     /// <param name="Metrics">Track and thumb geometry, already in window coordinates.</param>
     private readonly record struct ScrollbarHit(LayoutBox Box, ScrollbarMetrics Metrics);
+
+    /// <summary>Edges of a frameless window that participate in a resize drag.</summary>
+    [Flags]
+    private enum WindowResizeEdges
+    {
+        /// <summary>No edge is under the pointer.</summary>
+        None = 0,
+
+        /// <summary>The left client edge.</summary>
+        Left = 1,
+
+        /// <summary>The right client edge.</summary>
+        Right = 2,
+
+        /// <summary>The top client edge.</summary>
+        Top = 4,
+
+        /// <summary>The bottom client edge.</summary>
+        Bottom = 8
+    }
 }
