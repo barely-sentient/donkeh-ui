@@ -173,6 +173,103 @@ public enum PointerEvents : byte
     None
 }
 
+/// <summary>The CSS <c>cursor</c> property, selecting the pointer shape over a box.</summary>
+/// <remarks>
+/// <para>
+/// The value is inherited, so descendants of an interactive element keep that
+/// element's cursor unless they override it. <see cref="Auto"/> is the initial
+/// value and asks the host to choose a shape from the element's role; every
+/// other value is an explicit request.
+/// </para>
+/// <para>
+/// The layout engine records the value for the host but does not paint it. The
+/// window host maps it to a native cursor, and platform backends that cannot
+/// represent a shape fall back to an arrow.
+/// </para>
+/// </remarks>
+public enum Cursor : byte
+{
+    /// <summary><c>cursor: auto</c>; the host chooses a shape from the element's role.</summary>
+    Auto,
+    /// <summary><c>cursor: default</c>; the platform's default arrow.</summary>
+    Default,
+    /// <summary>
+    /// <c>cursor: none</c>; no cursor should be rendered.
+    /// </summary>
+    /// <remarks>Hosts without a hidden-cursor mode fall back to the arrow.</remarks>
+    None,
+    /// <summary><c>cursor: context-menu</c>; a context menu is available.</summary>
+    ContextMenu,
+    /// <summary><c>cursor: help</c>; help is available.</summary>
+    Help,
+    /// <summary><c>cursor: pointer</c>; the box is an activatable link or control.</summary>
+    Pointer,
+    /// <summary>
+    /// The legacy <c>cursor: hand</c> alias for <see cref="Pointer"/>.
+    /// </summary>
+    Hand,
+    /// <summary><c>cursor: progress</c>; the host is busy but still interactive.</summary>
+    Progress,
+    /// <summary><c>cursor: wait</c>; the host is busy.</summary>
+    Wait,
+    /// <summary><c>cursor: cell</c>; a table cell can be selected.</summary>
+    Cell,
+    /// <summary><c>cursor: crosshair</c>; precise selection, as in a drawing tool.</summary>
+    Crosshair,
+    /// <summary><c>cursor: text</c>; selectable text.</summary>
+    Text,
+    /// <summary><c>cursor: vertical-text</c>; vertically written selectable text.</summary>
+    VerticalText,
+    /// <summary><c>cursor: alias</c>; an alias or shortcut will be created.</summary>
+    Alias,
+    /// <summary><c>cursor: copy</c>; content will be copied.</summary>
+    Copy,
+    /// <summary><c>cursor: move</c>; content can be moved.</summary>
+    Move,
+    /// <summary><c>cursor: no-drop</c>; content cannot be dropped here.</summary>
+    NoDrop,
+    /// <summary><c>cursor: not-allowed</c>; the action is not allowed.</summary>
+    NotAllowed,
+    /// <summary><c>cursor: grab</c>; content can be grabbed and dragged.</summary>
+    Grab,
+    /// <summary><c>cursor: grabbing</c>; content is being dragged.</summary>
+    Grabbing,
+    /// <summary><c>cursor: all-scroll</c>; content can be scrolled in any direction.</summary>
+    AllScroll,
+    /// <summary><c>cursor: zoom-in</c>; the view can be zoomed in.</summary>
+    ZoomIn,
+    /// <summary><c>cursor: zoom-out</c>; the view can be zoomed out.</summary>
+    ZoomOut,
+    /// <summary><c>cursor: e-resize</c>; resize towards the inline end.</summary>
+    EResize,
+    /// <summary><c>cursor: n-resize</c>; resize towards the block start.</summary>
+    NResize,
+    /// <summary><c>cursor: ne-resize</c>; resize the top-right corner.</summary>
+    NeResize,
+    /// <summary><c>cursor: nw-resize</c>; resize the top-left corner.</summary>
+    NwResize,
+    /// <summary><c>cursor: s-resize</c>; resize towards the block end.</summary>
+    SResize,
+    /// <summary><c>cursor: se-resize</c>; resize the bottom-right corner.</summary>
+    SeResize,
+    /// <summary><c>cursor: sw-resize</c>; resize the bottom-left corner.</summary>
+    SwResize,
+    /// <summary><c>cursor: w-resize</c>; resize towards the inline start.</summary>
+    WResize,
+    /// <summary><c>cursor: ew-resize</c>; resize horizontally on either side.</summary>
+    EwResize,
+    /// <summary><c>cursor: ns-resize</c>; resize vertically on either side.</summary>
+    NsResize,
+    /// <summary><c>cursor: nesw-resize</c>; resize along the bottom-left/top-right diagonal.</summary>
+    NeswResize,
+    /// <summary><c>cursor: nwse-resize</c>; resize along the top-left/bottom-right diagonal.</summary>
+    NwseResize,
+    /// <summary><c>cursor: col-resize</c>; resize a column.</summary>
+    ColResize,
+    /// <summary><c>cursor: row-resize</c>; resize a row.</summary>
+    RowResize
+}
+
 /// <summary>The CSS <c>visibility</c> property.</summary>
 /// <remarks>
 /// Unlike <see cref="Display.None"/>, hidden boxes still occupy space; only

@@ -1018,6 +1018,42 @@ public class StyleResolutionTests
     }
 
     [Fact]
+    public void CursorIsSupported()
+    {
+        Assert.Equal(Cursor.Auto, new ComputedStyle().Cursor);
+        Assert.Equal(Cursor.Pointer, TestSupport.Style("cursor: pointer").Cursor);
+        Assert.Equal(Cursor.Pointer, TestSupport.Style("cursor: hand").Cursor);
+        Assert.Equal(Cursor.Move, TestSupport.Style("cursor: move").Cursor);
+        Assert.Equal(Cursor.Crosshair, TestSupport.Style("cursor: crosshair").Cursor);
+        Assert.Equal(Cursor.Grab, TestSupport.Style("cursor: grab").Cursor);
+        Assert.Equal(Cursor.NwseResize, TestSupport.Style("cursor: nwse-resize").Cursor);
+        Assert.Equal(Cursor.ZoomIn, TestSupport.Style("cursor: zoom-in").Cursor);
+    }
+
+    [Fact]
+    public void CursorImagesFallBackToTheirKeyword()
+    {
+        Assert.Equal(Cursor.Pointer,
+            TestSupport.Style("cursor: url(hand.cur), pointer").Cursor);
+        Assert.Equal(Cursor.Move,
+            TestSupport.Style("cursor: url(data:image/png;base64,AAAA), move").Cursor);
+    }
+
+    [Fact]
+    public void CursorIsInheritedAndWideKeywordsRespectIt()
+    {
+        Assert.Equal(Cursor.Pointer, Child("cursor: pointer;", "").Cursor);
+        Assert.Equal(Cursor.Move, Child("cursor: move;", "cursor: unset;").Cursor);
+        Assert.Equal(Cursor.Auto, Child("cursor: move;", "cursor: initial;").Cursor);
+    }
+
+    [Fact]
+    public void InvalidCursorValuesAreIgnored()
+    {
+        Assert.Equal(Cursor.Pointer, Child("cursor: pointer;", "cursor: sideways;").Cursor);
+    }
+
+    [Fact]
     public void AppRegionIsSupported()
     {
         Assert.Equal(AppRegion.None, new ComputedStyle().AppRegion);

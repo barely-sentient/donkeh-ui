@@ -5833,13 +5833,27 @@ public sealed partial class IgniteWindow : IDisposable
     /// </summary>
     /// <param name="element">The hovered element, or <see langword="null"/>.</param>
     /// <remarks>
-    /// Inspector splitters resize; text controls and elements with selectable text
-    /// show an I-beam; everything else uses the arrow. CSS <c>cursor</c> is not
-    /// modelled.
+    /// An explicit CSS <c>cursor</c> wins; <c>auto</c> falls back to the
+    /// browser-like default: inspector splitters resize, text controls and
+    /// elements with selectable text show an I-beam, and everything else uses
+    /// the arrow.
     /// </remarks>
     private void UpdateCursor(ElementNode? element)
     {
-        if (element is not null && element.HasClass("dt-splitter"))
+        var cursor = Cursor.Auto;
+
+        if (element is not null
+            && LayoutFor(element) is { } layout
+            && layout.TryGetBox(element, out var box))
+        {
+            cursor = box.Style.Cursor;
+        }
+
+        if (cursor != Cursor.Auto)
+        {
+            SetCursor(ToStandardCursor(cursor));
+        }
+        else if (element is not null && element.HasClass("dt-splitter"))
         {
             SetCursor(element.HasClass("dt-splitter-bottom")
                 ? StandardCursor.VResize
@@ -5854,6 +5868,39 @@ public sealed partial class IgniteWindow : IDisposable
         {
             SetCursor(StandardCursor.Arrow);
         }
+    }
+
+    /// <summary>Maps a CSS cursor keyword to the closest native pointer shape.</summary>
+    /// <param name="cursor">The CSS cursor value.</param>
+    /// <returns>The native shape to request from the backend.</returns>
+    /// <remarks>
+    /// CSS has more cursor shapes than most platform backends expose. Values
+    /// without a native equivalent (the overlay cursors, zoom and the hidden
+    /// cursor) fall back to the arrow; grab and grabbing use the hand, and
+    /// progress uses the arrow-plus-wait shape.
+    /// </remarks>
+    private static StandardCursor ToStandardCursor(Cursor cursor)
+    {
+        return cursor switch
+        {
+            Cursor.Pointer or Cursor.Hand or Cursor.Grab or Cursor.Grabbing
+                => StandardCursor.Hand,
+            Cursor.Text or Cursor.VerticalText => StandardCursor.IBeam,
+            Cursor.Crosshair or Cursor.Cell => StandardCursor.Crosshair,
+            Cursor.Move or Cursor.AllScroll => StandardCursor.ResizeAll,
+            Cursor.NoDrop or Cursor.NotAllowed => StandardCursor.NotAllowed,
+            Cursor.Wait => StandardCursor.Wait,
+            Cursor.Progress => StandardCursor.WaitArrow,
+            Cursor.EResize or Cursor.WResize or Cursor.EwResize
+                or Cursor.ColResize => StandardCursor.HResize,
+            Cursor.NResize or Cursor.SResize or Cursor.NsResize
+                or Cursor.RowResize => StandardCursor.VResize,
+            Cursor.NeResize or Cursor.SwResize => StandardCursor.NeswResize,
+            Cursor.NwResize or Cursor.SeResize => StandardCursor.NwseResize,
+            Cursor.NeswResize => StandardCursor.NeswResize,
+            Cursor.NwseResize => StandardCursor.NwseResize,
+            _ => StandardCursor.Arrow
+        };
     }
 
     /// <summary>Applies a standard cursor to every attached mouse, if it changed.</summary>

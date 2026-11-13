@@ -97,6 +97,14 @@ public sealed class ComputedStyle
     /// </remarks>
     public PointerEvents PointerEvents { get; set; } = PointerEvents.Auto;
 
+    /// <summary>Gets or sets the pointer shape requested by <c>cursor</c>; inherited by <see cref="CopyInheritedFrom"/>.</summary>
+    /// <remarks>
+    /// The layout engine records the value for the host and does not paint a
+    /// cursor. <see cref="Cursor.Auto"/> lets the host choose a shape from the
+    /// element's role; other values are explicit requests.
+    /// </remarks>
+    public Cursor Cursor { get; set; } = Cursor.Auto;
+
     /// <summary>Gets or sets whether a <c>z-index</c> was specified, distinguishing an explicit zero from <c>auto</c>.</summary>
     public bool HasZIndex { get; set; }
 
@@ -712,6 +720,7 @@ public sealed class ComputedStyle
         WritingMode = parent.WritingMode;
         Visibility = parent.Visibility;
         PointerEvents = parent.PointerEvents;
+        Cursor = parent.Cursor;
         BorderCollapse = parent.BorderCollapse;
         BorderSpacing = parent.BorderSpacing;
     }
@@ -855,6 +864,7 @@ public sealed class ComputedStyle
         BoxSizing = source.BoxSizing;
         Visibility = source.Visibility;
         PointerEvents = source.PointerEvents;
+        Cursor = source.Cursor;
         HasZIndex = source.HasZIndex;
         ZIndex = source.ZIndex;
         Opacity = source.Opacity;

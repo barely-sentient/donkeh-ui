@@ -210,6 +210,7 @@ public sealed partial class StyleResolver
             case CssProperty.Clear: dest.Clear = source.Clear; break;
             case CssProperty.BoxSizing: dest.BoxSizing = source.BoxSizing; break;
             case CssProperty.Visibility: dest.Visibility = source.Visibility; break;
+            case CssProperty.Cursor: dest.Cursor = source.Cursor; break;
             case CssProperty.Opacity: dest.Opacity = source.Opacity; break;
             case CssProperty.ZIndex:
                 dest.ZIndex = source.ZIndex;
@@ -871,6 +872,80 @@ public sealed partial class StyleResolver
             "scale-down" => ObjectFit.ScaleDown,
             _ => ObjectFit.Fill
         };
+    }
+
+    /// <summary>
+    /// Parses a <c>cursor</c> keyword, including the legacy <c>hand</c> alias.
+    /// </summary>
+    /// <param name="value">The declaration value.</param>
+    /// <param name="cursor">Receives the matching cursor when the value is valid.</param>
+    /// <returns><see langword="true"/> when the value names a known cursor keyword.</returns>
+    /// <remarks>
+    /// <para>
+    /// A comma-separated fallback list such as <c>url(hand.cur), pointer</c> is
+    /// reduced to its final segment, because custom images are not supported and
+    /// the generic keyword is the mandatory last entry.
+    /// </para>
+    /// <para>
+    /// Unrecognised values return <see langword="false"/> so the caller can leave
+    /// the inherited value in place, matching CSS's rule for invalid
+    /// declarations.
+    /// </para>
+    /// </remarks>
+    private static bool TryParseCursor(string value, out Cursor cursor)
+    {
+        value = value.Trim();
+
+        var comma = value.LastIndexOf(',');
+
+        if (comma >= 0)
+        {
+            value = value[(comma + 1)..].Trim();
+        }
+
+        switch (value.ToLowerInvariant())
+        {
+            case "auto": cursor = Cursor.Auto; return true;
+            case "default": cursor = Cursor.Default; return true;
+            case "none": cursor = Cursor.None; return true;
+            case "context-menu": cursor = Cursor.ContextMenu; return true;
+            case "help": cursor = Cursor.Help; return true;
+            case "pointer":
+            case "hand": cursor = Cursor.Pointer; return true;
+            case "progress": cursor = Cursor.Progress; return true;
+            case "wait": cursor = Cursor.Wait; return true;
+            case "cell": cursor = Cursor.Cell; return true;
+            case "crosshair": cursor = Cursor.Crosshair; return true;
+            case "text": cursor = Cursor.Text; return true;
+            case "vertical-text": cursor = Cursor.VerticalText; return true;
+            case "alias": cursor = Cursor.Alias; return true;
+            case "copy": cursor = Cursor.Copy; return true;
+            case "move": cursor = Cursor.Move; return true;
+            case "no-drop": cursor = Cursor.NoDrop; return true;
+            case "not-allowed": cursor = Cursor.NotAllowed; return true;
+            case "grab": cursor = Cursor.Grab; return true;
+            case "grabbing": cursor = Cursor.Grabbing; return true;
+            case "all-scroll": cursor = Cursor.AllScroll; return true;
+            case "zoom-in": cursor = Cursor.ZoomIn; return true;
+            case "zoom-out": cursor = Cursor.ZoomOut; return true;
+            case "e-resize": cursor = Cursor.EResize; return true;
+            case "n-resize": cursor = Cursor.NResize; return true;
+            case "ne-resize": cursor = Cursor.NeResize; return true;
+            case "nw-resize": cursor = Cursor.NwResize; return true;
+            case "s-resize": cursor = Cursor.SResize; return true;
+            case "se-resize": cursor = Cursor.SeResize; return true;
+            case "sw-resize": cursor = Cursor.SwResize; return true;
+            case "w-resize": cursor = Cursor.WResize; return true;
+            case "ew-resize": cursor = Cursor.EwResize; return true;
+            case "ns-resize": cursor = Cursor.NsResize; return true;
+            case "nesw-resize": cursor = Cursor.NeswResize; return true;
+            case "nwse-resize": cursor = Cursor.NwseResize; return true;
+            case "col-resize": cursor = Cursor.ColResize; return true;
+            case "row-resize": cursor = Cursor.RowResize; return true;
+            default:
+                cursor = Cursor.Auto;
+                return false;
+        }
     }
 
     /// <summary>

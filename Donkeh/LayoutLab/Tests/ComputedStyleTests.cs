@@ -292,6 +292,7 @@ public class ComputedStyleTests
             Direction = Direction.RightToLeft,
             WritingMode = WritingMode.VerticalRightToLeft,
             Visibility = Visibility.Hidden,
+            Cursor = Cursor.Pointer,
             BorderCollapse = BorderCollapse.Collapse,
             BorderSpacing = CssLength.Px(9),
             ObjectFit = ObjectFit.Cover,
@@ -318,6 +319,7 @@ public class ComputedStyleTests
         Assert.Equal(Direction.RightToLeft, child.Direction);
         Assert.Equal(WritingMode.VerticalRightToLeft, child.WritingMode);
         Assert.Equal(Visibility.Hidden, child.Visibility);
+        Assert.Equal(Cursor.Pointer, child.Cursor);
         Assert.Equal(BorderCollapse.Collapse, child.BorderCollapse);
         Assert.Equal(CssLength.Px(9), child.BorderSpacing);
 

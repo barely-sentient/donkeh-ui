@@ -1446,6 +1446,17 @@ public sealed partial class StyleResolver
                 break;
 
             case CssProperty.Cursor:
+            {
+                // Unknown keywords are ignored rather than reset, so an invalid
+                // declaration leaves the inherited cursor intact.
+                if (TryParseCursor(value, out var cursor))
+                {
+                    style.Cursor = cursor;
+                }
+
+                break;
+            }
+
             case CssProperty.UserSelect:
             case CssProperty.WillChange:
             case CssProperty.Contain:
