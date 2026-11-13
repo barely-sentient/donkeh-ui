@@ -21,6 +21,11 @@
     </ItemGroup>
 
     <ItemGroup>
+        <EmbeddedResource Include="Assets\sample.png" />
+        <EmbeddedResource Include="Assets\type-level.png" />
+    </ItemGroup>
+
+    <ItemGroup>
         <ProjectReference Include="..\Source\Donkeh.UILab.csproj" />
     </ItemGroup>
 

@@ -185,6 +185,30 @@ fragments generate a `display: contents` box, and text nodes are laid out
 inline. Text-only children are folded into the element's `TextContent` so they
 do not allocate a text box at all.
 
+## Packed images
+
+`[Image]` declares an embedded image so it can be referenced from the same
+string sources as any other asset:
+
+```csharp
+using Donkeh.UILab;
+
+[assembly: Image("Assets/logo.png")]
+
+// Resolves to the embedded resource when no file exists at the same path.
+H("img", new Props { Src = "Assets/logo.png" });
+
+// Force the embedded lookup, even if a file with that name exists.
+H("img", new Props { Src = "packed:Assets/logo.png" });
+```
+
+The file must be an `EmbeddedResource` in the assembly that declares it. The
+lookup accepts the full relative path or just the file name. `Image.TryGetBytes`
+and `Image.Load` expose the encoded bytes directly for hosts that decode images
+themselves. The window host uses the same declarations for `src` attributes, CSS
+`url(...)` layers and `WindowSettings.Icon`, so a packed asset can be referenced
+without a copy step.
+
 ## How the diff works
 
 The renderer keeps the old virtual tree and patches the live nodes in place.

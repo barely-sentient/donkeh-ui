@@ -67,6 +67,21 @@ public sealed partial class IgniteWindow : IDisposable
     /// <summary>The creation options this instance was built with, copied by value.</summary>
     private readonly WindowSettings _settings;
 
+    /// <summary>Last corner radii applied to the native window region.</summary>
+    private CornerRadius _windowRegionCorners;
+
+    /// <summary>Last client width used for the native window region.</summary>
+    private int _windowRegionWidth;
+
+    /// <summary>Last client height used for the native window region.</summary>
+    private int _windowRegionHeight;
+
+    /// <summary>Last device-to-CSS ratio used for the native window region.</summary>
+    private float _windowRegionDpi;
+
+    /// <summary>Whether a rounded native window region is currently assigned.</summary>
+    private bool _windowRegionSet;
+
     /// <summary>Reentrancy guard for min/max size clamping in <see cref="OnResize"/>.</summary>
     private bool _clampingSize;
 
@@ -954,7 +969,6 @@ public sealed partial class IgniteWindow : IDisposable
         _window.Render += OnRender;
         _window.Resize += OnResize;
         _window.Closing += OnClosing;
-        ApplyWindowIcon();
         _window.Run();
 
         // Silk owns the native window until the loop exits; tearing it down from
@@ -979,6 +993,13 @@ public sealed partial class IgniteWindow : IDisposable
         _renderer = new GLRenderer(_gl, _fonts, _images);
         _input = _window!.CreateInput();
         ConfigureInput();
+
+        // Silk's GLFW backend rejects SetWindowIcon until the native window has
+        // been initialized, which happens at the start of Run(). Applying it in
+        // Run() therefore threw and the catch block silently kept the default
+        // icon. OnLoad runs after initialization.
+        ApplyWindowIcon();
+
         Loaded?.Invoke(this);
         _needsLayout = true;
     }
@@ -1022,9 +1043,17 @@ public sealed partial class IgniteWindow : IDisposable
 
     /// <summary>
     /// Decodes <see cref="WindowSettings.Icon"/> and applies it to the native window,
-    /// if a path was supplied. Failures are ignored so a bad icon never prevents
+    /// if a source was supplied. Failures are ignored so a bad icon never prevents
     /// the window from opening.
     /// </summary>
+    /// <remarks>
+    /// The source uses the same resolution order as other images: an on-disk file
+    /// first, then an embedded resource declared through
+    /// <see cref="ImageAttribute"/>. A <c>packed:</c> prefix forces the embedded
+    /// lookup. This must run after the native window has been initialized, because
+    /// Silk.NET's GLFW backend throws when the icon is set on an uninitialized
+    /// window.
+    /// </remarks>
     private void ApplyWindowIcon()
     {
         if (string.IsNullOrWhiteSpace(_settings.Icon) || _window is null)
@@ -1034,14 +1063,35 @@ public sealed partial class IgniteWindow : IDisposable
 
         try
         {
-            var data = File.ReadAllBytes(_settings.Icon!);
-            var image = StbImageSharp.ImageResult.FromMemory(data, StbImageSharp.ColorComponents.RedGreenBlueAlpha);
-            if (image.Width <= 0 || image.Height <= 0 || image.Data is null)
+            if (!_images.TryGetEncodedBytes(_settings.Icon!, out var data))
             {
                 return;
             }
 
-            var raw = new Silk.NET.Core.RawImage(image.Width, image.Height, new Memory<byte>(image.Data));
+            byte[] pixels;
+            int width;
+            int height;
+
+            if (SvgRasterizer.TryRender(data, out var svgPixels, out var svgWidth, out var svgHeight))
+            {
+                pixels = svgPixels;
+                width = svgWidth;
+                height = svgHeight;
+            }
+            else
+            {
+                var image = StbImageSharp.ImageResult.FromMemory(data, StbImageSharp.ColorComponents.RedGreenBlueAlpha);
+                pixels = image.Data ?? [];
+                width = image.Width;
+                height = image.Height;
+            }
+
+            if (width <= 0 || height <= 0 || pixels.Length == 0)
+            {
+                return;
+            }
+
+            var raw = new Silk.NET.Core.RawImage(width, height, new Memory<byte>(pixels));
             _window.SetWindowIcon(new[] { raw });
         }
         catch
@@ -1642,6 +1692,13 @@ public sealed partial class IgniteWindow : IDisposable
 
         var renderStart = Stopwatch.GetTimestamp();
         var clear = _settings.ClearColor != 0 ? _settings.ClearColor : 0xFFFFFFFF;
+        var windowCorners = ResolveWindowCorners(width, height);
+
+        // The shader mask rounds the framebuffer alpha; the native region makes
+        // the same shape apply to decorations and to compositors that ignore the
+        // framebuffer alpha. It is only updated when the geometry changes.
+        SyncWindowRegion(windowCorners, width, height, dpi);
+
         _renderer.BeginFrame(
             framebuffer.X,
             framebuffer.Y,
@@ -1649,7 +1706,7 @@ public sealed partial class IgniteWindow : IDisposable
             height,
             dpi,
             Color(clear),
-            ResolveWindowCorners(width, height));
+            windowCorners);
 
         if (_layoutResult is not null)
         {
@@ -6580,6 +6637,70 @@ public sealed partial class IgniteWindow : IDisposable
             Math.Clamp(corners.TopRight, 0, max),
             Math.Clamp(corners.BottomRight, 0, max),
             Math.Clamp(corners.BottomLeft, 0, max));
+    }
+
+    /// <summary>
+    /// Keeps the native Win32 window region in sync with the resolved corner
+    /// radii.
+    /// </summary>
+    /// <param name="corners">The radii that mask the window this frame.</param>
+    /// <param name="width">Client width in CSS pixels.</param>
+    /// <param name="height">Client height in CSS pixels.</param>
+    /// <param name="dpi">Device-to-CSS-pixel ratio used to scale the radii.</param>
+    /// <remarks>
+    /// <para>
+    /// The framebuffer mask already cuts the content to the rounded outline. The
+    /// native region is what gives decorated windows rounded title-bar corners and
+    /// keeps the shape visible on systems that do not support per-pixel
+    /// framebuffer transparency.
+    /// </para>
+    /// <para>
+    /// Maximized and full-screen windows are left to the platform, so the region
+    /// is cleared for them. The call is skipped when the radii, client size and DPI
+    /// are unchanged, which keeps per-frame cost to a few field comparisons.
+    /// </para>
+    /// </remarks>
+    private void SyncWindowRegion(CornerRadius corners, int width, int height, float dpi)
+    {
+        if (!OperatingSystem.IsWindows() || _window is null)
+        {
+            return;
+        }
+
+        if (_window.WindowState is WindowState.Maximized or WindowState.Fullscreen)
+        {
+            corners = CornerRadius.Zero;
+        }
+
+        if (corners == _windowRegionCorners
+            && width == _windowRegionWidth
+            && height == _windowRegionHeight
+            && MathF.Abs(dpi - _windowRegionDpi) <= 0.001f)
+        {
+            return;
+        }
+
+        _windowRegionCorners = corners;
+        _windowRegionWidth = width;
+        _windowRegionHeight = height;
+        _windowRegionDpi = dpi;
+
+        var hwnd = _window.Native?.Win32?.Hwnd ?? 0;
+
+        if (corners.IsZero)
+        {
+            // Only touch the native window when this helper previously applied a
+            // region; a plain square window keeps the platform's default shape.
+            if (_windowRegionSet)
+            {
+                WindowRegion.Apply(hwnd, CornerRadius.Zero, dpi);
+                _windowRegionSet = false;
+            }
+
+            return;
+        }
+
+        _windowRegionSet = WindowRegion.Apply(hwnd, corners, dpi);
     }
 
     /// <summary>Converts a packed 0xAARRGGBB colour to normalized RGBA components.</summary>

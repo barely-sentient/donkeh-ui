@@ -265,14 +265,23 @@ namespace Donkeh.Windowing
         }
 
         /// <summary>
-        /// Path to an image file used as the window icon. <see langword="null"/>
-        /// or whitespace leaves the platform default icon in place.
+        /// Path or packed-asset source for an image used as the window icon.
+        /// <see langword="null"/> or whitespace leaves the platform default icon
+        /// in place.
         /// </summary>
         /// <remarks>
-        /// The file is decoded with the same image pipeline as other assets, so
-        /// PNG, JPEG, BMP, TGA and GIF are supported. Decoding failures are
-        /// ignored and the default icon is kept. Applied when the native window
-        /// is created.
+        /// <para>
+        /// The source is decoded with the same image pipeline as other assets, so
+        /// PNG, JPEG, BMP, TGA, GIF and SVG are supported. An on-disk file is preferred;
+        /// when it is absent, the path is looked up among the images declared with
+        /// <see cref="Donkeh.UILab.ImageAttribute"/>. Prefix the source with
+        /// <c>packed:</c> to force the embedded lookup.
+        /// </para>
+        /// <para>
+        /// Decoding failures are ignored and the default icon is kept. The icon is
+        /// applied after the native window is created, which is required by the
+        /// Silk.NET backend.
+        /// </para>
         /// </remarks>
         public string? Icon;
 
@@ -344,9 +353,11 @@ namespace Donkeh.Windowing
         /// <para>
         /// The content, overlays and inspector are clipped to the rounded
         /// window, and the area outside the shape is cleared to transparent.
-        /// Full-screen windows ignore the setting. The native window must have a
-        /// transparent framebuffer for the corners to be visible; the host
-        /// requests one automatically for frameless windows and explicit radii.
+        /// On Windows the native window region is also shaped, so decorated
+        /// windows and systems without per-pixel framebuffer transparency still
+        /// show the rounded outline. Full-screen and maximized windows ignore the
+        /// setting. The host requests a transparent framebuffer automatically for
+        /// frameless windows and explicit radii.
         /// </para>
         /// </remarks>
         public CornerRadius? CornerRadius;

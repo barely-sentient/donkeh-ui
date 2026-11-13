@@ -1,17 +1,25 @@
 using System.Collections.Concurrent;
 using Silk.NET.OpenGL;
 using StbImageSharp;
+using PackedImage = Donkeh.UILab.Image;
 
 namespace Donkeh.Windowing;
 
 /// <summary>Decoded images and their OpenGL textures, keyed by source string.</summary>
 /// <remarks>
 /// <para>
-/// A source is either an absolute or relative file path or a base64
-/// <c>data:</c> URI. Encoded bytes are cached separately from decoded textures,
+/// A source is an absolute or relative file path, a base64 <c>data:</c> URI, or
+/// an embedded image declared through <see cref="Donkeh.UILab.ImageAttribute"/>.
+/// A plain path is probed on disk first and then in the packed-asset declaration
+/// table; <c>packed:</c>, <c>embedded:</c> and <c>asset:</c> prefixes force the
+/// embedded lookup. Encoded bytes are cached separately from decoded textures,
 /// and both caches are keyed case-insensitively by the original source string.
 /// Relative paths are resolved against the process working directory at first
 /// use.
+/// </para>
+/// <para>
+/// SVG documents are rasterised whether they arrive as a <c>data:</c> URI or as
+/// bytes read from a file or embedded resource.
 /// </para>
 /// <para>
 /// There is no eviction and no file-change tracking: once a source has been
@@ -66,7 +74,9 @@ public sealed unsafe class ImageCache : IDisposable
     /// Reads an image's intrinsic dimensions from its header without creating a
     /// GPU texture.
     /// </summary>
-    /// <param name="source">The file path or base64 data URI to inspect.</param>
+    /// <param name="source">
+    /// The file path, base64 data URI or packed-asset path to inspect.
+    /// </param>
     /// <param name="width">Receives the intrinsic width in image pixels, or zero.</param>
     /// <param name="height">Receives the intrinsic height in image pixels, or zero.</param>
     /// <returns>
@@ -81,9 +91,10 @@ public sealed unsafe class ImageCache : IDisposable
     /// queries during layout before the image is painted.
     /// </para>
     /// <para>
-    /// A missing file, an unsupported or corrupt format, a non-base64 data URI and
-    /// I/O errors all return <see langword="false"/> with zero dimensions instead
-    /// of throwing. The renderer treats such images as absent.
+    /// A missing file, an unresolved packed asset, an unsupported or corrupt
+    /// format, a non-base64 data URI and I/O errors all return
+    /// <see langword="false"/> with zero dimensions instead of throwing. The
+    /// renderer treats such images as absent.
     /// </para>
     /// </remarks>
     public bool TryGetInfo(string source, out int width, out int height)
@@ -115,6 +126,14 @@ public sealed unsafe class ImageCache : IDisposable
                 return false;
             }
 
+            if (SvgRasterizer.TryRender(data, out _, out var vectorWidth, out var vectorHeight))
+            {
+                width = vectorWidth;
+                height = vectorHeight;
+                _info[source] = (vectorWidth, vectorHeight);
+                return true;
+            }
+
             using var stream = new MemoryStream(data, writable: false);
             var info = ImageInfo.FromStream(stream);
 
@@ -144,7 +163,9 @@ public sealed unsafe class ImageCache : IDisposable
     /// Returns the RGBA texture for a source, decoding and uploading it on first
     /// use.
     /// </summary>
-    /// <param name="source">The file path or base64 data URI to load.</param>
+    /// <param name="source">
+    /// The file path, base64 data URI or packed-asset path to load.
+    /// </param>
     /// <param name="width">Receives the decoded image width in pixels, or zero.</param>
     /// <param name="height">Receives the decoded image height in pixels, or zero.</param>
     /// <param name="repeat">
@@ -198,6 +219,38 @@ public sealed unsafe class ImageCache : IDisposable
         width = entry.Width;
         height = entry.Height;
         return entry.Texture;
+    }
+
+    /// <summary>
+    /// Reads the encoded bytes for a source without uploading a texture.
+    /// </summary>
+    /// <param name="source">
+    /// A file path, a base64 <c>data:</c> URI, or a path declared through
+    /// <see cref="Donkeh.UILab.ImageAttribute"/> and packed into an assembly.
+    /// </param>
+    /// <param name="bytes">
+    /// Receives the encoded bytes on success; otherwise an empty array.
+    /// </param>
+    /// <returns>
+    /// <see langword="true"/> when the source was found and read; otherwise
+    /// <see langword="false"/>.
+    /// </returns>
+    /// <remarks>
+    /// This is the same lookup used by <see cref="GetTexture"/> and
+    /// <see cref="TryGetInfo"/>, exposed for callers that decode the bytes
+    /// themselves, such as the native window icon. Successful reads are cached
+    /// exactly like texture loads, including packed resources.
+    /// </remarks>
+    public bool TryGetEncodedBytes(string source, out byte[] bytes)
+    {
+        if (LoadBytes(source) is { } data)
+        {
+            bytes = data;
+            return true;
+        }
+
+        bytes = [];
+        return false;
     }
 
     /// <summary>
@@ -289,6 +342,11 @@ public sealed unsafe class ImageCache : IDisposable
             return default;
         }
 
+        if (SvgRasterizer.TryRender(data, out var vectorPixels, out var vectorWidth, out var vectorHeight))
+        {
+            return Upload(gl, vectorPixels, vectorWidth, vectorHeight);
+        }
+
         ImageResult image;
 
         try
@@ -372,10 +430,14 @@ public sealed unsafe class ImageCache : IDisposable
     }
 
     /// <summary>
-    /// Returns the encoded bytes for a source, reading a file or decoding a
-    /// base64 data URI and caching the result.
+    /// Returns the encoded bytes for a source, reading a file, decoding a base64
+    /// data URI, or resolving an embedded image declared through
+    /// <see cref="Donkeh.UILab.ImageAttribute"/>, and caching the result.
     /// </summary>
-    /// <param name="source">A file path or <c>data:</c> URI.</param>
+    /// <param name="source">
+    /// A file path, a <c>data:</c> URI, or a declared packed-asset path, optionally
+    /// prefixed with <c>packed:</c> or <c>embedded:</c>.
+    /// </param>
     /// <returns>The encoded bytes, or <see langword="null"/> when unavailable.</returns>
     /// <remarks>
     /// <para>
@@ -388,9 +450,16 @@ public sealed unsafe class ImageCache : IDisposable
     /// <para>
     /// File paths are made absolute with <see cref="Path.GetFullPath(string)"/>
     /// when they are relative, which resolves against the current working
-    /// directory rather than the stylesheet or assembly location. Missing files
-    /// and all I/O or base64 errors return <see langword="null"/>. Nothing is
-    /// cached on failure, so a missing file is probed again on the next call.
+    /// directory rather than the stylesheet or assembly location. When no file
+    /// exists, the path is looked up in the declaration table populated by
+    /// <see cref="Donkeh.UILab.ImageAttribute"/> and the matching embedded
+    /// resource is read. An explicit <c>packed:</c> prefix skips the file probe
+    /// entirely.
+    /// </para>
+    /// <para>
+    /// Missing files, unresolved packed paths and all I/O or base64 errors return
+    /// <see langword="null"/>. Nothing is cached on failure, so a missing source
+    /// is probed again on the next call.
     /// </para>
     /// </remarks>
     private byte[]? LoadBytes(string source)
@@ -426,28 +495,39 @@ public sealed unsafe class ImageCache : IDisposable
             }
         }
 
-        try
+        // A prefixed source is explicitly an embedded asset, so do not let a
+        // coincidentally named file on disk shadow it.
+        if (!PackedImage.IsPackedSource(source))
         {
-            var path = source;
-
-            if (!Path.IsPathRooted(path))
+            try
             {
-                path = Path.GetFullPath(path);
-            }
+                var path = source;
 
-            if (!File.Exists(path))
+                if (!Path.IsPathRooted(path))
+                {
+                    path = Path.GetFullPath(path);
+                }
+
+                if (File.Exists(path))
+                {
+                    var data = File.ReadAllBytes(path);
+                    _bytes[source] = data;
+                    return data;
+                }
+            }
+            catch
             {
-                return null;
+                // Fall through to the packed-asset lookup.
             }
-
-            var data = File.ReadAllBytes(path);
-            _bytes[source] = data;
-            return data;
         }
-        catch
+
+        if (PackedImage.TryGetBytes(source, out var packed))
         {
-            return null;
+            _bytes[source] = packed;
+            return packed;
         }
+
+        return null;
     }
 
     /// <summary>Deletes every cached texture and clears both caches.</summary>

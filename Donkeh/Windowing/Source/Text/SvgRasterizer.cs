@@ -39,6 +39,72 @@ internal static class SvgRasterizer
             return false;
         }
 
+        return TryRenderText(text, out pixels, out width, out height);
+    }
+
+    /// <summary>
+    /// Renders an SVG document held in encoded file or embedded-resource bytes.
+    /// </summary>
+    /// <param name="data">The encoded UTF-8 SVG document.</param>
+    /// <param name="pixels">Receives the RGBA buffer.</param>
+    /// <param name="width">Receives the bitmap width.</param>
+    /// <param name="height">Receives the bitmap height.</param>
+    /// <returns>
+    /// <see langword="true"/> when the bytes look like an SVG document and could
+    /// be rendered.
+    /// </returns>
+    /// <remarks>
+    /// This overload lets packed <c>.svg</c> assets and on-disk SVG files use the
+    /// same rasterizer as <c>data:</c> URIs. Binary image bytes are rejected
+    /// cheaply by checking the first non-whitespace byte for <c>&lt;</c>.
+    /// </remarks>
+    public static bool TryRender(ReadOnlySpan<byte> data, out byte[] pixels, out int width, out int height)
+    {
+        pixels = [];
+        width = 0;
+        height = 0;
+
+        var index = 0;
+
+        // Skip a UTF-8 BOM and leading whitespace so a formatted XML document is
+        // still recognised.
+        if (data.Length >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF)
+        {
+            index = 3;
+        }
+
+        while (index < data.Length && (data[index] == (byte)' ' || data[index] == (byte)'\t'
+            || data[index] == (byte)'\r' || data[index] == (byte)'\n'))
+        {
+            index++;
+        }
+
+        if (index >= data.Length || data[index] != (byte)'<')
+        {
+            return false;
+        }
+
+        return TryRenderText(
+            System.Text.Encoding.UTF8.GetString(data),
+            out pixels,
+            out width,
+            out height);
+    }
+
+    /// <summary>
+    /// Renders SVG text to tightly packed RGBA pixels.
+    /// </summary>
+    /// <param name="text">The decoded SVG document.</param>
+    /// <param name="pixels">Receives the RGBA buffer.</param>
+    /// <param name="width">Receives the bitmap width.</param>
+    /// <param name="height">Receives the bitmap height.</param>
+    /// <returns><see langword="true"/> when the document could be rendered.</returns>
+    private static bool TryRenderText(string text, out byte[] pixels, out int width, out int height)
+    {
+        pixels = [];
+        width = 0;
+        height = 0;
+
         try
         {
             var document = XDocument.Parse(text, LoadOptions.PreserveWhitespace);

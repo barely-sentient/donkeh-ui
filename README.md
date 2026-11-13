@@ -529,7 +529,7 @@ offers components, hooks, context and stylesheet attachment.
   subtrees so layout caches stay warm.
 - Implement component state, reducers, effects, layout effects, memo,
   callbacks, refs and context.
-- Attach CSS inline, from files, or from embedded resources.
+- Attach CSS and images inline, from files, or from embedded resources.
 
 **Key types**
 
@@ -544,6 +544,7 @@ offers components, hooks, context and stylesheet attachment.
 | `Ref<T>`, `Context<T>` | Mutable refs and context values. |
 | `AppRouter`, `AppRoutes`, `Route`, `Link` | In-app path routing with context-driven navigation. |
 | `Stylesheet` / `StylesheetAttribute` | CSS loading and embedded-resource declarations. |
+| `Image` / `ImageAttribute` | Packed-image declarations and embedded-image lookup for `src`, `url(...)` and window icons. |
 
 **Usage**
 
@@ -638,6 +639,20 @@ Components can navigate directly with
 `var setPage = UseContext(Router.SetPage);`. See
 [Donkeh.UILab](Donkeh/UILab/Source/README.md#routing) for the full API.
 
+Images can be packed into the assembly the same way as stylesheets. Mark each
+embedded file with `[Image]`, then reference its relative path from an `img`
+`src`, a CSS `url(...)`, or `WindowSettings.Icon`:
+
+```csharp
+[assembly: Image("Assets/logo.png")]
+
+H("img", new Props { Src = "Assets/logo.png" });
+```
+
+The path is tried on disk first and then in the packed declaration table. Use a
+`packed:` prefix (also `embedded:` or `asset:`) to force the embedded resource
+and prevent a same-named file from shadowing it.
+
 **Remarks**
 
 - Hooks must run in the **same order every render**; the runtime enforces this
@@ -662,6 +677,7 @@ Components can navigate directly with
 | `Donkeh/UILab/Tests` | `BuilderTests` | 6 | Attribute interning, nested children, props/events, empty attributes, text folding, mixed content, fragments. |
 | `Donkeh/UILab/Tests` | `ComponentTests` | 7 | In-place state patching, keyed reorder reuse, effects updating state, context, no-op state, unchanged-child revisions, functional updates. |
 | `Donkeh/UILab/Tests` | `RouterTests` | 17 | Route matching, wildcard and fallback routes, link activation, `SetPage` navigation, path normalisation. |
+| `Donkeh/UILab/Tests` | `ImageAssetTests` | 12 | Packed-image declarations, embedded resource lookup, file-name fallback, path disambiguation, `packed:` prefixes and missing-asset errors. |
 
 ---
 
@@ -694,7 +710,7 @@ controls, image/font caches, the OpenGL renderer and optional devtools.
 | `GLRenderer` | Batched OpenGL consumer of `InstructionBuffer` + `ConstantPool`. |
 | `FontManager` | System TrueType discovery, face/atlas caches, metrics. |
 | `TrueTypeTextMeasurer` | `ITextMeasurer` adapter over `FontManager`. |
-| `ImageCache` | Decoded image cache for file paths and data URIs. |
+| `ImageCache` | Decoded image cache for file paths, data URIs and packed images declared with `[Image]`. |
 | `HtmlDefaults` | Built-in user-agent stylesheet and HTML display defaults. |
 | `DevToolsWindowHost` | Standalone inspector window on its own STA thread. |
 | `Stylesheet` / `StylesheetAttribute` | Window-side stylesheet loading. |
@@ -728,8 +744,10 @@ Frameless windows can be rounded directly from CSS: a non-zero
 `border-radius` on the root element masks the native window to that shape and
 clears the area outside it to transparent, so the desktop shows through the
 corners. `WindowSettings.CornerRadius` overrides the CSS radius (or pins it to
-`CornerRadius.Zero` for a square frameless window). Full-screen windows ignore
-both.
+`CornerRadius.Zero` for a square frameless window). On Windows the native window
+region is shaped as well, so decorated windows and systems without per-pixel
+framebuffer transparency still show the rounded outline. Full-screen and
+maximized windows ignore both.
 
 **Rendering pipeline.** `GLRenderer` consumes the instruction opcodes:
 
@@ -922,7 +940,7 @@ var result = engine.Layout(documentRoot, new LayoutOptions
 | --- | --- | ---: | --- |
 | `Donkeh/Parser/Tests` | xUnit | 42 | `Donkeh.Parser`, `Donkeh.Data`, `Donkeh.DataEngine` |
 | `Donkeh/LayoutLab/Tests` | xUnit | 959 | `Donkeh.LayoutLab` (plus `Donkeh.Data` / `Donkeh.DataEngine` integration) |
-| `Donkeh/UILab/Tests` | xUnit | 30 | `Donkeh.UILab` |
+| `Donkeh/UILab/Tests` | xUnit | 42 | `Donkeh.UILab` |
 
 ### Module → test matrix
 
@@ -932,7 +950,7 @@ var result = engine.Layout(documentRoot, new LayoutOptions
 | `Donkeh.Data` | `MatchingTests`, `InteractionPseudoTests` | `StyleResolutionTests`, `LayoutCachingTests`, `BootstrapCompatibilityTests`. |
 | `Donkeh.DataEngine` | `DataEngineTests`, `MediaConditionTests` | Every LayoutLab fixture builds its stylesheet through `DataEngine`. |
 | `Donkeh.LayoutLab` | 26 classes, 959 tests | `UILab` tests assert layout-facing node revisions. |
-| `Donkeh.UILab` | `BuilderTests`, `ComponentTests`, `RouterTests` | — |
+| `Donkeh.UILab` | `BuilderTests`, `ComponentTests`, `RouterTests`, `ImageAssetTests` | - |
 | `Donkeh.Windowing` | none (requires GPU/window) | Consumes LayoutLab output; manual verification. |
 | `Donkeh.Inspector` | none | Manual verification; `ColorPreview` is unit-testable. |
 

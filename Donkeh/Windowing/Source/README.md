@@ -109,6 +109,27 @@ DejaVu/Liberation on Linux, Arial on macOS), caches faces and glyph atlases per
 pixel size, and exposes the same metrics to layout and painting. Missing
 codepoints fall back through a small system-font list.
 
+### Images, packed assets and icons
+
+`ImageCache` resolves a source in this order: a base64 `data:` URI, an on-disk
+file, then an embedded resource declared with
+`[assembly: Image("Assets/logo.png")]`. The same source strings work for
+`img src`, CSS `background-image: url(...)`, and `WindowSettings.Icon`. A
+`packed:` prefix forces the embedded lookup. SVG sources are rasterised whether
+they arrive as a data URI, a file or a packed resource.
+
+```csharp
+[assembly: Image("Assets/icon.png")]
+
+var window = new IgniteWindow(WindowSettings.Default with
+{
+    Icon = "packed:Assets/icon.png"
+});
+```
+
+The icon is applied after the native window is initialized, because Silk.NET's
+GLFW backend rejects `SetWindowIcon` before that point.
+
 ## Input and pseudo classes
 
 Interaction state is written onto the live DOM node, so it participates in the
