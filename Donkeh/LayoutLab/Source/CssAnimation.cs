@@ -147,3 +147,66 @@ public sealed class AnimationSpec
         };
     }
 }
+
+/// <summary>
+/// One entry of the CSS <c>transition</c> shorthand / longhands. Times are in
+/// seconds.
+/// </summary>
+/// <remarks>
+/// <para>
+/// This is a mutable reference type because the style resolver fills it in
+/// while parsing the shorthand. Computed styles clone each spec when they are
+/// copied, so per-element mutation does not leak across elements. Code that
+/// receives a spec from shared state should treat it as read-only or call
+/// <see cref="Clone"/> before modifying it.
+/// </para>
+/// <para>
+/// A property of <see cref="CssProperty.All"/> matches every interpolable
+/// property. <see cref="CssProperty.Unknown"/> represents <c>none</c>, which
+/// disables the layer. The runtime observes the base style each frame and
+/// starts a transition when a tracked property changes.
+/// </para>
+/// </remarks>
+public sealed class TransitionSpec
+{
+    /// <summary>Gets or sets the property this layer animates.</summary>
+    /// <value>
+    /// A concrete <see cref="CssProperty"/>, <see cref="CssProperty.All"/> for
+    /// every interpolable property, or <see cref="CssProperty.Unknown"/> for
+    /// <c>none</c>.
+    /// </value>
+    public CssProperty Property { get; set; } = CssProperty.All;
+
+    /// <summary>Gets or sets how long the transition runs, in seconds.</summary>
+    /// <value>A non-negative duration; zero or less disables the transition.</value>
+    public float Duration { get; set; }
+
+    /// <summary>Gets or sets the delay before the transition starts, in seconds.</summary>
+    /// <value>A signed delay; negative values start the transition part-way through.</value>
+    public float Delay { get; set; }
+
+    /// <summary>Raw timing function text, for example <c>linear</c> or <c>cubic-bezier(...)</c>.</summary>
+    /// <remarks>
+    /// The string is kept unparsed so the runtime can evaluate it per frame and
+    /// so unresolved values can round-trip. Defaults to <c>ease</c>.
+    /// </remarks>
+    public string TimingFunction { get; set; } = "ease";
+
+    /// <summary>Creates an independent copy of this specification.</summary>
+    /// <returns>A new <see cref="TransitionSpec"/> with the same values.</returns>
+    /// <remarks>
+    /// The copy is shallow: <see cref="TimingFunction"/> is an immutable string,
+    /// so sharing it is safe. Mutating the returned instance does not affect
+    /// this one.
+    /// </remarks>
+    public TransitionSpec Clone()
+    {
+        return new TransitionSpec
+        {
+            Property = Property,
+            Duration = Duration,
+            Delay = Delay,
+            TimingFunction = TimingFunction
+        };
+    }
+}

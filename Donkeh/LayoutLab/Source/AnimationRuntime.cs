@@ -8,9 +8,9 @@ using Donkeh.Parser;
 namespace Donkeh.LayoutLab;
 
 /// <summary>
-/// Evaluates CSS keyframe animations during layout. The engine keeps one
-/// runtime per <see cref="LayoutEngine"/> so animation start times survive
-/// frames. Only properties with a supported interpolator are animated;
+/// Evaluates CSS keyframe animations and transitions during layout. The engine
+/// keeps one runtime per <see cref="LayoutEngine"/> so animation start times
+/// survive frames. Only properties with a supported interpolator are animated;
 /// discrete properties switch at the segment midpoint and everything else
 /// keeps its base value.
 /// </summary>
@@ -217,14 +217,16 @@ internal sealed class AnimationRuntime
         double now)
     {
         var animations = baseStyle.Animations;
+        var transitions = baseStyle.Transitions;
 
-        if (animations is null || animations.Count == 0)
+        if ((animations is null || animations.Count == 0)
+            && (transitions is null || transitions.Count == 0))
         {
             _states.Remove(node);
             return baseStyle;
         }
 
-        var signature = Signature(animations);
+        var signature = Signature(animations, transitions);
 
         if (!_states.TryGetValue(node, out var state) || state.Signature != signature)
         {
@@ -241,43 +243,48 @@ internal sealed class AnimationRuntime
 
         ComputedStyle? animated = null;
 
-        for (var i = 0; i < animations.Count; i++)
+        if (animations is not null)
         {
-            var spec = animations[i];
-
-            if (string.IsNullOrWhiteSpace(spec.Name)
-                || spec.Name.Equals("none", StringComparison.OrdinalIgnoreCase))
+            for (var i = 0; i < animations.Count; i++)
             {
-                continue;
+                var spec = animations[i];
+
+                if (string.IsNullOrWhiteSpace(spec.Name)
+                    || spec.Name.Equals("none", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var track = GetTrack(spec.Name);
+
+                if (track is null)
+                {
+                    continue;
+                }
+
+                var active = TryEvaluate(spec, state.StartTime, now, out var progress, out var running);
+
+                if (running)
+                {
+                    HasRunningAnimations = true;
+                }
+
+                if (!active)
+                {
+                    continue;
+                }
+
+                if (animated is null)
+                {
+                    animated = state.Animated ??= baseStyle.CloneForAnimation();
+                    animated.CopyAllFrom(baseStyle);
+                }
+
+                ApplyTrack(animated, baseStyle, parent, track, progress);
             }
-
-            var track = GetTrack(spec.Name);
-
-            if (track is null)
-            {
-                continue;
-            }
-
-            var active = TryEvaluate(spec, state.StartTime, now, out var progress, out var running);
-
-            if (running)
-            {
-                HasRunningAnimations = true;
-            }
-
-            if (!active)
-            {
-                continue;
-            }
-
-            if (animated is null)
-            {
-                animated = state.Animated ??= baseStyle.CloneForAnimation();
-                animated.CopyAllFrom(baseStyle);
-            }
-
-            ApplyTrack(animated, baseStyle, parent, track, progress);
         }
+
+        animated = ApplyTransitions(baseStyle, parent, transitions, state, now, animated);
 
         if (animated is null)
         {
@@ -286,6 +293,314 @@ internal sealed class AnimationRuntime
 
         animated.IsAnimated = true;
         return animated;
+    }
+
+    /// <summary>
+    /// Properties observed when a transition layer targets <c>all</c>. The set
+    /// mirrors the properties <see cref="ApplyAnimated"/> can interpolate.
+    /// </summary>
+    private static readonly CssProperty[] TransitionProperties =
+    [
+        CssProperty.Opacity,
+        CssProperty.Transform,
+        CssProperty.Color,
+        CssProperty.BackgroundColor,
+        CssProperty.BorderColor,
+        CssProperty.BorderTopColor,
+        CssProperty.BorderRightColor,
+        CssProperty.BorderBottomColor,
+        CssProperty.BorderLeftColor,
+        CssProperty.OutlineColor,
+        CssProperty.Width,
+        CssProperty.Height,
+        CssProperty.MinWidth,
+        CssProperty.MinHeight,
+        CssProperty.MaxWidth,
+        CssProperty.MaxHeight,
+        CssProperty.Top,
+        CssProperty.Right,
+        CssProperty.Bottom,
+        CssProperty.Left,
+        CssProperty.FontSize,
+        CssProperty.LineHeight,
+        CssProperty.LetterSpacing,
+        CssProperty.RowGap,
+        CssProperty.ColumnGap,
+        CssProperty.OutlineWidth,
+        CssProperty.BorderSpacing,
+        CssProperty.Margin,
+        CssProperty.Padding,
+        CssProperty.BorderWidth,
+        CssProperty.MarginTop,
+        CssProperty.MarginRight,
+        CssProperty.MarginBottom,
+        CssProperty.MarginLeft,
+        CssProperty.PaddingTop,
+        CssProperty.PaddingRight,
+        CssProperty.PaddingBottom,
+        CssProperty.PaddingLeft,
+        CssProperty.BorderTopWidth,
+        CssProperty.BorderRightWidth,
+        CssProperty.BorderBottomWidth,
+        CssProperty.BorderLeftWidth,
+        CssProperty.FontWeight,
+        CssProperty.ZIndex,
+        CssProperty.Visibility,
+        CssProperty.Display,
+        CssProperty.TransformOrigin
+    ];
+
+    /// <summary>
+    /// Starts and advances CSS transitions by comparing the current base style
+    /// with the values observed on the previous frame.
+    /// </summary>
+    /// <param name="baseStyle">Unanimated style resolved for the current frame.</param>
+    /// <param name="parent">Parent style threaded through to the interpolators.</param>
+    /// <param name="transitions">Declared transition layers, or <see langword="null"/>.</param>
+    /// <param name="state">Retained per-node state holding the previous base values.</param>
+    /// <param name="now">Current monotonic time, in seconds.</param>
+    /// <param name="animated">
+    /// Animated style already created by keyframes for this frame, or
+    /// <see langword="null"/>.
+    /// </param>
+    /// <returns>
+    /// <paramref name="animated"/>, or a style containing the interpolated
+    /// transition values.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// On the first observation the current values are recorded as the
+    /// baseline, matching the CSS rule that transitions do not run on the
+    /// initial style. A later change starts a run from the previous value; a
+    /// change during a run starts from the currently painted value so retargeting
+    /// does not jump.
+    /// </para>
+    /// <para>
+    /// Runs are evaluated with the same timing-function implementation as
+    /// keyframes, so <c>cubic-bezier()</c> and the standard keywords behave
+    /// identically in both systems. Finished runs are dropped once their final
+    /// value has been applied.
+    /// </para>
+    /// </remarks>
+    private ComputedStyle? ApplyTransitions(
+        ComputedStyle baseStyle,
+        ComputedStyle? parent,
+        List<TransitionSpec>? transitions,
+        NodeAnimationState state,
+        double now,
+        ComputedStyle? animated)
+    {
+        if (transitions is null || transitions.Count == 0)
+        {
+            return animated;
+        }
+
+        var baseValues = state.BaseValues ??= [];
+        var runs = state.Runs ??= [];
+
+        if (!ReferenceEquals(state.LastBaseStyle, baseStyle))
+        {
+            state.LastBaseStyle = baseStyle;
+
+            if (HasAllTransition(transitions))
+            {
+                for (var i = 0; i < TransitionProperties.Length; i++)
+                {
+                    CaptureTransitionBase(transitions, baseValues, runs, baseStyle, animated, now, TransitionProperties[i]);
+                }
+            }
+            else
+            {
+                for (var i = 0; i < transitions.Count; i++)
+                {
+                    var property = transitions[i].Property;
+
+                    if (property is CssProperty.Unknown or CssProperty.All)
+                    {
+                        continue;
+                    }
+
+                    CaptureTransitionBase(transitions, baseValues, runs, baseStyle, animated, now, property);
+                }
+            }
+        }
+
+        if (runs.Count == 0)
+        {
+            return animated;
+        }
+
+        List<CssProperty>? finished = null;
+
+        foreach (var pair in runs)
+        {
+            var property = pair.Key;
+            var run = pair.Value;
+            var spec = FindTransitionSpec(transitions, property);
+
+            if (spec is null || spec.Property == CssProperty.Unknown)
+            {
+                (finished ??= []).Add(property);
+                continue;
+            }
+
+            var elapsed = now - run.Start - run.Delay;
+            var progress = run.Duration <= 0
+                ? 1
+                : Math.Clamp((float)(elapsed / run.Duration), 0, 1);
+            var eased = ApplyTimingFunction(run.TimingFunction, progress);
+
+            if (animated is null)
+            {
+                animated = state.Animated ??= baseStyle.CloneForAnimation();
+                animated.CopyAllFrom(baseStyle);
+            }
+
+            ApplyAnimated(animated, parent, property, run.From, run.To, eased);
+
+            if (progress < 1)
+            {
+                HasRunningAnimations = true;
+            }
+            else
+            {
+                (finished ??= []).Add(property);
+            }
+        }
+
+        if (finished is not null)
+        {
+            for (var i = 0; i < finished.Count; i++)
+            {
+                runs.Remove(finished[i]);
+            }
+        }
+
+        return animated;
+    }
+
+    /// <summary>Returns whether any transition layer targets every property.</summary>
+    /// <param name="transitions">Declared transition layers.</param>
+    /// <returns><see langword="true"/> when a layer uses <c>all</c>.</returns>
+    private static bool HasAllTransition(List<TransitionSpec> transitions)
+    {
+        for (var i = 0; i < transitions.Count; i++)
+        {
+            if (transitions[i].Property == CssProperty.All)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Records the current base value of one property and starts a transition
+    /// when that value changed since the previous frame.
+    /// </summary>
+    /// <param name="transitions">Declared transition layers.</param>
+    /// <param name="baseValues">Previous values keyed by property.</param>
+    /// <param name="runs">Active transitions keyed by property.</param>
+    /// <param name="baseStyle">Current unanimated style.</param>
+    /// <param name="animated">Style already animated this frame, if any.</param>
+    /// <param name="now">Current monotonic time, in seconds.</param>
+    /// <param name="property">Property to capture.</param>
+    /// <remarks>
+    /// Properties without a textual base representation are skipped, as are
+    /// layers configured with <c>none</c>. A zero duration or a missing layer
+    /// cancels any run for the property because the base value should apply
+    /// immediately.
+    /// </remarks>
+    private static void CaptureTransitionBase(
+        List<TransitionSpec> transitions,
+        Dictionary<CssProperty, string> baseValues,
+        Dictionary<CssProperty, TransitionRun> runs,
+        ComputedStyle baseStyle,
+        ComputedStyle? animated,
+        double now,
+        CssProperty property)
+    {
+        var current = GetBaseValue(baseStyle, property);
+
+        if (current is null)
+        {
+            return;
+        }
+
+        var spec = FindTransitionSpec(transitions, property);
+
+        if (spec is null || spec.Property == CssProperty.Unknown)
+        {
+            runs.Remove(property);
+            return;
+        }
+
+        if (spec.Duration <= 0)
+        {
+            runs.Remove(property);
+            baseValues[property] = current;
+            return;
+        }
+
+        if (baseValues.TryGetValue(property, out var previous)
+            && !string.Equals(previous, current, StringComparison.Ordinal))
+        {
+            var from = previous;
+
+            if (runs.ContainsKey(property) && animated is not null)
+            {
+                from = GetBaseValue(animated, property) ?? previous;
+            }
+
+            runs[property] = new TransitionRun
+            {
+                From = from,
+                To = current,
+                Start = now,
+                Duration = spec.Duration,
+                Delay = spec.Delay,
+                TimingFunction = spec.TimingFunction
+            };
+        }
+
+        baseValues[property] = current;
+    }
+
+    /// <summary>
+    /// Finds the transition layer for a property, preferring an explicit entry
+    /// over an <c>all</c> layer.
+    /// </summary>
+    /// <param name="transitions">Declared transition layers.</param>
+    /// <param name="property">Property being animated.</param>
+    /// <returns>The matching layer, or <see langword="null"/> when none applies.</returns>
+    /// <remarks>
+    /// When a property appears more than once, the last explicit entry wins,
+    /// matching how later values of <c>transition-property</c> override earlier
+    /// ones.
+    /// </remarks>
+    private static TransitionSpec? FindTransitionSpec(
+        List<TransitionSpec> transitions,
+        CssProperty property)
+    {
+        TransitionSpec? explicitMatch = null;
+        TransitionSpec? allMatch = null;
+
+        for (var i = 0; i < transitions.Count; i++)
+        {
+            var spec = transitions[i];
+
+            if (spec.Property == property)
+            {
+                explicitMatch = spec;
+            }
+            else if (spec.Property == CssProperty.All)
+            {
+                allMatch = spec;
+            }
+        }
+
+        return explicitMatch ?? allMatch;
     }
 
     // ------------------------------------------------------------- keyframes
@@ -1631,6 +1946,9 @@ internal sealed class AnimationRuntime
             CssProperty.ColumnGap => style.ColumnGap.ToString(),
             CssProperty.OutlineWidth => style.OutlineWidth.ToString(),
             CssProperty.BorderSpacing => style.BorderSpacing.ToString(),
+            CssProperty.Margin => FormatLength4(style.Margin),
+            CssProperty.Padding => FormatLength4(style.Padding),
+            CssProperty.BorderWidth => FormatLength4(style.BorderWidth),
             CssProperty.MarginTop => style.Margin.Top.ToString(),
             CssProperty.MarginRight => style.Margin.Right.ToString(),
             CssProperty.MarginBottom => style.Margin.Bottom.ToString(),
@@ -1659,6 +1977,19 @@ internal sealed class AnimationRuntime
     private static string FormatColor(uint color)
     {
         return $"#{CssColor.Red(color):X2}{CssColor.Green(color):X2}{CssColor.Blue(color):X2}{CssColor.Alpha(color):X2}";
+    }
+
+    /// <summary>Formats four sides as a one-to-four value CSS shorthand.</summary>
+    /// <param name="value">Edges to serialise.</param>
+    /// <returns>Text such as <c>1px 2px 3px 4px</c>.</returns>
+    /// <remarks>
+    /// All four values are always emitted, even when they are equal, because
+    /// the animation parser accepts that form and keeping the output uniform
+    /// makes transition snapshots easy to compare.
+    /// </remarks>
+    private static string FormatLength4(CssLength4 value)
+    {
+        return value.Top + " " + value.Right + " " + value.Bottom + " " + value.Left;
     }
 
     /// <summary>Serialises a parsed transform list back to CSS transform text.</summary>
@@ -1896,30 +2227,48 @@ internal sealed class AnimationRuntime
     /// detect a changed declaration.
     /// </summary>
     /// <param name="animations">Animation list attached to a computed style.</param>
+    /// <param name="transitions">Transition list attached to a computed style.</param>
     /// <returns>A hash combining every timing field of every spec, in list order.</returns>
     /// <remarks>
     /// The name, duration, delay, iteration count, direction, fill mode, play
     /// state and timing function participate; the list order and length are
-    /// implied by how the hash is accumulated. A changed signature restarts the
-    /// node's animation. Hash collisions are theoretically possible, in which
-    /// case a changed declaration may not restart, so this is a change detector
-    /// rather than an identity.
+    /// implied by how the hash is accumulated. Transition layers contribute
+    /// their property, duration, delay and timing function. A changed signature
+    /// restarts the node's animation and its baseline, which is why a transition
+    /// edits does not animate from a stale value. Hash collisions are
+    /// theoretically possible, in which case a changed declaration may not
+    /// restart, so this is a change detector rather than an identity.
     /// </remarks>
-    private static int Signature(List<AnimationSpec> animations)
+    private static int Signature(List<AnimationSpec>? animations, List<TransitionSpec>? transitions)
     {
         var hash = new HashCode();
 
-        for (var i = 0; i < animations.Count; i++)
+        if (animations is not null)
         {
-            var spec = animations[i];
-            hash.Add(spec.Name);
-            hash.Add(spec.Duration);
-            hash.Add(spec.Delay);
-            hash.Add(spec.IterationCount);
-            hash.Add((int)spec.Direction);
-            hash.Add((int)spec.FillMode);
-            hash.Add((int)spec.PlayState);
-            hash.Add(spec.TimingFunction);
+            for (var i = 0; i < animations.Count; i++)
+            {
+                var spec = animations[i];
+                hash.Add(spec.Name);
+                hash.Add(spec.Duration);
+                hash.Add(spec.Delay);
+                hash.Add(spec.IterationCount);
+                hash.Add((int)spec.Direction);
+                hash.Add((int)spec.FillMode);
+                hash.Add((int)spec.PlayState);
+                hash.Add(spec.TimingFunction);
+            }
+        }
+
+        if (transitions is not null)
+        {
+            for (var i = 0; i < transitions.Count; i++)
+            {
+                var spec = transitions[i];
+                hash.Add((int)spec.Property);
+                hash.Add(spec.Duration);
+                hash.Add(spec.Delay);
+                hash.Add(spec.TimingFunction);
+            }
         }
 
         return hash.ToHashCode();
@@ -1960,6 +2309,48 @@ internal sealed class AnimationRuntime
         /// frame. Never <see langword="null"/> once animation has applied.
         /// </remarks>
         public ComputedStyle? Animated;
+
+        /// <summary>
+        /// Last observed base value for each transitioned property, formatted as
+        /// CSS text. Used to detect a style change on the following frame.
+        /// </summary>
+        public Dictionary<CssProperty, string>? BaseValues;
+
+        /// <summary>Active transitions keyed by property.</summary>
+        public Dictionary<CssProperty, TransitionRun>? Runs;
+
+        /// <summary>
+        /// Base style instance observed on the previous frame. Transitions only
+        /// need to rescan values when this changes, which keeps
+        /// <c>transition: all</c> cheap while a run is in flight.
+        /// </summary>
+        public ComputedStyle? LastBaseStyle;
+    }
+
+    /// <summary>One in-flight CSS transition for a single property.</summary>
+    /// <remarks>
+    /// Created by <see cref="CaptureTransitionBase"/> when a base value changes
+    /// and removed once the run reaches its end.
+    /// </remarks>
+    private sealed class TransitionRun
+    {
+        /// <summary>Value at the start of the run, as CSS text.</summary>
+        public string From = string.Empty;
+
+        /// <summary>Target value, as CSS text.</summary>
+        public string To = string.Empty;
+
+        /// <summary>Clock time at which the run was created, in seconds.</summary>
+        public double Start;
+
+        /// <summary>Duration of the run, in seconds.</summary>
+        public float Duration;
+
+        /// <summary>Delay before the run starts, in seconds.</summary>
+        public float Delay;
+
+        /// <summary>Timing function text used for the run.</summary>
+        public string TimingFunction = "ease";
     }
 
     /// <summary>An ordered set of keyframe stops for one animation name.</summary>

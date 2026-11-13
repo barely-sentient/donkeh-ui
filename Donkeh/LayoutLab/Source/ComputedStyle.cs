@@ -554,6 +554,14 @@ public sealed class ComputedStyle
     /// </remarks>
     public List<AnimationSpec>? Animations { get; set; }
 
+    /// <summary>Transition entries resolved from the <c>transition</c> properties.</summary>
+    /// <remarks>
+    /// The list is shared by <see cref="CopyAllFrom"/> and cloned only by
+    /// <see cref="Clone"/>. <see langword="null"/> when the element has no
+    /// transitions.
+    /// </remarks>
+    public List<TransitionSpec>? Transitions { get; set; }
+
     /// <summary>True when this style is the result of applying an animation at the current frame.</summary>
     /// <remarks>
     /// Set by the animation runtime and exposed through
@@ -805,10 +813,11 @@ public sealed class ComputedStyle
     /// <remarks>
     /// <para>
     /// <see cref="CustomProperties"/>, <see cref="Animations"/>,
-    /// <see cref="BackgroundImages"/>, <see cref="BoxShadows"/>,
-    /// <see cref="Filter"/>, <see cref="ClipPath"/>, <see cref="Mask"/>,
-    /// <see cref="StyleParent"/> and <see cref="CachedBackgroundSpecs"/> are
-    /// all shared. The copy must not mutate any of them.
+    /// <see cref="Transitions"/>, <see cref="BackgroundImages"/>,
+    /// <see cref="BoxShadows"/>, <see cref="Filter"/>, <see cref="ClipPath"/>,
+    /// <see cref="Mask"/>, <see cref="StyleParent"/> and
+    /// <see cref="CachedBackgroundSpecs"/> are all shared. The copy must not
+    /// mutate any of them.
     /// </para>
     /// <para>
     /// The runtime follows this call with <see cref="CopyAllFrom"/> to replace
@@ -844,6 +853,16 @@ public sealed class ComputedStyle
             }
         }
 
+        if (Transitions is not null)
+        {
+            copy.Transitions = new List<TransitionSpec>(Transitions.Count);
+
+            for (var i = 0; i < Transitions.Count; i++)
+            {
+                copy.Transitions.Add(Transitions[i].Clone());
+            }
+        }
+
         return copy;
     }
 
@@ -852,8 +871,9 @@ public sealed class ComputedStyle
     /// <remarks>
     /// Reference-typed members are copied by reference, not cloned:
     /// <see cref="CustomProperties"/>, <see cref="UnsupportedProperties"/>,
-    /// <see cref="Animations"/>, <see cref="BackgroundImages"/>,
-    /// <see cref="BoxShadows"/> and the parsed paint specs end up shared.
+    /// <see cref="Animations"/>, <see cref="Transitions"/>,
+    /// <see cref="BackgroundImages"/>, <see cref="BoxShadows"/> and the parsed
+    /// paint specs end up shared.
     /// <see cref="CachedBackgroundSpecs"/> is copied by reference; its validation
     /// compares the copied background inputs, so a later mutation rebuilds it.
     /// </remarks>
@@ -979,6 +999,7 @@ public sealed class ComputedStyle
         StyleParent = source.StyleParent;
         UnsupportedProperties = source.UnsupportedProperties;
         Animations = source.Animations;
+        Transitions = source.Transitions;
         IsAnimated = source.IsAnimated;
         UsesViewportHeight = source.UsesViewportHeight;
         CachedBackgroundSpecs = source.CachedBackgroundSpecs;

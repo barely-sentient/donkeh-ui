@@ -1,4 +1,5 @@
 using System.Globalization;
+using Donkeh.Parser;
 
 namespace Donkeh.LayoutLab;
 
@@ -525,5 +526,267 @@ public sealed partial class StyleResolver
         }
 
         return tokens;
+    }
+
+    // ------------------------------------------------------------ transitions
+
+    /// <summary>
+    /// Applies one comma-separated transition longhand across the transition
+    /// list.
+    /// </summary>
+    /// <param name="style">The style being updated.</param>
+    /// <param name="value">The longhand value, possibly a comma-separated list.</param>
+    /// <param name="apply">Sets one field on the spec at the matching index.</param>
+    /// <remarks>
+    /// <para>
+    /// The transition list is created with a single default layer when no
+    /// <c>transition-property</c> has been seen yet, so setting only a duration
+    /// still produces a usable transition.
+    /// </para>
+    /// <para>
+    /// Values repeat cyclically to match the layer count, mirroring how CSS
+    /// repeats a shorter duration list. Entries beyond the layer count are
+    /// ignored, because <c>transition-property</c> owns the number of layers.
+    /// </para>
+    /// </remarks>
+    private static void ApplyTransitionLonghand(
+        ComputedStyle style,
+        string value,
+        Action<TransitionSpec, string> apply)
+    {
+        var parts = CssValueParser.SplitTopLevel(value, ',');
+        var list = style.Transitions ??= [];
+
+        if (parts.Count == 0)
+        {
+            return;
+        }
+
+        if (list.Count == 0)
+        {
+            list.Add(new TransitionSpec());
+        }
+
+        for (var i = 0; i < list.Count; i++)
+        {
+            var part = parts[i % parts.Count].Trim();
+
+            if (part.Length > 0)
+            {
+                apply(list[i], part);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Applies <c>transition-property</c>.
+    /// </summary>
+    /// <param name="style">The style being updated.</param>
+    /// <param name="value">A property name or comma-separated name list.</param>
+    /// <remarks>
+    /// The list length becomes the number of layers. Existing entries keep
+    /// their duration, delay and timing function so a later
+    /// <c>transition-property</c> can refine an earlier shorthand.
+    /// </remarks>
+    private static void ApplyTransitionProperty(ComputedStyle style, string value)
+    {
+        var parts = CssValueParser.SplitTopLevel(value, ',');
+        var list = style.Transitions ??= [];
+
+        if (parts.Count == 0)
+        {
+            return;
+        }
+
+        var existing = list.Count;
+
+        while (list.Count < parts.Count)
+        {
+            // Repeat the existing layers so a duration or timing function
+            // declared before transition-property still reaches every new
+            // layer, matching CSS's cyclic list behaviour.
+            list.Add(existing == 0
+                ? new TransitionSpec()
+                : list[list.Count % existing].Clone());
+        }
+
+        if (list.Count > parts.Count)
+        {
+            list.RemoveRange(parts.Count, list.Count - parts.Count);
+        }
+
+        for (var i = 0; i < parts.Count; i++)
+        {
+            var part = parts[i].Trim();
+
+            if (part.Length > 0 && TryParseTransitionProperty(part, out var property))
+            {
+                list[i].Property = property;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Applies a time-valued transition longhand, such as duration or delay.
+    /// </summary>
+    /// <param name="style">The style being updated.</param>
+    /// <param name="value">A time or comma-separated time list.</param>
+    /// <param name="apply">Sets the field on the matching spec, in seconds.</param>
+    private static void ApplyTransitionTime(
+        ComputedStyle style,
+        string value,
+        Action<TransitionSpec, float> apply)
+    {
+        ApplyTransitionLonghand(style, value, (spec, part) =>
+        {
+            if (TryParseTime(part, out var seconds))
+            {
+                apply(spec, seconds);
+            }
+        });
+    }
+
+    /// <summary>
+    /// Applies <c>transition-timing-function</c>.
+    /// </summary>
+    /// <param name="style">The style being updated.</param>
+    /// <param name="value">A timing function or comma-separated list.</param>
+    /// <remarks>
+    /// The function text is stored verbatim so the animation runtime can
+    /// evaluate keywords, <c>cubic-bezier()</c>, <c>steps()</c> and
+    /// <c>linear()</c> itself. Unrecognised values leave the existing function
+    /// unchanged.
+    /// </remarks>
+    private static void ApplyTransitionTimingFunction(ComputedStyle style, string value)
+    {
+        ApplyTransitionLonghand(style, value, static (spec, part) =>
+        {
+            if (IsTimingFunction(part.ToLowerInvariant()))
+            {
+                spec.TimingFunction = part;
+            }
+        });
+    }
+
+    /// <summary>
+    /// Parses the comma-separated <c>transition</c> shorthand into specs.
+    /// </summary>
+    /// <param name="value">The cleaned, variable-substituted shorthand.</param>
+    /// <returns>
+    /// One spec per non-empty layer, or <see langword="null"/> when the value
+    /// has no layers.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// Tokens are classified by shape rather than position, mirroring the
+    /// unordered grammar. The first time is the duration and the second is the
+    /// delay. Timing functions are recognised by
+    /// <see cref="IsTimingFunction"/> and property names by
+    /// <see cref="TryParseTransitionProperty"/>; anything else is ignored.
+    /// </para>
+    /// <para>
+    /// A layer without an explicit property defaults to <c>all</c>. The
+    /// <c>none</c> keyword disables that layer. The result replaces
+    /// <see cref="ComputedStyle.Transitions"/> wholesale; subsequent longhands
+    /// then overlay it by index.
+    /// </para>
+    /// </remarks>
+    private static List<TransitionSpec>? ParseTransitionShorthand(string value)
+    {
+        var parts = CssValueParser.SplitTopLevel(value, ',');
+        var list = new List<TransitionSpec>(parts.Count);
+
+        for (var i = 0; i < parts.Count; i++)
+        {
+            var part = parts[i].Trim();
+
+            if (part.Length == 0)
+            {
+                continue;
+            }
+
+            var spec = new TransitionSpec();
+            var tokens = SplitWhitespaceTopLevel(part);
+            var timeCount = 0;
+
+            for (var t = 0; t < tokens.Count; t++)
+            {
+                var token = tokens[t];
+                var lower = token.ToLowerInvariant();
+
+                if (TryParseTime(lower, out var seconds))
+                {
+                    if (timeCount == 0)
+                    {
+                        spec.Duration = seconds;
+                    }
+                    else if (timeCount == 1)
+                    {
+                        spec.Delay = seconds;
+                    }
+
+                    timeCount++;
+                    continue;
+                }
+
+                if (lower == "none")
+                {
+                    spec.Property = CssProperty.Unknown;
+                    continue;
+                }
+
+                if (IsTimingFunction(lower))
+                {
+                    spec.TimingFunction = lower;
+                    continue;
+                }
+
+                if (TryParseTransitionProperty(lower, out var property))
+                {
+                    spec.Property = property;
+                }
+            }
+
+            list.Add(spec);
+        }
+
+        return list.Count == 0 ? null : list;
+    }
+
+    /// <summary>
+    /// Resolves a <c>transition-property</c> token to a property id.
+    /// </summary>
+    /// <param name="text">The lower-case token to resolve.</param>
+    /// <param name="property">
+    /// Receives the property, <see cref="CssProperty.All"/> for <c>all</c>, or
+    /// <see cref="CssProperty.Unknown"/> for <c>none</c>.
+    /// </param>
+    /// <returns><see langword="true"/> when the token is a recognised name.</returns>
+    /// <remarks>
+    /// Unsupported property names are rejected rather than stored, so an
+    /// unrecognised token cannot accidentally match every layer.
+    /// </remarks>
+    private static bool TryParseTransitionProperty(string text, out CssProperty property)
+    {
+        if (text.Equals("all", StringComparison.OrdinalIgnoreCase))
+        {
+            property = CssProperty.All;
+            return true;
+        }
+
+        if (text.Equals("none", StringComparison.OrdinalIgnoreCase))
+        {
+            property = CssProperty.Unknown;
+            return true;
+        }
+
+        if (InternTable.TryGetId(text, out var id))
+        {
+            property = CssPropertyIds.Get(id);
+            return property != CssProperty.Unknown;
+        }
+
+        property = CssProperty.Unknown;
+        return false;
     }
 }

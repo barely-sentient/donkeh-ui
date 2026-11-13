@@ -370,7 +370,17 @@ public enum CssProperty : ushort
     /// <summary><c>animation-fill-mode</c>.</summary>
     AnimationFillMode,
     /// <summary><c>animation-play-state</c>.</summary>
-    AnimationPlayState
+    AnimationPlayState,
+    /// <summary><c>transition</c>; shorthand for all transition longhands.</summary>
+    Transition,
+    /// <summary><c>transition-property</c>.</summary>
+    TransitionProperty,
+    /// <summary><c>transition-duration</c>.</summary>
+    TransitionDuration,
+    /// <summary><c>transition-timing-function</c>.</summary>
+    TransitionTimingFunction,
+    /// <summary><c>transition-delay</c>.</summary>
+    TransitionDelay
 }
 
 /// <summary>
@@ -587,7 +597,12 @@ public static class CssPropertyIds
             ("animation-iteration-count", CssProperty.AnimationIterationCount),
             ("animation-direction", CssProperty.AnimationDirection),
             ("animation-fill-mode", CssProperty.AnimationFillMode),
-            ("animation-play-state", CssProperty.AnimationPlayState)
+            ("animation-play-state", CssProperty.AnimationPlayState),
+            ("transition", CssProperty.Transition),
+            ("transition-property", CssProperty.TransitionProperty),
+            ("transition-duration", CssProperty.TransitionDuration),
+            ("transition-timing-function", CssProperty.TransitionTimingFunction),
+            ("transition-delay", CssProperty.TransitionDelay)
         };
 
         Values = new CssProperty[entries.Length];

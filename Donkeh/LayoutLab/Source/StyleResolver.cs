@@ -1502,6 +1502,26 @@ public sealed partial class StyleResolver
                 ApplyAnimationTimingFunction(style, value);
                 break;
 
+            case CssProperty.Transition:
+                style.Transitions = ParseTransitionShorthand(value);
+                break;
+
+            case CssProperty.TransitionProperty:
+                ApplyTransitionProperty(style, value);
+                break;
+
+            case CssProperty.TransitionDuration:
+                ApplyTransitionTime(style, value, static (spec, seconds) => spec.Duration = seconds);
+                break;
+
+            case CssProperty.TransitionDelay:
+                ApplyTransitionTime(style, value, static (spec, seconds) => spec.Delay = seconds);
+                break;
+
+            case CssProperty.TransitionTimingFunction:
+                ApplyTransitionTimingFunction(style, value);
+                break;
+
             default:
                 style.UnsupportedProperties ??= [];
                 style.UnsupportedProperties.Add(rulePropertyId(property));
