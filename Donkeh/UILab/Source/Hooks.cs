@@ -648,7 +648,7 @@ namespace Donkeh.UILab
         /// </remarks>
         protected Action Callback(Action callback)
         {
-            return Memo(() => callback);
+            return callback;
         }
 
         /// <summary>
@@ -662,7 +662,7 @@ namespace Donkeh.UILab
         /// </exception>
         protected Action Callback(Action callback, params object?[] deps)
         {
-            return Memo(() => callback, deps);
+            return MemoValue(callback, deps);
         }
 
         /// <summary>
@@ -677,7 +677,7 @@ namespace Donkeh.UILab
         /// </exception>
         protected Func<T> Callback<T>(Func<T> callback)
         {
-            return Memo(() => callback);
+            return callback;
         }
 
         /// <summary>
@@ -692,7 +692,7 @@ namespace Donkeh.UILab
         /// </exception>
         protected Func<T> Callback<T>(Func<T> callback, params object?[] deps)
         {
-            return Memo(() => callback, deps);
+            return MemoValue(callback, deps);
         }
 
         /// <summary>
@@ -929,6 +929,25 @@ namespace Donkeh.UILab
                 hook.Value = factory();
                 hook.Deps = deps;
                 hook.HasDeps = hasDeps;
+            }
+
+            return hook.Value;
+        }
+
+        /// <summary>Memoises an already-created value without wrapping it in a factory.</summary>
+        /// <typeparam name="T">The value type.</typeparam>
+        /// <param name="value">The value for this render.</param>
+        /// <param name="deps">The dependency array.</param>
+        /// <returns>The cached value, or <paramref name="value"/> when dependencies changed.</returns>
+        private T MemoValue<T>(T value, object?[]? deps)
+        {
+            var hook = GetHook<MemoHook<T>>(out var created);
+
+            if (created || !DepsEqual(hook.Deps, deps))
+            {
+                hook.Value = value;
+                hook.Deps = deps;
+                hook.HasDeps = true;
             }
 
             return hook.Value;

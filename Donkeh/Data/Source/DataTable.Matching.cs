@@ -216,7 +216,10 @@ namespace Donkeh.Data
                 }
             }
 
-            matched.Sort(CompareMatchedRules);
+            if (matched.Count > 1)
+            {
+                CollectionsMarshal.AsSpan(matched).Sort(new MatchedRuleComparer());
+            }
 
             if (_matchBuffer.Length < matched.Count)
             {
@@ -1085,6 +1088,12 @@ namespace Donkeh.Data
             }
 
             return a.Order.CompareTo(b.Order);
+        }
+
+        /// <summary>Struct comparer so the sort does not go through a delegate.</summary>
+        private readonly struct MatchedRuleComparer : IComparer<MatchedRule>
+        {
+            public int Compare(MatchedRule x, MatchedRule y) => CompareMatchedRules(x, y);
         }
     }
 }

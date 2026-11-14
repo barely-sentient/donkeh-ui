@@ -768,11 +768,8 @@ namespace Donkeh.DataEngine
             {
                 if (valueEnd > valueStart)
                 {
-                    var propertyLength = NormalizeTokens(start, colon, lowerCase: !customProperty);
-                    var propertyId = InternTable.Intern(_textBuffer.AsSpan(0, propertyLength));
-
-                    var valueLength = NormalizeTokens(valueStart, valueEnd, lowerCase: false);
-                    var valueId = InternTable.Intern(_textBuffer.AsSpan(0, valueLength));
+                    var propertyId = NormalizeAndIntern(start, colon, lowerCase: !customProperty);
+                    var valueId = NormalizeAndIntern(valueStart, valueEnd, lowerCase: false);
 
                     var contextId = _descriptorContextId;
                     // Margin boxes: if inside a margin box, context is the box name.
@@ -802,11 +799,8 @@ namespace Donkeh.DataEngine
             {
                 if (valueEnd > valueStart && !selectors.IsEmpty)
                 {
-                    var propertyLength = NormalizeTokens(start, colon, lowerCase: !customProperty);
-                    var propertyId = InternTable.Intern(_textBuffer.AsSpan(0, propertyLength));
-
-                    var valueLength = NormalizeTokens(valueStart, valueEnd, lowerCase: false);
-                    var valueId = InternTable.Intern(_textBuffer.AsSpan(0, valueLength));
+                    var propertyId = NormalizeAndIntern(start, colon, lowerCase: !customProperty);
+                    var valueId = NormalizeAndIntern(valueStart, valueEnd, lowerCase: false);
 
                     var conditionId = _context.ConditionId;
                     foreach (var selectorId in selectors)
@@ -838,11 +832,8 @@ namespace Donkeh.DataEngine
                 return;
             }
 
-            var propertyLength2 = NormalizeTokens(start, colon, lowerCase: !customProperty);
-            var propertyId2 = InternTable.Intern(_textBuffer.AsSpan(0, propertyLength2));
-
-            var valueLength2 = NormalizeTokens(valueStart, valueEnd, lowerCase: false);
-            var valueId2 = InternTable.Intern(_textBuffer.AsSpan(0, valueLength2));
+            var propertyId2 = NormalizeAndIntern(start, colon, lowerCase: !customProperty);
+            var valueId2 = NormalizeAndIntern(valueStart, valueEnd, lowerCase: false);
 
             var conditionId2 = _context.ConditionId;
             var layerId = CurrentLayerId;
@@ -900,6 +891,53 @@ namespace Donkeh.DataEngine
             }
 
             return length;
+        }
+
+        /// <summary>
+        /// Interns a declaration's property or value, taking the token's existing
+        /// id when a single token already has the required casing.
+        /// </summary>
+        /// <param name="start">First token index.</param>
+        /// <param name="endExclusive">Exclusive last token index.</param>
+        /// <param name="lowerCase">Whether property-name folding is required.</param>
+        /// <returns>The interned id of the normalised text.</returns>
+        private int NormalizeAndIntern(int start, int endExclusive, bool lowerCase)
+        {
+            if (endExclusive - start == 1)
+            {
+                var token = _tokens[start];
+
+                if (!lowerCase || IsLowercase(token.InternedId))
+                {
+                    return token.InternedId;
+                }
+            }
+
+            var length = NormalizeTokens(start, endExclusive, lowerCase);
+            return InternTable.Intern(_textBuffer.AsSpan(0, length));
+        }
+
+        /// <summary>Returns whether interned text already contains no ASCII uppercase letters.</summary>
+        /// <param name="id">The interned id to inspect.</param>
+        /// <returns><see langword="true"/> when no <c>A</c>–<c>Z</c> is present.</returns>
+        private static bool IsLowercase(int id)
+        {
+            var text = InternTable.GetString(id);
+
+            if (text is null)
+            {
+                return true;
+            }
+
+            for (var i = 0; i < text.Length; i++)
+            {
+                if (text[i] is >= 'A' and <= 'Z')
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         /// <summary>

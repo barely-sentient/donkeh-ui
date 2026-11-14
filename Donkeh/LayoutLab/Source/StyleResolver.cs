@@ -40,6 +40,8 @@ public sealed partial class StyleResolver
     /// <see cref="StyleValueCache.Clear"/> is called.
     /// </remarks>
     private readonly StyleValueCache _cache;
+    /// <summary>Reused inline-declaration list so styles are parsed once per resolve.</summary>
+    private readonly List<(string Name, string Value)> _inlineDeclarations = [];
     /// <summary>The frame options used for the default font size and root length context.</summary>
     private readonly LayoutOptions _options;
     /// <summary>
@@ -304,9 +306,18 @@ public sealed partial class StyleResolver
         }
 
         var hasCustom = false;
+        var declarations = _inlineDeclarations;
+        declarations.Clear();
 
-        foreach (var (name, value) in EnumerateInlineDeclarations(css))
+        foreach (var pair in EnumerateInlineDeclarations(css))
         {
+            declarations.Add(pair);
+        }
+
+        for (var i = 0; i < declarations.Count; i++)
+        {
+            var (name, value) = declarations[i];
+
             if (!name.StartsWith("--", StringComparison.Ordinal))
             {
                 continue;
@@ -321,8 +332,10 @@ public sealed partial class StyleResolver
             style.RefreshCustomPropertyHash();
         }
 
-        foreach (var (name, value) in EnumerateInlineDeclarations(css))
+        for (var i = 0; i < declarations.Count; i++)
         {
+            var (name, value) = declarations[i];
+
             if (name.StartsWith("--", StringComparison.Ordinal))
             {
                 continue;

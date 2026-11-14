@@ -278,6 +278,8 @@ public sealed unsafe class ImageCache : IDisposable
             return;
         }
 
+        var created = false;
+
         if (!_entries.TryGetValue(source, out var entry)
             || entry.Texture == 0
             || entry.Width != width
@@ -296,6 +298,7 @@ public sealed unsafe class ImageCache : IDisposable
             _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)GLEnum.ClampToEdge);
             entry = new ImageEntry(texture, width, height);
             _entries[source] = entry;
+            created = true;
         }
         else
         {
@@ -306,16 +309,34 @@ public sealed unsafe class ImageCache : IDisposable
 
         fixed (byte* pixels = rgba)
         {
-            _gl.TexImage2D(
-                TextureTarget.Texture2D,
-                0,
-                InternalFormat.Rgba8,
-                (uint)width,
-                (uint)height,
-                0,
-                PixelFormat.Rgba,
-                PixelType.UnsignedByte,
-                pixels);
+            if (created)
+            {
+                _gl.TexImage2D(
+                    TextureTarget.Texture2D,
+                    0,
+                    InternalFormat.Rgba8,
+                    (uint)width,
+                    (uint)height,
+                    0,
+                    PixelFormat.Rgba,
+                    PixelType.UnsignedByte,
+                    pixels);
+            }
+            else
+            {
+                // Same-size frames update in place; re-specifying the image
+                // would reallocate texture storage every frame.
+                _gl.TexSubImage2D(
+                    TextureTarget.Texture2D,
+                    0,
+                    0,
+                    0,
+                    (uint)width,
+                    (uint)height,
+                    PixelFormat.Rgba,
+                    PixelType.UnsignedByte,
+                    pixels);
+            }
         }
 
         _gl.BindTexture(TextureTarget.Texture2D, 0);

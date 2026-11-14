@@ -298,6 +298,15 @@ public sealed partial class LayoutEngine
             var x = cellX + item.Margin.Left + AlignGridOffset(justify, cellWidth - itemWidth - item.Margin.Horizontal);
             var y = cellY + item.Margin.Top + AlignGridOffset(align, cellHeight - itemHeight - item.Margin.Vertical);
 
+            if (!stretchHeight && MathF.Abs(itemWidth - naturalWidths[i]) < 0.01f)
+            {
+                // Pass one already laid this item out at this exact width. Only
+                // its position changed, so translate the finished subtree
+                // instead of walking it again.
+                item.Translate(x - item.BorderBox.X, y - item.BorderBox.Y);
+                continue;
+            }
+
             PrepareAndMeasureWidth(item, content.Width, itemWidth, false, false, false);
             LayoutPreparedBox(
                 item,

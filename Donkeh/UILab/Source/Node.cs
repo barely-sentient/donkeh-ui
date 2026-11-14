@@ -886,7 +886,8 @@ namespace Donkeh.UILab
                 Array.Resize(ref buffer, count);
             }
 
-            SetInternedClassName(buffer);
+            ClassIds = buffer;
+            SetInternedClassName(ClassIds);
         }
 
         /// <summary>

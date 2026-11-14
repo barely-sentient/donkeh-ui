@@ -82,6 +82,21 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
     /// <summary>Number of logically reachable nodes from the last prune pass.</summary>
     private int _liveNodeCount;
 
+    /// <summary>Selected element the style grouping was built for.</summary>
+    private ElementNode? _stylesCacheElement;
+
+    /// <summary>Element revision at the time the style grouping was built.</summary>
+    private int _stylesCacheRevision;
+
+    /// <summary>State version at the time the style grouping was built.</summary>
+    private long _stylesCacheVersion;
+
+    /// <summary>Table the style grouping was built from.</summary>
+    private DataTable? _stylesCacheTable;
+
+    /// <summary>Cached matched-rule grouping for the selected element.</summary>
+    private StylesGrouping? _stylesCache;
+
     /// <summary>
     /// Key of the rule whose "Add property" row is open, or -1. Element styles use
     /// <see cref="ElementStyleAddKey"/> because their selector id is not knowable
@@ -939,79 +954,17 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
         }
         else
         {
-            var matches = table.MatchRules(element, state.Context);
-            var hasElementStyle = state.TryGetElementStyleSelector(element, out var elementStyleSelectorId);
-            var elementStyle = new RuleGroup(
-                "inspector",
-                "element.style",
-                elementStyleSelectorId,
-                -1,
-                -1,
-                isElementStyle: true)
-            {
-                Element = element
-            };
+            var grouping = GetStyleGrouping(state, element, table);
+            output.Add(BuildRuleGroup(state, grouping.ElementStyle));
 
-            if (hasElementStyle)
-            {
-                for (var i = 0; i < matches.Length; i++)
-                {
-                    var match = matches[i];
-
-                    if (match.SelectorId == elementStyleSelectorId)
-                    {
-                        elementStyle.Declarations.Add(new Declaration(
-                            match.Order,
-                            InternTable.GetString(match.Rule.PropertyId) ?? "?",
-                            InternTable.GetString(match.Rule.ValueId) ?? "?"));
-                    }
-                }
-            }
-
-            output.Add(BuildRuleGroup(state, elementStyle));
-
-            var groups = new List<RuleGroup>();
-            var index = new Dictionary<(string Origin, int Selector), RuleGroup>();
-
-            for (var i = 0; i < matches.Length; i++)
-            {
-                var match = matches[i];
-
-                if (hasElementStyle && match.SelectorId == elementStyleSelectorId)
-                {
-                    continue;
-                }
-
-                var origin = OriginFor(state, match.Order);
-
-                if (!index.TryGetValue((origin, match.SelectorId), out var group))
-                {
-                    group = new RuleGroup(
-                        origin,
-                        SelectorText(table, match.SelectorId),
-                        match.SelectorId,
-                        match.Rule.ConditionId,
-                        match.Rule.LayerId);
-                    index[(origin, match.SelectorId)] = group;
-                    groups.Add(group);
-                }
-
-                group.Declarations.Add(new Declaration(
-                    match.Order,
-                    InternTable.GetString(match.Rule.PropertyId) ?? "?",
-                    InternTable.GetString(match.Rule.ValueId) ?? "?"));
-            }
-
-            groups.Reverse();
-
-            if (groups.Count == 0)
+            if (grouping.Groups.Count == 0)
             {
                 output.Add(_.H("div", new Props { ClassName = "dt-dim" }, _.Text("No matching rules.")));
             }
 
-            foreach (var group in groups)
+            for (var i = 0; i < grouping.Groups.Count; i++)
             {
-                output.Add(BuildRuleGroup(state, group));
+                output.Add(BuildRuleGroup(state, grouping.Groups[i]));
             }
         }
 
@@ -1051,6 +1004,101 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
         }
 
         return _.F(output.ToArray());
+    }
+
+    /// <summary>
+    /// Builds or reuses the matched-rule grouping for the selected element.
+    /// </summary>
+    /// <param name="state">Inspector state supplying the cascade context.</param>
+    /// <param name="element">The selected element.</param>
+    /// <param name="table">The stylesheet table being inspected.</param>
+    /// <returns>The cached grouping, rebuilt when the element, its revision, the
+    /// table or the state version changes.</returns>
+    /// <remarks>
+    /// Matching, origin lookup, selector text and interned declaration strings are
+    /// the expensive part of the Styles pane. Node construction still runs every
+    /// render so selection and edit controls stay live.
+    /// </remarks>
+    private StylesGrouping GetStyleGrouping(DevToolsState state, ElementNode element, DataTable table)
+    {
+        if (_stylesCache is not null
+            && ReferenceEquals(_stylesCacheElement, element)
+            && _stylesCacheRevision == element.Revision
+            && _stylesCacheVersion == state.Version
+            && ReferenceEquals(_stylesCacheTable, table))
+        {
+            return _stylesCache;
+        }
+
+        var matches = table.MatchRules(element, state.Context);
+        var hasElementStyle = state.TryGetElementStyleSelector(element, out var elementStyleSelectorId);
+        var elementStyle = new RuleGroup(
+            "inspector",
+            "element.style",
+            elementStyleSelectorId,
+            -1,
+            -1,
+            isElementStyle: true)
+        {
+            Element = element
+        };
+
+        if (hasElementStyle)
+        {
+            for (var i = 0; i < matches.Length; i++)
+            {
+                var match = matches[i];
+
+                if (match.SelectorId == elementStyleSelectorId)
+                {
+                    elementStyle.Declarations.Add(new Declaration(
+                        match.Order,
+                        InternTable.GetString(match.Rule.PropertyId) ?? "?",
+                        InternTable.GetString(match.Rule.ValueId) ?? "?"));
+                }
+            }
+        }
+
+        var groups = new List<RuleGroup>();
+        var index = new Dictionary<(string Origin, int Selector), RuleGroup>();
+
+        for (var i = 0; i < matches.Length; i++)
+        {
+            var match = matches[i];
+
+            if (hasElementStyle && match.SelectorId == elementStyleSelectorId)
+            {
+                continue;
+            }
+
+            var origin = OriginFor(state, match.Order);
+
+            if (!index.TryGetValue((origin, match.SelectorId), out var group))
+            {
+                group = new RuleGroup(
+                    origin,
+                    SelectorText(table, match.SelectorId),
+                    match.SelectorId,
+                    match.Rule.ConditionId,
+                    match.Rule.LayerId);
+                index[(origin, match.SelectorId)] = group;
+                groups.Add(group);
+            }
+
+            group.Declarations.Add(new Declaration(
+                match.Order,
+                InternTable.GetString(match.Rule.PropertyId) ?? "?",
+                InternTable.GetString(match.Rule.ValueId) ?? "?"));
+        }
+
+        groups.Reverse();
+
+        _stylesCacheElement = element;
+        _stylesCacheRevision = element.Revision;
+        _stylesCacheVersion = state.Version;
+        _stylesCacheTable = table;
+        _stylesCache = new StylesGrouping(elementStyle, groups);
+        return _stylesCache;
     }
 
     /// <summary>
@@ -2020,6 +2068,16 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
         }
 
         return builder.ToString();
+    }
+
+    /// <summary>Cached matched-rule grouping for one selected element.</summary>
+    private sealed class StylesGrouping(RuleGroup elementStyle, List<RuleGroup> groups)
+    {
+        /// <summary>Gets the inspector-owned <c>element.style</c> group.</summary>
+        public RuleGroup ElementStyle { get; } = elementStyle;
+
+        /// <summary>Gets the real matched groups in display order.</summary>
+        public List<RuleGroup> Groups { get; } = groups;
     }
 
     /// <summary>
