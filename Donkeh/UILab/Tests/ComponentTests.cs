@@ -90,6 +90,23 @@ public sealed class ComponentTests
     }
 
     [Fact]
+    public void UnkeyedInsertUpdatesTheRenderedList()
+    {
+        var renderer = new Renderer();
+        var root = (ElementNode)renderer.Mount(C<UnkeyedList>());
+        var button = (ElementNode)root.Children[1];
+
+        Assert.Equal(2, ((FragmentNode)root.Children[0]).Children.Length);
+        Assert.True(button.TryGetEventHandler("click", out var handler));
+
+        ((Action)handler!)();
+
+        var items = (FragmentNode)root.Children[0];
+        Assert.Equal(3, items.Children.Length);
+        Assert.Equal("new", ((ElementNode)items.Children[0]).TextContent);
+    }
+
+    [Fact]
     public void StateWithUpdateUsesTheCurrentValue()
     {
         var renderer = new Renderer();
@@ -188,5 +205,18 @@ public sealed class Updater : Component
 
         return H("div", Text($"value: {value}"))
             .OnClick(() => update(current => current + 1));
+    }
+}
+
+public sealed class UnkeyedList : Component
+{
+    public override Node Render()
+    {
+        var (inserted, setInserted) = State(false);
+        var items = inserted ? new[] { "new", "A", "B" } : new[] { "A", "B" };
+
+        return H("div",
+            Each(items, item => H("div", Text(item))),
+            H("button", Text("insert")).OnClick(() => setInserted(true)));
     }
 }

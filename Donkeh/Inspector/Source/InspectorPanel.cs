@@ -76,6 +76,12 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
     /// </summary>
     private long _lastVersion = -1;
 
+    /// <summary>Reused visited set for the per-render tree prune and node count.</summary>
+    private readonly HashSet<Node> _liveNodes = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>Number of logically reachable nodes from the last prune pass.</summary>
+    private int _liveNodeCount;
+
     /// <summary>
     /// Key of the rule whose "Add property" row is open, or -1. Element styles use
     /// <see cref="ElementStyleAddKey"/> because their selector id is not knowable
@@ -661,22 +667,23 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
     private Node BuildComponentRow(DevToolsState state, ComponentNode component)
     {
         var name = component.ComponentType.Name;
+        var expanded = state.Expanded.Contains(component);
+        var output = component.OutputVdom;
+        var hasChildren = output is not null;
         var children = new List<Node?>();
 
-        if (component.OutputVdom is { } output)
+        if (expanded && output is not null)
         {
             AddLogicalRows(state, [output], children);
         }
-
-        var expanded = state.Expanded.Contains(component);
 
         var label = _.F(
             _.H("span", new Props { ClassName = "dt-component" }, _.Text("<" + name + ">")),
             _.H("span", new Props { ClassName = "dt-component-badge" }, _.Text("component")));
 
-        var row = BuildRow(state, component, children.Count > 0, expanded, label);
+        var row = BuildRow(state, component, hasChildren, expanded, label);
 
-        if (!expanded || children.Count == 0)
+        if (!expanded || !hasChildren)
         {
             return row;
         }
@@ -712,14 +719,16 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
     /// </remarks>
     private Node BuildElementRow(DevToolsState state, ElementNode element)
     {
-        var children = new List<Node?>();
-        var logical = element.VdomChildren.Length > 0
-            ? element.VdomChildren
-            : element.Children.OfType<Node>().ToArray();
-
-        AddLogicalRows(state, logical, children);
-
         var expanded = state.Expanded.Contains(element);
+        var logical = RenderedChildren(element);
+        var hasChildren = logical.Length > 0;
+        var children = new List<Node?>();
+
+        if (expanded)
+        {
+            AddLogicalRows(state, logical, children);
+        }
+
         var tag = element.Tag;
 
         var label = new List<Node?>
@@ -772,9 +781,9 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
 
         label.Add(_.H("span", new Props { ClassName = "dt-dim" }, _.Text(">")));
 
-        var row = BuildRow(state, element, children.Count > 0, expanded, _.F(label.ToArray()));
+        var row = BuildRow(state, element, hasChildren, expanded, _.F(label.ToArray()));
 
-        if (!expanded || children.Count == 0)
+        if (!expanded || !hasChildren)
         {
             return row;
         }
@@ -2414,7 +2423,7 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
     /// </remarks>
     private Node BuildStatusBar(DevToolsState state)
     {
-        var count = CountNodes(state.AppRoot);
+        var count = _liveNodeCount;
         var tab = state.Tab == DevToolsTab.Elements ? "Elements" : "Performance";
 
         return _.H(
@@ -2445,11 +2454,55 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
             ComponentNode component => component.OutputVdom is { } output ? [output] : [],
             FragmentNode fragment => fragment.VdomChildren,
             ProviderNode provider => provider.ProviderChildren,
-            ElementNode element => element.VdomChildren.Length > 0
-                ? element.VdomChildren
-                : element.Children.OfType<Node>().ToArray(),
+            ElementNode element => RenderedChildren(element),
             _ => []
         };
+    }
+
+    /// <summary>
+    /// Returns the logical children of an element without LINQ or a temporary
+    /// iterator over the DOM node array.
+    /// </summary>
+    /// <param name="element">Element whose children are wanted.</param>
+    /// <returns>
+    /// <c>VdomChildren</c> when populated, otherwise the rendered <see cref="Node"/>
+    /// entries from the DOM child array.
+    /// </returns>
+    private static Node[] RenderedChildren(ElementNode element)
+    {
+        if (element.VdomChildren.Length > 0)
+        {
+            return element.VdomChildren;
+        }
+
+        var children = element.Children;
+        var count = 0;
+
+        for (var i = 0; i < children.Length; i++)
+        {
+            if (children[i] is Node)
+            {
+                count++;
+            }
+        }
+
+        if (count == 0)
+        {
+            return [];
+        }
+
+        var result = new Node[count];
+        var index = 0;
+
+        for (var i = 0; i < children.Length; i++)
+        {
+            if (children[i] is Node node)
+            {
+                result[index++] = node;
+            }
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -2460,21 +2513,30 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
     /// </summary>
     /// <param name="state">The state to prune in place.</param>
     /// <remarks>
-    /// Builds the live set with <see cref="CollectLogicalNodes"/>, then drops
-    /// expansion entries, element-style bookkeeping, and selections pointing at
-    /// nodes that are no longer reachable. Runs at the start of every render and
-    /// allocates a fresh visited set, so it is O(n) in the mounted tree.
+    /// Reuses a single visited set, drops expansion entries, element-style
+    /// bookkeeping and selections pointing at nodes that are no longer reachable,
+    /// and records the live node count for the status bar so the tree is walked
+    /// only once per render.
     /// </remarks>
-    private static void PruneExpanded(DevToolsState state)
+    private void PruneExpanded(DevToolsState state)
     {
-        if (state.AppRoot is null || state.Expanded.Count == 0)
+        var live = _liveNodes;
+        live.Clear();
+
+        if (state.AppRoot is null)
         {
+            _liveNodeCount = 0;
             return;
         }
 
-        var live = new HashSet<Node>(ReferenceEqualityComparer.Instance);
         CollectLogicalNodes(state.AppRoot, live);
-        state.Expanded.RemoveWhere(node => !live.Contains(node));
+        _liveNodeCount = live.Count;
+
+        if (state.Expanded.Count > 0)
+        {
+            state.Expanded.RemoveWhere(node => !live.Contains(node));
+        }
+
         state.PruneElementStyles(live);
 
         if (state.Selected is not null && !live.Contains(state.Selected))
@@ -2579,66 +2641,5 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
         }
 
         return false;
-    }
-
-    /// <summary>Counts the logical nodes reachable from a node.</summary>
-    /// <param name="node">
-    /// The subtree root; may be <see langword="null"/>.
-    /// </param>
-    /// <returns>
-    /// The number of nodes including the root, with fragments and providers
-    /// flattened.
-    /// </returns>
-    /// <remarks>
-    /// Recursive and uncached; called for the status bar on every render. Unlike
-    /// <see cref="CollectLogicalNodes"/> it has no visited set.
-    /// </remarks>
-    private static int CountNodes(Node? node)
-    {
-        if (node is null)
-        {
-            return 0;
-        }
-
-        var count = 1;
-
-        switch (node)
-        {
-            case ComponentNode component:
-                count += CountNodes(component.OutputVdom);
-                break;
-
-            case ProviderNode provider:
-                for (var i = 0; i < provider.ProviderChildren.Length; i++)
-                {
-                    count += CountNodes(provider.ProviderChildren[i]);
-                }
-
-                break;
-
-            case FragmentNode fragment:
-                for (var i = 0; i < fragment.VdomChildren.Length; i++)
-                {
-                    count += CountNodes(fragment.VdomChildren[i]);
-                }
-
-                break;
-
-            case ElementNode element:
-            {
-                var logical = element.VdomChildren.Length > 0
-                    ? element.VdomChildren
-                    : element.Children.OfType<Node>().ToArray();
-
-                for (var i = 0; i < logical.Length; i++)
-                {
-                    count += CountNodes(logical[i]);
-                }
-
-                break;
-            }
-        }
-
-        return count;
     }
 }

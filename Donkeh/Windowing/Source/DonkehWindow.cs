@@ -154,6 +154,18 @@ public sealed partial class DonkehWindow : IDisposable
     /// <summary>The app's most recent layout result; drives hit testing and painting.</summary>
     private LayoutResult? _layoutResult;
 
+    /// <summary>Audio boxes collected from the current layout result.</summary>
+    private readonly List<LayoutBox> _audioBoxes = [];
+
+    /// <summary>Video boxes collected from the current layout result.</summary>
+    private readonly List<LayoutBox> _videoBoxes = [];
+
+    /// <summary>Canvas boxes collected from the current layout result.</summary>
+    private readonly List<LayoutBox> _canvasBoxes = [];
+
+    /// <summary>The layout result the media box lists were built from.</summary>
+    private LayoutResult? _mediaBoxesResult;
+
     /// <summary>The live app root as returned by <see cref="Renderer.Mount"/>.</summary>
     private Node? _root;
 
@@ -391,8 +403,11 @@ public sealed partial class DonkehWindow : IDisposable
     /// </summary>
     private string? _screenshotPath;
 
-    /// <summary>Scratch list of <c>position: fixed</c> boxes, rebuilt per hit test.</summary>
+    /// <summary>Scratch list of <c>position: fixed</c> boxes, rebuilt when layout changes.</summary>
     private readonly List<LayoutBox> _hitFixedBoxes = [];
+
+    /// <summary>The app layout result the fixed-box list was built from.</summary>
+    private LayoutResult? _hitFixedBoxesResult;
 
     /// <summary>
     /// The hovered element and all of its ancestors, used to clear <c>:hover</c>.
@@ -461,6 +476,15 @@ public sealed partial class DonkehWindow : IDisposable
 
     /// <summary>Last known pointer Y in window CSS pixels.</summary>
     private float _mouseY;
+
+    /// <summary>Whether a pointer move is waiting for the next frame.</summary>
+    private bool _mouseMovePending;
+
+    /// <summary>Latest coalesced pointer X.</summary>
+    private float _pendingMouseX;
+
+    /// <summary>Latest coalesced pointer Y.</summary>
+    private float _pendingMouseY;
 
     /// <summary>Smooth-scroll animations keyed by the scrolling node.</summary>
     private readonly Dictionary<IgniteSupportedDomNode, ScrollAnimation> _scrollAnimations = [];
@@ -1147,11 +1171,58 @@ public sealed partial class DonkehWindow : IDisposable
     }
 
     /// <summary>
+    /// Rebuilds the audio, video and canvas box lists when the layout result
+    /// changes, so the frame loop walks the box tree once instead of four times.
+    /// </summary>
+    private void EnsureMediaBoxCache()
+    {
+        if (ReferenceEquals(_mediaBoxesResult, _layoutResult))
+        {
+            return;
+        }
+
+        _mediaBoxesResult = _layoutResult;
+        _audioBoxes.Clear();
+        _videoBoxes.Clear();
+        _canvasBoxes.Clear();
+
+        if (_layoutResult?.Root is null)
+        {
+            return;
+        }
+
+        foreach (var box in EnumerateLayoutBoxes(_layoutResult.Root))
+        {
+            if (box.Node is not ElementNode element)
+            {
+                continue;
+            }
+
+            var tag = element.Tag;
+
+            if (string.Equals(tag, "audio", StringComparison.OrdinalIgnoreCase))
+            {
+                _audioBoxes.Add(box);
+            }
+            else if (string.Equals(tag, "video", StringComparison.OrdinalIgnoreCase))
+            {
+                _videoBoxes.Add(box);
+            }
+            else if (string.Equals(tag, "canvas", StringComparison.OrdinalIgnoreCase))
+            {
+                _canvasBoxes.Add(box);
+            }
+        }
+    }
+
+    /// <summary>
     /// Creates or updates one audio player per <c>audio</c> element, dispatches
     /// its media events and keeps the controls repainting while it plays.
     /// </summary>
     private void SyncAudioElements()
     {
+        EnsureMediaBoxCache();
+
         if (_layoutResult?.Root is null)
         {
             return;
@@ -1159,10 +1230,11 @@ public sealed partial class DonkehWindow : IDisposable
 
         _audioLive.Clear();
 
-        foreach (var box in EnumerateLayoutBoxes(_layoutResult.Root))
+        for (var boxIndex = 0; boxIndex < _audioBoxes.Count; boxIndex++)
         {
-            if (box.Node is not ElementNode element
-                || !string.Equals(element.Tag, "audio", StringComparison.OrdinalIgnoreCase))
+            var box = _audioBoxes[boxIndex];
+
+            if (box.Node is not ElementNode element)
             {
                 continue;
             }
@@ -1266,6 +1338,8 @@ public sealed partial class DonkehWindow : IDisposable
     /// </summary>
     private void SyncVideoElements()
     {
+        EnsureMediaBoxCache();
+
         if (_layoutResult?.Root is null)
         {
             return;
@@ -1273,10 +1347,11 @@ public sealed partial class DonkehWindow : IDisposable
 
         _videoLive.Clear();
 
-        foreach (var box in EnumerateLayoutBoxes(_layoutResult.Root))
+        for (var boxIndex = 0; boxIndex < _videoBoxes.Count; boxIndex++)
         {
-            if (box.Node is not ElementNode element
-                || !string.Equals(element.Tag, "video", StringComparison.OrdinalIgnoreCase))
+            var box = _videoBoxes[boxIndex];
+
+            if (box.Node is not ElementNode element)
             {
                 continue;
             }
@@ -1400,15 +1475,18 @@ public sealed partial class DonkehWindow : IDisposable
     /// </remarks>
     private void RecordCanvasElements()
     {
+        EnsureMediaBoxCache();
+
         if (_layoutResult is null || _renderer is null)
         {
             return;
         }
 
-        foreach (var box in EnumerateLayoutBoxes(_layoutResult.Root))
+        for (var boxIndex = 0; boxIndex < _canvasBoxes.Count; boxIndex++)
         {
+            var box = _canvasBoxes[boxIndex];
+
             if (box.Node is not ElementNode element
-                || !string.Equals(element.Tag, "canvas", StringComparison.OrdinalIgnoreCase)
                 || element.CanvasDrawHandler is not Action<CanvasContext> handler)
             {
                 continue;
@@ -1450,6 +1528,8 @@ public sealed partial class DonkehWindow : IDisposable
     /// </remarks>
     private void DrawCanvasContexts()
     {
+        EnsureMediaBoxCache();
+
         if (_layoutResult is null || _gl is null || _window is null)
         {
             return;
@@ -1465,10 +1545,11 @@ public sealed partial class DonkehWindow : IDisposable
             dpi = 1;
         }
 
-        foreach (var box in EnumerateLayoutBoxes(_layoutResult.Root))
+        for (var boxIndex = 0; boxIndex < _canvasBoxes.Count; boxIndex++)
         {
-            if (box.Node is not ElementNode element
-                || !string.Equals(element.Tag, "canvas", StringComparison.OrdinalIgnoreCase))
+            var box = _canvasBoxes[boxIndex];
+
+            if (box.Node is not ElementNode element)
             {
                 continue;
             }
@@ -1583,6 +1664,8 @@ public sealed partial class DonkehWindow : IDisposable
         {
             return;
         }
+
+        ProcessPendingMouseMove();
 
         BeforeFrame?.Invoke(this, delta);
 
@@ -4568,6 +4651,26 @@ public sealed partial class DonkehWindow : IDisposable
         _mouseY = y;
         _devTools.PointerX = x;
         _devTools.PointerY = y;
+        _pendingMouseX = x;
+        _pendingMouseY = y;
+        _mouseMovePending = true;
+    }
+
+    /// <summary>
+    /// Processes the latest coalesced pointer move once per frame. Hit testing is
+    /// two tree walks, so running it for every raw mouse event made high-polling
+    /// mice disproportionately expensive.
+    /// </summary>
+    private void ProcessPendingMouseMove()
+    {
+        if (!_mouseMovePending)
+        {
+            return;
+        }
+
+        _mouseMovePending = false;
+        var x = _pendingMouseX;
+        var y = _pendingMouseY;
 
         if (_windowDragging)
         {
@@ -6734,8 +6837,20 @@ public sealed partial class DonkehWindow : IDisposable
     /// </remarks>
     private LayoutBox? HitTestRoot(LayoutBox root, float x, float y)
     {
-        _hitFixedBoxes.Clear();
-        CollectFixedBoxes(root, _hitFixedBoxes);
+        if (ReferenceEquals(root, _layoutResult?.Root))
+        {
+            if (!ReferenceEquals(_hitFixedBoxesResult, _layoutResult))
+            {
+                _hitFixedBoxes.Clear();
+                CollectFixedBoxes(root, _hitFixedBoxes);
+                _hitFixedBoxesResult = _layoutResult;
+            }
+        }
+        else
+        {
+            _hitFixedBoxes.Clear();
+            CollectFixedBoxes(root, _hitFixedBoxes);
+        }
 
         // Fixed boxes are painted after the normal tree, so they are tested
         // first and in reverse order. Starting at the fixed box with zero

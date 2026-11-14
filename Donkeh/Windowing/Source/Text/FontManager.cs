@@ -118,20 +118,25 @@ public sealed unsafe class FontManager : IDisposable
         var width = 0f;
         FontFace? previousFace = null;
         var previousGlyph = 0;
+        var previousScale = 0f;
 
         foreach (var rune in text.EnumerateRunes())
         {
             var face = set.Select(rune);
             var glyph = face.GetGlyphIndex(rune.Value);
+            var scale = previousFace is not null && ReferenceEquals(previousFace, face)
+                ? previousScale
+                : face.GetScaleCached(style.FontSize);
 
             if (previousFace is not null && ReferenceEquals(previousFace, face))
             {
-                width += face.GetKerning(previousGlyph, glyph) * face.GetScaleForCss(style.FontSize);
+                width += face.GetKerning(previousGlyph, glyph) * scale;
             }
 
-            width += face.GetAdvance(glyph, style.FontSize) + style.LetterSpacing;
+            width += face.GetAdvance(glyph, style.FontSize, scale) + style.LetterSpacing;
             previousFace = face;
             previousGlyph = glyph;
+            previousScale = scale;
         }
 
         if (style.FontWeight >= 600)
@@ -214,6 +219,15 @@ public sealed unsafe class FontManager : IDisposable
     /// </remarks>
     internal float Kerning(FontFace face, int leftGlyph, int rightGlyph, float fontSize) =>
         face.GetKerning(leftGlyph, rightGlyph) * face.GetScaleForCss(fontSize);
+
+    /// <summary>Returns the kerning adjustment using an already resolved scale.</summary>
+    /// <param name="face">The face that owns both glyph indices.</param>
+    /// <param name="leftGlyph">The left glyph index.</param>
+    /// <param name="rightGlyph">The right glyph index.</param>
+    /// <param name="scale">The em-to-CSS scale from <see cref="FontFace.GetScaleCached"/>.</param>
+    /// <returns>The signed adjustment in CSS pixels.</returns>
+    internal float KerningScaled(FontFace face, int leftGlyph, int rightGlyph, float scale) =>
+        face.GetKerning(leftGlyph, rightGlyph) * scale;
 
     /// <summary>
     /// Normalises a CSS font request into the cache key used by this manager.
@@ -711,7 +725,18 @@ public sealed unsafe class FontManager : IDisposable
             list.Add("/System/Library/Fonts/Supplemental/Arial.ttf");
         }
 
-        return list.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var unique = new List<string>(list.Count);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        for (var i = 0; i < list.Count; i++)
+        {
+            if (seen.Add(list[i]))
+            {
+                unique.Add(list[i]);
+            }
+        }
+
+        return unique.ToArray();
     }
 
     /// <summary>
@@ -942,6 +967,9 @@ internal sealed unsafe class FontFace
     /// <summary>Cached metrics keyed by quarter-pixel size bucket.</summary>
     private readonly Dictionary<int, CssFontMetrics> _metrics = [];
 
+    /// <summary>Exact em-to-CSS scales cached per requested font size.</summary>
+    private readonly Dictionary<float, float> _scales = [];
+
     /// <summary>Cached glyphs keyed by codepoint and rounded device-pixel size.</summary>
     private readonly Dictionary<long, Glyph> _glyphs = [];
 
@@ -1046,6 +1074,25 @@ internal sealed unsafe class FontFace
         StbTrueType.stbtt_ScaleForMappingEmToPixels(_info, MathF.Max(1, fontSize));
 
     /// <summary>
+    /// Returns the em-to-CSS scale for an exact font size, caching the native
+    /// query per size. This preserves the exact metrics of repeated measurement
+    /// while removing the per-rune stb_truetype call.
+    /// </summary>
+    /// <param name="fontSize">The CSS font size.</param>
+    /// <returns>The scale used by <see cref="GetMetricsForCss"/>.</returns>
+    public float GetScaleCached(float fontSize)
+    {
+        if (_scales.TryGetValue(fontSize, out var scale))
+        {
+            return scale;
+        }
+
+        scale = GetScaleForCss(fontSize);
+        _scales[fontSize] = scale;
+        return scale;
+    }
+
+    /// <summary>
     /// Returns cached ascent, descent and scale for a CSS font size.
     /// </summary>
     /// <param name="fontSize">The requested font size in CSS pixels.</param>
@@ -1098,6 +1145,19 @@ internal sealed unsafe class FontFace
         int bearing;
         StbTrueType.stbtt_GetGlyphHMetrics(_info, glyphIndex, &advance, &bearing);
         return advance * GetScaleForCss(fontSize);
+    }
+
+    /// <summary>Returns a glyph advance using an already resolved scale.</summary>
+    /// <param name="glyphIndex">The face-local glyph index.</param>
+    /// <param name="fontSize">The CSS font size, used only as a documentation anchor.</param>
+    /// <param name="scale">The em-to-CSS scale from <see cref="FontFace.GetScaleCached"/>.</param>
+    /// <returns>The advance in CSS pixels.</returns>
+    public float GetAdvance(int glyphIndex, float fontSize, float scale)
+    {
+        int advance;
+        int bearing;
+        StbTrueType.stbtt_GetGlyphHMetrics(_info, glyphIndex, &advance, &bearing);
+        return advance * scale;
     }
 
     /// <summary>Returns the raw kerning adjustment between two glyphs.</summary>
@@ -1173,7 +1233,10 @@ internal sealed unsafe class FontFace
             &xOffset,
             &yOffset);
 
-        var advance = GetAdvance(StbTrueType.stbtt_FindGlyphIndex(_info, codepoint), fontSize);
+        var advance = GetAdvance(
+            StbTrueType.stbtt_FindGlyphIndex(_info, codepoint),
+            fontSize,
+            GetScaleCached(fontSize));
         Glyph glyph;
 
         if (bitmap is null || width <= 0 || height <= 0 || gl is null)

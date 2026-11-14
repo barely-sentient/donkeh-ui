@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace Donkeh.LayoutLab;
 
 public sealed partial class StyleResolver
@@ -1531,7 +1533,19 @@ public sealed partial class StyleResolver
 
         if (familyStart >= 0)
         {
-            style.FontFamily = CssValueParser.Unquote(string.Join(' ', parts.Skip(familyStart)));
+            var family = new StringBuilder();
+
+            for (var i = familyStart; i < parts.Count; i++)
+            {
+                if (i > familyStart)
+                {
+                    family.Append(' ');
+                }
+
+                family.Append(parts[i]);
+            }
+
+            style.FontFamily = CssValueParser.Unquote(family.ToString());
         }
     }
 

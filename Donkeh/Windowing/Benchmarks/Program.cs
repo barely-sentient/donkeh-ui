@@ -61,7 +61,7 @@ window.Load += () =>
             Console.WriteLine("  path      build ms   submit ms   gpu ms   draws   commands   instances");
             Console.WriteLine("  -------------------------------------------------------------------------");
 
-            foreach (var path in new[] { RenderPath.Direct, RenderPath.Indirect })
+            foreach (var path in new[] { RenderPath.Indirect, RenderPath.Direct })
             {
                 renderer.Path = path;
                 var (build, submit, gpu) = Measure(gl, renderer, result, iterations);

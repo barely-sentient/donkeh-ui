@@ -106,8 +106,24 @@ namespace Donkeh.UILab
             }
             else if (first is IEnumerable<Node?> nodes)
             {
-                var children = nodes.Concat(rest).ToArray();
-                element.VdomChildren = NormalizeChildren(children);
+                var children = new List<Node?>(rest.Length + 4);
+
+                if (nodes is ICollection<Node?> collection)
+                {
+                    children.Capacity = Math.Max(children.Capacity, collection.Count + rest.Length);
+                }
+
+                foreach (var child in nodes)
+                {
+                    children.Add(child);
+                }
+
+                for (var i = 0; i < rest.Length; i++)
+                {
+                    children.Add(rest[i]);
+                }
+
+                element.VdomChildren = NormalizeChildren(children.ToArray());
             }
             else if (first is null)
             {

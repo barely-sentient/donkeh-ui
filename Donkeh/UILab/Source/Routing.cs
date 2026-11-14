@@ -300,13 +300,16 @@ namespace Donkeh.UILab
             var setPage = UseContext(Router.SetPage);
             var active = Router.IsActive(Props.To, current);
 
-            var className = string.Join(
-                ' ',
-                new[]
-                {
-                    Props.ClassName,
-                    active ? Props.ActiveClassName : null
-                }.Where(static value => !string.IsNullOrWhiteSpace(value)));
+            var className = string.IsNullOrWhiteSpace(Props.ClassName)
+                ? string.Empty
+                : Props.ClassName!;
+
+            if (active && !string.IsNullOrWhiteSpace(Props.ActiveClassName))
+            {
+                className = className.Length == 0
+                    ? Props.ActiveClassName!
+                    : className + " " + Props.ActiveClassName;
+            }
 
             return H("a", new Props
             {

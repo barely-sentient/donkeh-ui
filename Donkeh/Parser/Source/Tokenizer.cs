@@ -706,7 +706,11 @@ namespace Donkeh.Parser
             if ((uint)count < (uint)buffer.Length)
             {
                 // Intern the token's source text and keep the id on the token.
-                var internedId = InternTable.Intern(source.Slice(start, length));
+                // Single ASCII characters (the punctuation that dominates CSS)
+                // use the precomputed table and avoid the global intern lock.
+                var internedId = length == 1 && source[start] < 128
+                    ? InternTable.Intern(source[start])
+                    : InternTable.Intern(source.Slice(start, length));
 
                 buffer[count] = new Token
                 {

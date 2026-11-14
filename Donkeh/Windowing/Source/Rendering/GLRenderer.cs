@@ -143,8 +143,24 @@ public sealed unsafe class GLRenderer : IDisposable
     /// <summary>Per-frame indirect commands, one per batch segment.</summary>
     private readonly List<DrawArraysIndirectCommand> _commands = [];
 
+    /// <summary>Desired wrap mode per texture, recorded while building instances.</summary>
+    private readonly Dictionary<uint, bool> _wrapModes = [];
+
+    /// <summary>Last wrap mode actually written to each texture.</summary>
+    private readonly Dictionary<uint, bool> _appliedWrap = [];
+
     /// <summary>Pooled batch segments; entries below the count are live.</summary>
     private readonly List<Segment> _segments = [];
+
+    /// <summary>
+    /// Shaped glyph runs keyed by text, style and DPI. Shaping walks every rune
+    /// through the font fallback and kerning tables, so repeating it every frame
+    /// was the largest remaining renderer cost.
+    /// </summary>
+    private readonly Dictionary<TextRunKey, CachedTextRun> _textRuns = [];
+
+    /// <summary>Maximum shaped text runs retained before the cache is cleared.</summary>
+    private const int MaxCachedTextRuns = 2048;
 
     /// <summary>Number of segments started in the current frame.</summary>
     private int _segmentCount;
@@ -1010,50 +1026,92 @@ public sealed unsafe class GLRenderer : IDisposable
     /// <param name="flags">Per-instruction flags; currently ignored by the glyph path.</param>
     private void AddText(in Rect rect, in TextCommand command, InstructionFlags flags)
     {
-        var text = command.Text;
-
-        if (string.IsNullOrEmpty(text) || rect.IsEmpty)
+        if (string.IsNullOrEmpty(command.Text) || rect.IsEmpty)
         {
             return;
         }
 
+        var key = new TextRunKey(command, (int)MathF.Round(_dpi * 1000));
+        if (!_textRuns.TryGetValue(key, out var run))
+        {
+            if (_textRuns.Count >= MaxCachedTextRuns)
+            {
+                _textRuns.Clear();
+            }
+
+            run = BuildTextRun(command);
+            _textRuns[key] = run;
+        }
+
+        var color = ColorOf(command.Style.Color, _opacity);
+        var glyphs = run.Glyphs;
+
+        for (var i = 0; i < glyphs.Length; i++)
+        {
+            var glyph = glyphs[i];
+            AddTexturedQuad(
+                glyph.Texture,
+                new Rect(
+                    MathF.Round(rect.X + glyph.X),
+                    MathF.Round(rect.Y + glyph.Y),
+                    glyph.Width,
+                    glyph.Height),
+                new Vector2(glyph.U0, glyph.V0),
+                new Vector2(glyph.U1, glyph.V1),
+                color,
+                alphaTexture: true);
+        }
+    }
+
+    /// <summary>
+    /// Shapes a text run once and caches the resulting glyph quads relative to the
+    /// instruction's origin.
+    /// </summary>
+    /// <param name="command">Text and style to shape.</param>
+    /// <returns>The cached run, owned by <see cref="_textRuns"/>.</returns>
+    private CachedTextRun BuildTextRun(in TextCommand command)
+    {
         var style = command.Style;
         var key = _fonts.CreateKey(in style);
         var lineHeight = style.LineHeight > 0 ? style.LineHeight : style.FontSize * 1.2f;
         var metrics = _fonts.Measure(string.Empty, in style);
-        var baseline = rect.Y + (lineHeight + metrics.Ascent - metrics.Descent) * 0.5f;
-        var pen = rect.X;
-        var color = ColorOf(style.Color, _opacity);
+        var scale = _fonts.ResolvePrimary(key).GetScaleCached(style.FontSize);
+        var baseline = (lineHeight + metrics.Ascent - metrics.Descent) * 0.5f;
+        var pen = 0f;
         var previousFace = (FontFace?)null;
         var previousGlyph = 0;
+        var glyphs = new List<CachedGlyph>(command.Text.Length);
 
-        foreach (var rune in text.EnumerateRunes())
+        foreach (var rune in command.Text.EnumerateRunes())
         {
             var info = _fonts.GetGlyph(key, rune, style.FontSize, _dpi);
             var glyph = info.Glyph;
 
             if (previousFace is not null && ReferenceEquals(previousFace, info.Face))
             {
-                pen += _fonts.Kerning(info.Face, previousGlyph, info.GlyphIndex, style.FontSize);
+                pen += _fonts.KerningScaled(info.Face, previousGlyph, info.GlyphIndex, scale);
             }
 
             if (glyph.Texture != 0 && glyph.Width > 0 && glyph.Height > 0)
             {
-                var x = MathF.Round(pen + glyph.OffsetX);
-                var y = MathF.Round(baseline + glyph.OffsetY);
-                AddTexturedQuad(
+                glyphs.Add(new CachedGlyph(
                     glyph.Texture,
-                    new Rect(x, y, glyph.Width, glyph.Height),
-                    new Vector2(glyph.U0, glyph.V0),
-                    new Vector2(glyph.U1, glyph.V1),
-                    color,
-                    alphaTexture: true);
+                    pen + glyph.OffsetX,
+                    baseline + glyph.OffsetY,
+                    glyph.Width,
+                    glyph.Height,
+                    glyph.U0,
+                    glyph.V0,
+                    glyph.U1,
+                    glyph.V1));
             }
 
             pen += glyph.Advance + style.LetterSpacing;
             previousFace = info.Face;
             previousGlyph = info.GlyphIndex;
         }
+
+        return new CachedTextRun(glyphs.ToArray());
     }
 
     /// <summary>Appends one textured quad for a cached texture.</summary>
@@ -1396,11 +1454,29 @@ public sealed unsafe class GLRenderer : IDisposable
     {
         for (var i = 0; i < count; i++)
         {
+            var texture = segment.Slots[i];
             _gl.ActiveTexture((TextureUnit)((int)TextureUnit.Texture0 + i));
-            _gl.BindTexture(TextureTarget.Texture2D, segment.Slots[i]);
+            _gl.BindTexture(TextureTarget.Texture2D, texture);
+            ApplyWrap(texture);
         }
 
         _gl.ActiveTexture(TextureUnit.Texture0);
+    }
+
+    /// <summary>Writes a texture's requested wrap mode only when it changed.</summary>
+    /// <param name="texture">The texture currently bound to the active unit.</param>
+    private void ApplyWrap(uint texture)
+    {
+        if (!_wrapModes.TryGetValue(texture, out var repeat)
+            || (_appliedWrap.TryGetValue(texture, out var applied) && applied == repeat))
+        {
+            return;
+        }
+
+        var mode = (int)(repeat ? GLEnum.Repeat : GLEnum.ClampToEdge);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, mode);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, mode);
+        _appliedWrap[texture] = repeat;
     }
 
     /// <summary>Applies the separable blend function for a mix-blend mode.</summary>
@@ -1498,11 +1574,10 @@ public sealed unsafe class GLRenderer : IDisposable
     /// <param name="repeat">Whether to use <c>GL_REPEAT</c> instead of clamp-to-edge.</param>
     private void SetWrap(uint texture, bool repeat)
     {
-        _gl.BindTexture(TextureTarget.Texture2D, texture);
-        var mode = (int)(repeat ? GLEnum.Repeat : GLEnum.ClampToEdge);
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, mode);
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, mode);
-        _gl.ActiveTexture(TextureUnit.Texture0);
+        if (texture != 0)
+        {
+            _wrapModes[texture] = repeat;
+        }
     }
 
     /// <summary>Creates the 1x1 opaque white texture used for unused samplers.</summary>
@@ -2029,6 +2104,55 @@ public sealed unsafe class GLRenderer : IDisposable
         public readonly uint InstanceCount;
         public readonly uint First;
         public readonly uint BaseInstance;
+    }
+
+    /// <summary>
+    /// Key for a shaped text run: the instruction's text/style pair plus the
+    /// quantised device-pixel ratio that determined glyph raster size.
+    /// </summary>
+    private readonly record struct TextRunKey(TextCommand Command, int Dpi);
+
+    /// <summary>One glyph quad relative to a text instruction's origin.</summary>
+    private readonly struct CachedGlyph
+    {
+        public CachedGlyph(
+            uint texture,
+            float x,
+            float y,
+            float width,
+            float height,
+            float u0,
+            float v0,
+            float u1,
+            float v1)
+        {
+            Texture = texture;
+            X = x;
+            Y = y;
+            Width = width;
+            Height = height;
+            U0 = u0;
+            V0 = v0;
+            U1 = u1;
+            V1 = v1;
+        }
+
+        public readonly uint Texture;
+        public readonly float X;
+        public readonly float Y;
+        public readonly float Width;
+        public readonly float Height;
+        public readonly float U0;
+        public readonly float V0;
+        public readonly float U1;
+        public readonly float V1;
+    }
+
+    /// <summary>A shaped text run cached between frames.</summary>
+    private sealed class CachedTextRun(CachedGlyph[] glyphs)
+    {
+        /// <summary>Gets the glyph quads in pen order.</summary>
+        public CachedGlyph[] Glyphs { get; } = glyphs;
     }
 
     /// <summary>

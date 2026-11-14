@@ -718,10 +718,21 @@ internal sealed class AnimationRuntime
             stops[1] = [];
         }
 
-        var ordered = stops
-            .OrderBy(pair => pair.Key)
-            .Select(pair => new KeyframeStop(pair.Key, Deduplicate(pair.Value)))
-            .ToArray();
+        var keys = new float[stops.Count];
+        var keyIndex = 0;
+
+        foreach (var pair in stops)
+        {
+            keys[keyIndex++] = pair.Key;
+        }
+
+        Array.Sort(keys);
+        var ordered = new KeyframeStop[keys.Length];
+
+        for (var i = 0; i < keys.Length; i++)
+        {
+            ordered[i] = new KeyframeStop(keys[i], Deduplicate(stops[keys[i]]));
+        }
 
         return new KeyframeTrack(ordered);
     }

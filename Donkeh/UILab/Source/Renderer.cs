@@ -884,8 +884,8 @@ namespace Donkeh.UILab
             Node[] newLogical,
             ContextScope? scope)
         {
-            var live = new List<Node>(newLogical.Length);
-            var logical = new List<Node>(newLogical.Length);
+            var live = new Node[newLogical.Length];
+            var logical = new Node[newLogical.Length];
             var oldUsed = new bool[oldLogical.Length];
             Dictionary<string, int>? keyed = null;
 
@@ -901,7 +901,21 @@ namespace Donkeh.UILab
             for (var i = 0; i < newLogical.Length; i++)
             {
                 var newChild = newLogical[i];
-                var oldIndex = FindOldChild(oldLogical, oldUsed, keyed, newChild);
+                var oldIndex = -1;
+
+                // Stable unkeyed lists are the common case: try the same index
+                // before falling back to a scan for inserts, removals or moves.
+                if (newChild.Key is null
+                    && i < oldLogical.Length
+                    && !oldUsed[i]
+                    && KindMatches(oldLogical[i], newChild))
+                {
+                    oldIndex = i;
+                }
+                else
+                {
+                    oldIndex = FindOldChild(oldLogical, oldUsed, keyed, newChild);
+                }
 
                 if (oldIndex >= 0)
                 {
@@ -913,14 +927,14 @@ namespace Donkeh.UILab
                         parent,
                         scope);
 
-                    live.Add(childLive);
-                    logical.Add(childLogical);
+                    live[i] = childLive;
+                    logical[i] = childLogical;
                 }
                 else
                 {
                     var (childLive, childLogical) = MountNode(newChild, parent, scope);
-                    live.Add(childLive);
-                    logical.Add(childLogical);
+                    live[i] = childLive;
+                    logical[i] = childLogical;
                 }
             }
 
@@ -932,7 +946,7 @@ namespace Donkeh.UILab
                 }
             }
 
-            return (live.ToArray(), logical.ToArray());
+            return (live, logical);
         }
 
         /// <summary>

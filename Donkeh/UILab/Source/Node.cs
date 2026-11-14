@@ -794,6 +794,11 @@ namespace Donkeh.UILab
         /// </remarks>
         internal void PatchFrom(ElementNode source)
         {
+            if (ReferenceEquals(this, source))
+            {
+                return;
+            }
+
             if (InternedId != source.InternedId)
             {
                 InternedId = source.InternedId;

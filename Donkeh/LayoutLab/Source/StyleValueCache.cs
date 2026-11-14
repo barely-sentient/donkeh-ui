@@ -129,7 +129,7 @@ public sealed class StyleValueCache
         Lengths.Count + Length4.Count + Colors.Count + Numbers.Count + Borders.Count
         + Radii.Count + Shadows.Count + Backgrounds.Count + Tracks.Count
         + Placements.Count + Transforms.Count + GridAreas.Count + Filters.Count
-        + ClipPaths.Count + Masks.Count;
+        + ClipPaths.Count + Masks.Count + Keywords.Count;
 
     /// <summary>
     /// Removes every cached value and every piece of cascade metadata.
@@ -157,6 +157,7 @@ public sealed class StyleValueCache
         ClipPaths.Clear();
         Masks.Clear();
         Transforms.Clear();
+        Keywords.Clear();
         Important.Clear();
         CleanValues.Clear();
         HasVariables.Clear();

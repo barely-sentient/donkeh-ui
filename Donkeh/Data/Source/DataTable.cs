@@ -172,7 +172,7 @@ namespace Donkeh.Data
             ArgumentOutOfRangeException.ThrowIfNegative(capacity);
 
             _selectors = new List<SelectorRecord>(capacity);
-            _rules = new List<Rule>(capacity <= int.MaxValue / 4 ? capacity * 4 : int.MaxValue);
+            _rules = new List<Rule>(capacity <= int.MaxValue / 2 ? capacity * 2 : int.MaxValue);
             _conditions = new List<Condition>(capacity);
 
             _selectorHeads = new Dictionary<int, int>(capacity);
@@ -202,7 +202,7 @@ namespace Donkeh.Data
 
             // Start with a small arena; it grows geometrically and is shared by
             // every selector/condition in the table.
-            var tokenCapacity = capacity <= int.MaxValue / 4 ? Math.Max(64, capacity * 4) : 64;
+            var tokenCapacity = capacity <= int.MaxValue / 3 ? Math.Max(64, capacity * 3) : 64;
             _selectorTokens = new Token[tokenCapacity];
             _conditionTokens = new Token[tokenCapacity];
         }

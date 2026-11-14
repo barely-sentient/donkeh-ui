@@ -40,6 +40,23 @@ public sealed class BuilderTests
     }
 
     [Fact]
+    public void H_AcceptsEnumerableChildrenAndAppendsRest()
+    {
+        var first = H("span", Text("first"));
+        var second = H("span", Text("second"));
+        var third = H("span", Text("third"));
+        var tree = H("div", new Node?[] { first, second }, third);
+
+        var renderer = new Renderer();
+        var live = (ElementNode)renderer.Mount(tree);
+
+        Assert.Equal(3, live.Children.Length);
+        Assert.Equal("first", ((ElementNode)live.Children[0]).TextContent);
+        Assert.Equal("second", ((ElementNode)live.Children[1]).TextContent);
+        Assert.Equal("third", ((ElementNode)live.Children[2]).TextContent);
+    }
+
+    [Fact]
     public void H_SupportsAnEmptyAttributeList()
     {
         var tree = H("div");

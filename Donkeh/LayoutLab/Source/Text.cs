@@ -204,15 +204,15 @@ public sealed class TextLine
     /// <summary>Gets or initialises the line's text after wrapping, trimming and any ellipsis.</summary>
     public string Text { get; init; } = string.Empty;
 
-    /// <summary>Gets or initialises the horizontal offset from the layout origin, in CSS pixels.</summary>
-    public float X { get; init; }
+    /// <summary>Gets or sets the horizontal offset from the layout origin, in CSS pixels.</summary>
+    public float X { get; set; }
 
     /// <summary>Gets or initialises the first-line indent applied before alignment, in CSS pixels.</summary>
     /// <remarks>Zero for every line except the first line of an indented block.</remarks>
     public float Indent { get; init; }
 
-    /// <summary>Gets or initialises the top offset from the layout origin, in CSS pixels.</summary>
-    public float Y { get; init; }
+    /// <summary>Gets or sets the top offset from the layout origin, in CSS pixels.</summary>
+    public float Y { get; set; }
 
     /// <summary>Gets or initialises the measured line width, in CSS pixels.</summary>
     public float Width { get; init; }
@@ -447,17 +447,8 @@ public static class TextLayoutEngine
 
             width = MathF.Max(width, indent + lineWidth);
             var x = indent + Align(lineWidth, available, style.Align, style.Direction);
-            lines[i] = new TextLine
-            {
-                Text = line.Text,
-                X = x,
-                Y = y,
-                Width = lineWidth,
-                Indent = indent,
-                Height = lineHeight,
-                Baseline = line.Baseline,
-                IsTruncated = line.IsTruncated
-            };
+            line.X = x;
+            line.Y = y;
             y += lineHeight;
         }
 
@@ -673,12 +664,7 @@ public static class TextLayoutEngine
             var ellipsis = "\u2026";
             var ellipsisWidth = measurer.Measure(ellipsis, in style).Width;
             var target = MathF.Max(0, bandWidth - ellipsisWidth);
-            var end = text.Length;
-
-            while (end > 0 && measurer.Measure(text.AsSpan(0, end), in style).Width > target)
-            {
-                end--;
-            }
+            var end = FitPrefix(measurer, text, in style, target);
 
             text = text[..end].TrimEnd() + ellipsis;
             width = measurer.Measure(text, in style).Width;
@@ -735,6 +721,7 @@ public static class TextLayoutEngine
     {
         var start = 0;
         var lastBreak = -1;
+        var lastWidth = 0f;
         var lineIndent = MathF.Max(0, firstLineIndent);
 
         for (var i = 0; i <= paragraph.Length; i++)
@@ -784,6 +771,7 @@ public static class TextLayoutEngine
             if (width <= MathF.Max(0, maxWidth - lineIndent))
             {
                 lastBreak = candidateEnd;
+                lastWidth = width;
 
                 if (atEnd)
                 {
@@ -797,7 +785,8 @@ public static class TextLayoutEngine
                         textOverflow,
                         maxLines,
                         ref truncated,
-                        lineIndent);
+                        lineIndent,
+                        measuredWidth: width);
                     return;
                 }
 
@@ -818,7 +807,8 @@ public static class TextLayoutEngine
                     textOverflow,
                     maxLines,
                     ref truncated,
-                    lineIndent);
+                    lineIndent,
+                    measuredWidth: lastWidth);
 
                 lineIndent = 0;
                 start = lastBreak;
@@ -829,6 +819,7 @@ public static class TextLayoutEngine
                 }
 
                 lastBreak = -1;
+                lastWidth = 0f;
                 i = start - 1;
                 continue;
             }
@@ -853,6 +844,7 @@ public static class TextLayoutEngine
                 lineIndent = 0;
                 start = i;
                 lastBreak = -1;
+                lastWidth = 0f;
                 i = start - 1;
                 continue;
             }
@@ -889,6 +881,7 @@ public static class TextLayoutEngine
                 lineIndent = 0;
                 start = end;
                 lastBreak = -1;
+                lastWidth = 0f;
                 i = start - 1;
             }
         }
@@ -962,6 +955,10 @@ public static class TextLayoutEngine
     /// <param name="maxLines">The line clamp, or <see cref="int.MaxValue"/> for unlimited.</param>
     /// <param name="truncated">Set when the clamp or ellipsis truncates content.</param>
     /// <param name="indent">Indent applied before alignment, in CSS pixels.</param>
+    /// <param name="measuredWidth">
+    /// A width already measured by the caller, or <see cref="float.NaN"/> to
+    /// measure the text here.
+    /// </param>
     /// <remarks>
     /// <see cref="TextLine.X"/> and <see cref="TextLine.Y"/> stay at zero here;
     /// the caller assigns them once the full line count is known. Ellipsis
@@ -977,7 +974,8 @@ public static class TextLayoutEngine
         TextOverflow overflow,
         int maxLines,
         ref bool truncated,
-        float indent = 0)
+        float indent = 0,
+        float measuredWidth = float.NaN)
     {
         if (lines.Count >= maxLines)
         {
@@ -988,19 +986,16 @@ public static class TextLayoutEngine
         var available = float.IsFinite(maxWidth)
             ? MathF.Max(0, maxWidth - indent)
             : maxWidth;
-        var width = measurer.Measure(text, in style).Width;
+        var width = float.IsNaN(measuredWidth)
+            ? measurer.Measure(text, in style).Width
+            : measuredWidth;
 
         if (overflow == TextOverflow.Ellipsis && float.IsFinite(available) && width > available)
         {
             var ellipsis = "\u2026";
             var ellipsisWidth = measurer.Measure(ellipsis, in style).Width;
             var target = MathF.Max(0, available - ellipsisWidth);
-            var end = text.Length;
-
-            while (end > 0 && measurer.Measure(text.AsSpan(0, end), in style).Width > target)
-            {
-                end--;
-            }
+            var end = FitPrefix(measurer, text, in style, target);
 
             text = text[..end].TrimEnd() + ellipsis;
             width = measurer.Measure(text, in style).Width;
@@ -1016,6 +1011,42 @@ public static class TextLayoutEngine
             Baseline = lineHeight * 0.8f,
             IsTruncated = truncated
         });
+    }
+
+    /// <summary>
+    /// Finds the longest prefix that fits, using a binary search over prefix
+    /// lengths. Width is monotonic in practice; the final downward correction
+    /// preserves the old linear-scan result if kerning ever makes it non-monotonic.
+    /// </summary>
+    private static int FitPrefix(
+        ITextMeasurer measurer,
+        string text,
+        in TextStyle style,
+        float target)
+    {
+        var low = 0;
+        var high = text.Length;
+
+        while (low < high)
+        {
+            var mid = (low + high + 1) >> 1;
+
+            if (measurer.Measure(text.AsSpan(0, mid), in style).Width <= target)
+            {
+                low = mid;
+            }
+            else
+            {
+                high = mid - 1;
+            }
+        }
+
+        while (low > 0 && measurer.Measure(text.AsSpan(0, low), in style).Width > target)
+        {
+            low--;
+        }
+
+        return low;
     }
 
     /// <summary>Maps an alignment mode and direction to a horizontal offset inside the available width.</summary>

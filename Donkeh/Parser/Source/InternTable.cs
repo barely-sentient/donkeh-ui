@@ -40,12 +40,21 @@ namespace Donkeh.Parser
         private static readonly Dictionary<string, int>.AlternateLookup<ReadOnlySpan<char>>
             AlternateLookup = InternedStrings.GetAlternateLookup<ReadOnlySpan<char>>();
 
-        // Ids are allocated densely from zero, so the reverse lookup is just an
-        // array index instead of a scan over the dictionary.
+        // Ids are allocated densely from zero, so the reverse lookup is a plain
+        // array index instead of a scan over the dictionary. The array reference
+        // and high-water mark are published together so readers do not need the
+        // global lock.
+        private static string[] InternedValues = new string[64];
+
+        /// <summary>Number of valid entries in <see cref="InternedValues"/>.</summary>
+        private static int InternedValueCount;
+
         /// <summary>
-        /// Reverse lookup from a dense id back to its interned text.
+        /// Pre-interned ids for single ASCII characters. Punctuation dominates CSS
+        /// token streams, and taking the global lock for every brace or colon was
+        /// the hottest part of tokenization.
         /// </summary>
-        private static readonly List<string> InternedValues = [];
+        private static readonly int[] AsciiIds = CreateAsciiIds();
 
         /// <summary>
         /// Returns the dense id for <paramref name="s"/>, adding it to the table
@@ -90,6 +99,24 @@ namespace Donkeh.Parser
         }
 
         /// <summary>
+        /// Interns a single character, using the precomputed ASCII table when
+        /// possible so punctuation does not take the global lock.
+        /// </summary>
+        /// <param name="c">The character to intern.</param>
+        /// <returns>The stable, non-negative id for the character.</returns>
+        public static int Intern(char c)
+        {
+            if (c < 128)
+            {
+                return AsciiIds[c];
+            }
+
+            Span<char> buffer = stackalloc char[1];
+            buffer[0] = c;
+            return Intern(buffer);
+        }
+
+        /// <summary>
         /// Resolves an interned id back to its original string, or null if not found.
         /// </summary>
         /// <param name="id">The id returned by an earlier <c>Intern</c> call.</param>
@@ -103,10 +130,11 @@ namespace Donkeh.Parser
         /// </remarks>
         public static string? GetString(int id)
         {
-            lock (Sync)
-            {
-                return (uint)id < (uint)InternedValues.Count ? InternedValues[id] : null;
-            }
+            var count = Volatile.Read(ref InternedValueCount);
+            var values = Volatile.Read(ref InternedValues);
+            return (uint)id < (uint)count && (uint)id < (uint)values.Length
+                ? values[id]
+                : null;
         }
 
         /// <summary>
@@ -124,17 +152,17 @@ namespace Donkeh.Parser
         /// </returns>
         public static bool TryGetString(int id, out string? value)
         {
-            lock (Sync)
-            {
-                if ((uint)id < (uint)InternedValues.Count)
-                {
-                    value = InternedValues[id];
-                    return true;
-                }
+            var count = Volatile.Read(ref InternedValueCount);
+            var values = Volatile.Read(ref InternedValues);
 
-                value = null;
-                return false;
+            if ((uint)id < (uint)count && (uint)id < (uint)values.Length)
+            {
+                value = values[id];
+                return true;
             }
+
+            value = null;
+            return false;
         }
 
         /// <summary>
@@ -223,8 +251,30 @@ namespace Donkeh.Parser
                 throw new InvalidOperationException($"Unable to intern string {s}");
             }
 
-            InternedValues.Add(s);
+            if ((uint)id >= (uint)InternedValues.Length)
+            {
+                Array.Resize(ref InternedValues, Math.Max(64, InternedValues.Length * 2));
+            }
+
+            InternedValues[id] = s;
+            Volatile.Write(ref InternedValueCount, id + 1);
             return id;
+        }
+
+        /// <summary>
+        /// Builds the single-character ASCII id table.
+        /// </summary>
+        /// <returns>An array indexed by ASCII code point.</returns>
+        private static int[] CreateAsciiIds()
+        {
+            var ids = new int[128];
+
+            for (var i = 0; i < ids.Length; i++)
+            {
+                ids[i] = InternCore(((char)i).ToString());
+            }
+
+            return ids;
         }
     }
 }

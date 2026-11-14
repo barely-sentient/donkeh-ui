@@ -98,9 +98,15 @@ namespace Donkeh.UILab
             ArgumentNullException.ThrowIfNull(assemblies);
 
             var parts = new List<string>();
+            var seen = new HashSet<Assembly>();
 
-            foreach (var assembly in assemblies.Distinct())
+            foreach (var assembly in assemblies)
             {
+                if (assembly is null || !seen.Add(assembly))
+                {
+                    continue;
+                }
+
                 foreach (var path in CollectPaths(assembly))
                 {
                     parts.Add(ReadResource(assembly, path));
@@ -152,7 +158,27 @@ namespace Donkeh.UILab
             }
             catch (ReflectionTypeLoadException ex)
             {
-                types = ex.Types.Where(t => t is not null).Cast<Type>().ToArray();
+                var loaded = ex.Types;
+                var count = 0;
+
+                for (var i = 0; i < loaded.Length; i++)
+                {
+                    if (loaded[i] is not null)
+                    {
+                        count++;
+                    }
+                }
+
+                types = new Type[count];
+                var index = 0;
+
+                for (var i = 0; i < loaded.Length; i++)
+                {
+                    if (loaded[i] is { } type)
+                    {
+                        types[index++] = type;
+                    }
+                }
             }
 
             foreach (var type in types)
@@ -261,19 +287,35 @@ namespace Donkeh.UILab
         {
             var names = assembly.GetManifestResourceNames();
             var normalized = NormalizePath(path);
+            var suffix = "." + normalized;
+            var matches = new List<string>();
 
-            var matches = names
-                .Where(name => string.Equals(name, normalized, StringComparison.OrdinalIgnoreCase)
-                    || name.EndsWith("." + normalized, StringComparison.OrdinalIgnoreCase))
-                .ToList();
+            for (var i = 0; i < names.Length; i++)
+            {
+                var name = names[i];
+
+                if (string.Equals(name, normalized, StringComparison.OrdinalIgnoreCase)
+                    || name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                {
+                    matches.Add(name);
+                }
+            }
 
             if (matches.Count == 0)
             {
                 var fileName = NormalizePath(Path.GetFileName(path));
-                matches = names
-                    .Where(name => string.Equals(name, fileName, StringComparison.OrdinalIgnoreCase)
-                        || name.EndsWith("." + fileName, StringComparison.OrdinalIgnoreCase))
-                    .ToList();
+                var fileSuffix = "." + fileName;
+
+                for (var i = 0; i < names.Length; i++)
+                {
+                    var name = names[i];
+
+                    if (string.Equals(name, fileName, StringComparison.OrdinalIgnoreCase)
+                        || name.EndsWith(fileSuffix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        matches.Add(name);
+                    }
+                }
             }
 
             if (matches.Count == 0)

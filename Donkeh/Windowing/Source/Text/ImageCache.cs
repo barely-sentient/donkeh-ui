@@ -46,6 +46,13 @@ public sealed unsafe class ImageCache : IDisposable
     private readonly ConcurrentDictionary<string, byte[]> _bytes = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
+    /// Rasterised SVG pixels retained between the intrinsic-size query and the
+    /// texture upload, so an SVG is not parsed and rasterised twice.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, (byte[] Pixels, int Width, int Height)> _vectors =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Intrinsic pixel dimensions of successfully decoded sources. Layout asks
     /// for these while sizing every <c>img</c>; without the cache an SVG source
     /// was rasterised again on every layout pass just to read its dimensions.
@@ -111,11 +118,12 @@ public sealed unsafe class ImageCache : IDisposable
 
         try
         {
-            if (SvgRasterizer.TryRender(source, out _, out var svgWidth, out var svgHeight))
+            if (SvgRasterizer.TryRender(source, out var svgPixels, out var svgWidth, out var svgHeight))
             {
                 width = svgWidth;
                 height = svgHeight;
                 _info[source] = (svgWidth, svgHeight);
+                _vectors[source] = (svgPixels, svgWidth, svgHeight);
                 return true;
             }
 
@@ -126,11 +134,12 @@ public sealed unsafe class ImageCache : IDisposable
                 return false;
             }
 
-            if (SvgRasterizer.TryRender(data, out _, out var vectorWidth, out var vectorHeight))
+            if (SvgRasterizer.TryRender(data, out var vectorPixels, out var vectorWidth, out var vectorHeight))
             {
                 width = vectorWidth;
                 height = vectorHeight;
                 _info[source] = (vectorWidth, vectorHeight);
+                _vectors[source] = (vectorPixels, vectorWidth, vectorHeight);
                 return true;
             }
 
@@ -330,6 +339,11 @@ public sealed unsafe class ImageCache : IDisposable
     /// </remarks>
     private ImageEntry Load(string source, GL gl)
     {
+        if (_vectors.TryRemove(source, out var cached))
+        {
+            return Upload(gl, cached.Pixels, cached.Width, cached.Height);
+        }
+
         if (SvgRasterizer.TryRender(source, out var svgPixels, out var svgWidth, out var svgHeight))
         {
             return Upload(gl, svgPixels, svgWidth, svgHeight);
@@ -558,6 +572,7 @@ public sealed unsafe class ImageCache : IDisposable
         }
 
         _entries.Clear();
+        _vectors.Clear();
         _bytes.Clear();
     }
 
