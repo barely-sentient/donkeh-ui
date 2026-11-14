@@ -1,64 +1,106 @@
+using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.InteropServices;
-using System.Text;
 using Donkeh.LayoutLab;
 using Silk.NET.OpenGL;
 
 namespace Donkeh.Windowing;
 
 /// <summary>
-/// Executes the layout engine's instruction stream with OpenGL. Shapes and text
-/// are accumulated into ordered batches; state changes only flush the batch they
-/// affect, so a typical UI frame becomes a handful of draw calls.
+/// Selects how <see cref="GLRenderer"/> submits its geometry to the GPU.
+/// </summary>
+/// <remarks>
+/// <see cref="Indirect"/> is the GPU-driven path: all geometry for a frame is
+/// baked into one GPU-resident instance buffer and submitted with indirect draw
+/// commands, so the CPU does not walk the scene issuing a draw call per object.
+/// <see cref="Direct"/> keeps the same geometry but submits one
+/// <c>glDrawArraysInstanced</c> per batch; it exists as a reference path for
+/// benchmarking and as a fallback on drivers without indirect-draw extensions.
+/// </remarks>
+public enum RenderPath
+{
+    /// <summary>Use indirect submission when the driver exposes the required extensions.</summary>
+    Auto,
+
+    /// <summary>Submit each batch with a direct instanced draw call.</summary>
+    Direct,
+
+    /// <summary>Submit batches through an indirect command buffer.</summary>
+    Indirect
+}
+
+/// <summary>
+/// Executes the layout engine's instruction stream with OpenGL. Shapes, text and
+/// images become instanced quads in a single GPU-resident buffer; indirect draw
+/// commands select the visible ranges, so a frame is normally one
+/// <c>glMultiDrawArraysIndirect</c> call regardless of element count.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The renderer consumes the 24-byte <see cref="Instruction"/> stream that the
-/// layout engine exposes through <see cref="LayoutResult"/> and translates it
-/// into two GL paths. Solid shapes, borders, shadows, ellipses and scrollbars
-/// become instanced rounded-box SDF quads drawn with <c>DrawArraysInstanced</c>
-/// (a four-vertex triangle strip per instance); text, images and gradient
-/// backgrounds become textured quads drawn with <c>DrawElements</c> from a
-/// shared index buffer.
+/// <b>GPU-driven submission.</b> <see cref="Process"/> translates every paint
+/// instruction into a fixed-size <see cref="GpuInstance"/> record that carries
+/// its own clip rectangle, affine transform, colour, SDF parameters and texture
+/// selector. Because per-object state lives in the vertex stream, clip and
+/// transform changes no longer split batches. <see cref="Flush"/> uploads the
+/// instance buffer once and writes one <c>DrawArraysIndirectCommand</c> per
+/// blend/texture epoch into a GPU-resident command buffer.
 /// </para>
 /// <para>
-/// <b>Batching.</b> Instructions are walked in submission order and appended to
-/// a <see cref="DrawRun"/>. A new run starts when the run kind switches between
-/// solid and textured, when the texture changes (textured runs only), or when
-/// the active clip, transform or blend mode differs from the run's recorded
-/// state. Opacity deliberately does not split runs because it is baked into the
-/// per-vertex and per-instance colours. Runs are never merged retroactively, so
-/// interleaving two textures produces two draw calls even if the first run
-/// resumes later.
+/// <b>Indirect path.</b> When <c>GL_ARB_draw_indirect</c> and
+/// <c>GL_ARB_base_instance</c> are present (or the context is OpenGL 4.0+), the
+/// command buffer is submitted with <c>glMultiDrawArraysIndirect</c> when
+/// <c>GL_ARB_multi_draw_indirect</c> is available and
+/// <c>glDrawArraysIndirect</c> otherwise. The vertex shader expands a four-vertex
+/// triangle strip per instance, so one command can cover any number of
+/// rectangles, glyphs, borders or images.
+/// </para>
+/// <para>
+/// <b>State.</b> Clip rectangles and rounded clip radii are evaluated in the
+/// fragment shader from the per-instance record instead of the scissor stack.
+/// The window mask, viewport and texture-unit bindings remain uniforms or GL
+/// state, because they change at most once per batch.
 /// </para>
 /// <para>
 /// <b>Coordinate space.</b> Rectangles are CSS pixels with the origin at the
-/// top-left and Y increasing downwards. The vertex shaders apply the active
-/// affine transform (CSS px in, CSS px out) and then map to clip space using
-/// the logical viewport size. Scissor rectangles, by contrast, are converted to
-/// framebuffer pixels by multiplying by the frame DPI, so callers must pass a
-/// device-pixel framebuffer size that matches <c>viewport * dpi</c>.
+/// top-left and Y increasing downwards. The vertex shader applies the instance's
+/// affine transform (CSS px in, CSS px out) and then maps to clip space using the
+/// logical viewport size.
 /// </para>
 /// <para>
-/// <b>Ownership.</b> The renderer owns the two <see cref="ShaderProgram"/>
-/// instances, the VAOs and VBOs it creates, and the
-/// <see cref="GradientCache"/>; all of them are released by
-/// <see cref="Dispose"/>. The <see cref="FontManager"/> and
-/// <see cref="ImageCache"/> passed to the constructor are borrowed, and their
-/// textures remain owned by those caches.
-/// </para>
-/// <para>
-/// <b>Threading.</b> The type is not thread-safe and every member must be
-/// called on the thread that owns the current GL context, typically the UI
-/// thread inside the render loop. <see cref="Dispose"/> must also run while the
-/// context is current, otherwise the deletes are lost or sent to the wrong
-/// context.
+/// <b>Ownership and threading.</b> The renderer owns the shader program, the
+/// VAOs, the instance/command buffers, the white fallback texture and the
+/// gradient cache; <see cref="Dispose"/> releases them. The
+/// <see cref="FontManager"/> and <see cref="ImageCache"/> are borrowed. The type
+/// is not thread-safe and every member must run on the GL context thread.
 /// </para>
 /// </remarks>
 /// <seealso cref="GradientCache"/>
 /// <seealso cref="ShaderProgram"/>
 public sealed unsafe class GLRenderer : IDisposable
 {
+    /// <summary>Number of texture units the unified shader can sample per batch.</summary>
+    /// <remarks>
+    /// OpenGL 3.3 guarantees at least sixteen fragment texture image units, so
+    /// this is the largest portable fixed slot count. Exceeding it closes the
+    /// current batch and starts a new texture epoch; paint order is preserved.
+    /// </remarks>
+    private const int MaxTextureSlots = 16;
+
+    /// <summary>Size of one <see cref="GpuInstance"/> in bytes.</summary>
+    private const int InstanceStride = 160;
+
+    /// <summary>Number of <c>vec4</c> attributes in a <see cref="GpuInstance"/>.</summary>
+    private const int InstanceAttributeCount = 10;
+
+    /// <summary>Size of one <see cref="DrawArraysIndirectCommand"/> in bytes.</summary>
+    private const int CommandStride = 16;
+
+    /// <summary>
+    /// Number of regions in a persistently mapped stream buffer. Rotating three
+    /// regions lets the CPU prepare frame N+1 while the GPU still reads N.
+    /// </summary>
+    private const int StreamSlotCount = 3;
+
     /// <summary>The OpenGL entry point for the context this renderer was created on.</summary>
     private readonly GL _gl;
 
@@ -68,58 +110,95 @@ public sealed unsafe class GLRenderer : IDisposable
     /// <summary>Borrowed bitmap source; this renderer does not own or dispose it.</summary>
     private readonly ImageCache _images;
 
-    /// <summary>
-    /// Cached 256x256 gradient textures; owned and disposed by this renderer.
-    /// </summary>
+    /// <summary>Cached 256x256 gradient textures; owned and disposed by this renderer.</summary>
     private readonly GradientCache _gradients;
 
-    /// <summary>Program that draws instanced rounded-box SDF shapes.</summary>
-    private readonly ShaderProgram _shapeProgram;
+    /// <summary>The unified shader: instanced quads for shapes, text and images.</summary>
+    private readonly ShaderProgram _program;
 
-    /// <summary>Program that draws textured, coloured triangle quads.</summary>
-    private readonly ShaderProgram _textureProgram;
-
-    /// <summary>VAO binding the unit quad to attribute 0 and per-instance data.</summary>
+    /// <summary>VAO binding the unit quad and the ten per-instance attributes.</summary>
     private readonly uint _shapeVao;
 
-    /// <summary>Static VBO holding the four unit-quad corners used by every shape.</summary>
+    /// <summary>Static VBO holding the four unit-quad corners used by every instance.</summary>
     private readonly uint _quadVbo;
 
-    /// <summary>
-    /// Dynamic VBO holding <see cref="ShapeInstance"/> records, re-uploaded for
-    /// each solid run; its layout is configured once in
-    /// <see cref="ConfigureShapeVao"/>.
-    /// </summary>
-    private readonly uint _instanceVbo;
+    /// <summary>Opaque white texture bound to unused sampler slots.</summary>
+    private readonly uint _whiteTexture;
 
-    /// <summary>VAO binding the interleaved <see cref="TexturedVertex"/> layout.</summary>
-    private readonly uint _textureVao;
+    /// <summary>Whether the driver exposes <c>GL_ARB_draw_indirect</c> (or OpenGL 4.0+).</summary>
+    private readonly bool _hasDrawIndirect;
 
-    /// <summary>Dynamic VBO receiving the vertices of each textured run.</summary>
-    private readonly uint _textureVbo;
+    /// <summary>Whether the driver exposes <c>GL_ARB_multi_draw_indirect</c> (or OpenGL 4.3+).</summary>
+    private readonly bool _hasMultiDrawIndirect;
 
-    /// <summary>
-    /// Dynamic element buffer with the triangle indices for the current
-    /// textured run. It is bound inside <see cref="_textureVao"/>, so the VAO
-    /// also remembers this element binding.
-    /// </summary>
-    private readonly uint _textureIndexVbo;
+    /// <summary>Whether the driver supports per-command base instances.</summary>
+    private readonly bool _hasBaseInstance;
 
-    /// <summary>
-    /// Growable CPU scratch buffer for quad indices; starts at 256 indices and
-    /// only ever grows.
-    /// </summary>
-    private uint[] _textureIndices = new uint[256];
+    /// <summary>Whether the driver exposes <c>GL_ARB_buffer_storage</c> (or OpenGL 4.4+).</summary>
+    private readonly bool _hasBufferStorage;
 
-    /// <summary>
-    /// Per-frame pool of batches. Entries below <see cref="_runCount"/> are live
-    /// for the current frame; entries at or above it are retained between
-    /// frames so their list capacities are reused instead of reallocated.
-    /// </summary>
-    private readonly List<DrawRun> _runs = [];
+    /// <summary>Per-frame instance storage. Entries below the count are live.</summary>
+    private readonly List<GpuInstance> _instances = [];
 
-    /// <summary>Number of runs that have been started in the current frame.</summary>
-    private int _runCount;
+    /// <summary>Per-frame indirect commands, one per batch segment.</summary>
+    private readonly List<DrawArraysIndirectCommand> _commands = [];
+
+    /// <summary>Pooled batch segments; entries below the count are live.</summary>
+    private readonly List<Segment> _segments = [];
+
+    /// <summary>Number of segments started in the current frame.</summary>
+    private int _segmentCount;
+
+    /// <summary>The segment currently accepting instances, or <see langword="null"/>.</summary>
+    private Segment? _current;
+
+    /// <summary>Textures bound to the current texture epoch.</summary>
+    private readonly uint[] _textureSlots = new uint[MaxTextureSlots];
+
+    /// <summary>Number of occupied entries in <see cref="_textureSlots"/>.</summary>
+    private int _textureSlotCount;
+
+    /// <summary>Increments whenever the texture slot table is reset.</summary>
+    private int _textureEpoch;
+
+    /// <summary>Instance buffer object; recreated when it must grow.</summary>
+    private uint _instanceVbo;
+
+    /// <summary>Persistent mapping of the instance buffer, or <see langword="null"/>.</summary>
+    private void* _instanceMapping;
+
+    /// <summary>Size of the instance buffer in bytes.</summary>
+    private nuint _instanceCapacity;
+
+    /// <summary>Bytes per slot in the instance ring, or the full size when unmapped.</summary>
+    private int _instanceSlotBytes;
+
+    /// <summary>Whether the instance buffer was allocated with immutable storage.</summary>
+    private bool _instanceImmutable;
+
+    /// <summary>Indirect command buffer object; recreated when it must grow.</summary>
+    private uint _commandVbo;
+
+    /// <summary>Persistent mapping of the command buffer, or <see langword="null"/>.</summary>
+    private void* _commandMapping;
+
+    /// <summary>Size of the command buffer in bytes.</summary>
+    private nuint _commandCapacity;
+
+    /// <summary>Bytes per slot in the command ring, or the full size when unmapped.</summary>
+    private int _commandSlotBytes;
+
+    /// <summary>Whether the command buffer was allocated with immutable storage.</summary>
+    private bool _commandImmutable;
+
+    /// <summary>Index of the stream slot prepared by the current frame.</summary>
+    private int _streamSlot;
+
+    /// <summary>GPU completion fences for the three instance slots.</summary>
+    private readonly IntPtr[] _instanceFences = new IntPtr[StreamSlotCount];
+
+    /// <summary>GPU completion fences for the three command slots.</summary>
+    private readonly IntPtr[] _commandFences = new IntPtr[StreamSlotCount];
 
     /// <summary>Saved clip states for nested <c>PushClip</c>/<c>PopClip</c> pairs.</summary>
     private readonly Stack<ClipState> _clips = new();
@@ -133,21 +212,10 @@ public sealed unsafe class GLRenderer : IDisposable
     /// <summary>Saved blend modes for nested blend-mode pushes.</summary>
     private readonly Stack<MixBlendMode> _blends = new();
 
-    /// <summary>
-    /// The currently effective clip, always the intersection of every pushed
-    /// rectangle. <see cref="ClipState.None"/> when nothing is pushed.
-    /// </summary>
+    /// <summary>The currently effective clip, always the intersection of every pushed rectangle.</summary>
     private ClipState _clip = ClipState.None;
 
-    /// <summary>
-    /// The rounded window mask applied to every content run in the frame, or
-    /// <see cref="WindowMaskState.None"/> for a square window.
-    /// </summary>
-    /// <remarks>
-    /// Unlike <see cref="_clip"/>, this is not part of the CSS clip stack. It
-    /// stays fixed for the whole frame so nested clips cannot distort the
-    /// window's corners.
-    /// </remarks>
+    /// <summary>The rounded window mask applied to every fragment in the frame.</summary>
     private WindowMaskState _windowMask = WindowMaskState.None;
 
     /// <summary>Accumulated opacity multiplier in the range 0 to 1.</summary>
@@ -159,22 +227,13 @@ public sealed unsafe class GLRenderer : IDisposable
     /// </summary>
     private Matrix3x2 _transform = Matrix3x2.Identity;
 
-    /// <summary>
-    /// Blend mode for subsequent draws. Unlike the other state, pushes replace
-    /// the value rather than stacking it.
-    /// </summary>
+    /// <summary>Blend mode for subsequent draws.</summary>
     private MixBlendMode _blend = MixBlendMode.Normal;
 
-    /// <summary>
-    /// The batch currently accepting geometry, or <see langword="null"/> when no
-    /// run has been started yet in this frame.
-    /// </summary>
-    private DrawRun? _current;
-
-    /// <summary>Logical viewport width in CSS pixels; used for projection.</summary>
+    /// <summary>Logical viewport width in CSS pixels.</summary>
     private int _viewportWidth = 1;
 
-    /// <summary>Logical viewport height in CSS pixels; used for projection.</summary>
+    /// <summary>Logical viewport height in CSS pixels.</summary>
     private int _viewportHeight = 1;
 
     /// <summary>Framebuffer width in device pixels, used for <c>glViewport</c>.</summary>
@@ -183,104 +242,84 @@ public sealed unsafe class GLRenderer : IDisposable
     /// <summary>Framebuffer height in device pixels, used for <c>glViewport</c>.</summary>
     private int _framebufferHeight = 1;
 
-    /// <summary>
-    /// Device-to-CSS-pixel ratio used to convert scissor rectangles and to
-    /// request glyph rasters at device resolution; never zero.
-    /// </summary>
+    /// <summary>Device-to-CSS-pixel ratio; never zero.</summary>
     private float _dpi = 1;
 
     /// <summary>Set by <see cref="Dispose"/> so a second call becomes a no-op.</summary>
     private bool _disposed;
 
     /// <summary>
-    /// Creates the renderer, compiling its two shader programs and allocating
-    /// every VAO and VBO it uses for the lifetime of the instance.
+    /// Creates the renderer, probes the driver's indirect-draw capabilities and
+    /// allocates the shader, VAO, stream buffers and fallback texture.
     /// </summary>
-    /// <param name="gl">
-    /// The Silk.NET OpenGL entry point; must wrap a current OpenGL 3.3 core
-    /// context and outlive the renderer.
-    /// </param>
-    /// <param name="fonts">
-    /// Font manager used for glyph lookups and kerning. It is borrowed, not
-    /// owned, and must outlive the renderer.
-    /// </param>
-    /// <param name="images">
-    /// Image cache supplying URL background layers and bitmap textures. It is
-    /// borrowed, not owned, and must outlive the renderer.
-    /// </param>
-    /// <exception cref="InvalidOperationException">
-    /// Thrown when either shader program fails to compile or link; the message
-    /// contains the GL info log.
-    /// </exception>
-    /// <remarks>
-    /// The constructor is fairly expensive (two shader builds and six buffer or
-    /// VAO allocations), so create one renderer per context rather than one per
-    /// frame. GPU resources are freed only by <see cref="Dispose"/>.
-    /// </remarks>
+    /// <param name="gl">The Silk.NET OpenGL entry point; must wrap a current context.</param>
+    /// <param name="fonts">Borrowed glyph source that must outlive the renderer.</param>
+    /// <param name="images">Borrowed bitmap source that must outlive the renderer.</param>
+    /// <exception cref="InvalidOperationException">Thrown when the shader fails to build.</exception>
     public GLRenderer(GL gl, FontManager fonts, ImageCache images)
     {
         _gl = gl;
         _fonts = fonts;
         _images = images;
         _gradients = new GradientCache(gl);
-        _shapeProgram = new ShaderProgram(gl, ShapeVertexShader, ShapeFragmentShader);
-        _textureProgram = new ShaderProgram(gl, TextureVertexShader, TextureFragmentShader);
+
+        var (major, minor) = ParseGlVersion();
+        var extensions = ReadExtensions();
+        _hasDrawIndirect = major > 4 || (major == 4) || extensions.Contains("GL_ARB_draw_indirect");
+        _hasMultiDrawIndirect = major > 4 || (major == 4 && minor >= 3) || extensions.Contains("GL_ARB_multi_draw_indirect");
+        _hasBaseInstance = major > 4 || (major == 4 && minor >= 2) || extensions.Contains("GL_ARB_base_instance");
+        _hasBufferStorage = major > 4 || (major == 4 && minor >= 4) || extensions.Contains("GL_ARB_buffer_storage");
+
+        _program = new ShaderProgram(gl, InstanceVertexShader, InstanceFragmentShader);
         _shapeVao = gl.GenVertexArray();
         _quadVbo = gl.GenBuffer();
-        _instanceVbo = gl.GenBuffer();
-        _textureVao = gl.GenVertexArray();
-        _textureVbo = gl.GenBuffer();
-        _textureIndexVbo = gl.GenBuffer();
-        ConfigureShapeVao();
-        ConfigureTextureVao();
+        _whiteTexture = CreateWhiteTexture();
+
+        EnsureInstanceCapacity((int)Math.Max(64 * 1024, InstanceStride * 64));
+        EnsureCommandCapacity(CommandStride * 32);
+        BindSamplerUnits();
     }
 
-    /// <summary>Prepares the framebuffer for a frame.</summary>
-    /// <param name="framebufferWidth">
-    /// Framebuffer width in device pixels; clamped to at least 1.
-    /// </param>
-    /// <param name="framebufferHeight">
-    /// Framebuffer height in device pixels; clamped to at least 1.
-    /// </param>
-    /// <param name="viewportWidth">
-    /// Logical viewport width in CSS pixels; clamped to at least 1 and used by
-    /// the shaders to project into clip space.
-    /// </param>
-    /// <param name="viewportHeight">
-    /// Logical viewport height in CSS pixels; clamped to at least 1 and used
-    /// both for projection and to flip scissor rectangles.
-    /// </param>
-    /// <param name="dpi">
-    /// Device-to-CSS-pixel ratio. Non-positive values fall back to 1.
-    /// </param>
-    /// <param name="clearColor">
-    /// Straight-alpha RGBA clear colour with components in the range 0 to 1.
-    /// </param>
-    /// <param name="windowCorners">
-    /// Corner radii that mask the native window, in CSS pixels. The default,
-    /// <see cref="CornerRadius.Zero"/>, keeps the window square.
-    /// </param>
+    /// <summary>Gets or sets the submission strategy; defaults to <see cref="RenderPath.Auto"/>.</summary>
     /// <remarks>
-    /// <para>
-    /// This resets all batching state: the run counter, the current run, the
-    /// clip/opacity/transform stacks and the blend mode. It also sets the GL
-    /// viewport to the framebuffer size, disables depth testing, face culling
-    /// and scissoring, enables straight-alpha source-over blending, and clears
-    /// the colour buffer (but not depth or stencil).
-    /// </para>
-    /// <para>
-    /// The initial blend function is <c>(SrcAlpha, OneMinusSrcAlpha)</c> for
-    /// RGB with <c>(One, OneMinusSrcAlpha)</c> for alpha, matching the default
-    /// <see cref="MixBlendMode.Normal"/> path in <see cref="ApplyBlend"/>.
-    /// </para>
-    /// <para>
-    /// When <paramref name="windowCorners"/> is non-zero the framebuffer is
-    /// cleared to transparent instead of <paramref name="clearColor"/>, and
-    /// every run is masked to the rounded shape in the fragment shaders. The
-    /// corners therefore show the desktop through an alpha-blended native
-    /// window, and the app's own rounded surface paints the visible background.
-    /// </para>
-    /// <para>Must be called before the first <see cref="Render(LayoutResult)"/> of a frame.</para>
+    /// <see cref="EffectivePath"/> reports what the next <see cref="Flush"/> will
+    /// actually use. Forcing <see cref="RenderPath.Indirect"/> on a driver
+    /// without indirect-draw support degrades to <see cref="RenderPath.Direct"/>.
+    /// </remarks>
+    public RenderPath Path { get; set; } = RenderPath.Auto;
+
+    /// <summary>Gets the strategy the renderer will use for the next flush.</summary>
+    public RenderPath EffectivePath =>
+        Path == RenderPath.Direct || !_hasDrawIndirect || !_hasBaseInstance
+            ? RenderPath.Direct
+            : RenderPath.Indirect;
+
+    /// <summary>Gets the number of draw calls issued by the last <see cref="Flush"/>.</summary>
+    public int LastDrawCalls { get; private set; }
+
+    /// <summary>Gets the number of indirect commands issued by the last flush.</summary>
+    public int LastCommandCount { get; private set; }
+
+    /// <summary>Gets the number of instances submitted by the last flush.</summary>
+    public int LastInstanceCount { get; private set; }
+
+    /// <summary>Gets the number of batches recorded in the last frame.</summary>
+    public int LastBatchCount { get; private set; }
+
+    /// <summary>Gets the CPU time spent submitting the last frame, in milliseconds.</summary>
+    public double LastSubmissionMilliseconds { get; private set; }
+
+    /// <summary>Prepares the framebuffer for a frame.</summary>
+    /// <param name="framebufferWidth">Framebuffer width in device pixels; clamped to at least 1.</param>
+    /// <param name="framebufferHeight">Framebuffer height in device pixels; clamped to at least 1.</param>
+    /// <param name="viewportWidth">Logical viewport width in CSS pixels; clamped to at least 1.</param>
+    /// <param name="viewportHeight">Logical viewport height in CSS pixels; clamped to at least 1.</param>
+    /// <param name="dpi">Device-to-CSS-pixel ratio; non-positive values fall back to 1.</param>
+    /// <param name="clearColor">Straight-alpha RGBA clear colour, components in 0..1.</param>
+    /// <param name="windowCorners">Corner radii that mask the native window, in CSS pixels.</param>
+    /// <remarks>
+    /// Resets all batching state and clears the colour buffer. Rounded windows
+    /// clear to transparent and mask every fragment in the shader.
     /// </remarks>
     public void BeginFrame(
         int framebufferWidth,
@@ -297,8 +336,12 @@ public sealed unsafe class GLRenderer : IDisposable
         _viewportHeight = Math.Max(1, viewportHeight);
         _dpi = dpi > 0 ? dpi : 1;
 
-        _runCount = 0;
+        _instances.Clear();
+        _commands.Clear();
+        _segmentCount = 0;
         _current = null;
+        _textureSlotCount = 0;
+        _textureEpoch = 0;
         _clips.Clear();
         _opacities.Clear();
         _transforms.Clear();
@@ -308,6 +351,11 @@ public sealed unsafe class GLRenderer : IDisposable
         _opacity = 1;
         _transform = Matrix3x2.Identity;
         _blend = MixBlendMode.Normal;
+        LastDrawCalls = 0;
+        LastCommandCount = 0;
+        LastInstanceCount = 0;
+        LastBatchCount = 0;
+        LastSubmissionMilliseconds = 0;
 
         _gl.Viewport(0, 0, (uint)_framebufferWidth, (uint)_framebufferHeight);
         _gl.Disable(EnableCap.DepthTest);
@@ -321,8 +369,6 @@ public sealed unsafe class GLRenderer : IDisposable
             BlendingFactor.One,
             BlendingFactor.OneMinusSrcAlpha);
 
-        // Clamp here as well as in the window host so a direct renderer caller
-        // cannot create opposite corners that overlap or a negative field.
         var maxRadius = MathF.Min(_viewportWidth, _viewportHeight) * 0.5f;
         var corners = new CornerRadius(
             Math.Clamp(windowCorners.TopLeft, 0, maxRadius),
@@ -337,126 +383,65 @@ public sealed unsafe class GLRenderer : IDisposable
             return;
         }
 
-        // A rounded window must not leave an opaque clear rectangle behind the
-        // shape. Clear to transparent and let the app paint its own rounded
-        // surface (normally the root element background); the content mask
-        // below keeps every later draw inside the same anti-aliased outline.
-        // Painting the clear colour here as well would show through the
-        // content's own corner anti-aliasing as a light fringe.
         _gl.ClearColor(0, 0, 0, 0);
         _gl.Clear(ClearBufferMask.ColorBufferBit);
-
         _windowMask = new WindowMaskState(
             new Rect(0, 0, _viewportWidth, _viewportHeight),
             ToRadii(corners),
             true);
     }
 
-    /// <summary>Consumes one layout result.</summary>
-    /// <param name="result">
-    /// The layout output whose opcodes are batched and drawn. Its constant pool
-    /// supplies colours, radii, text, images and border specs.
-    /// </param>
-    /// <remarks>
-    /// The instruction stream is first converted into draw runs and then
-    /// executed, so all geometry for this call is drawn before the method
-    /// returns. The renderer does not present the frame; the host swaps the
-    /// buffers after the last <c>Render</c> call of the frame.
-    /// </remarks>
+    /// <summary>Consumes one layout result and draws it immediately.</summary>
+    /// <param name="result">The layout output to paint.</param>
     public void Render(LayoutResult result)
     {
-        Process(result.Opcodes, result.Constants);
-        ExecuteRuns();
+        Submit(result);
+        Flush();
     }
 
-    /// <summary>
-    /// Consumes a layout result followed by an overlay stream. The overlay is
-    /// batched with the frame but always paints last, so host-owned popups such
-    /// as a select menu sit above every element in the tree.
-    /// </summary>
+    /// <summary>Consumes a layout result and an overlay, then draws them.</summary>
     /// <param name="result">The root layout output to paint first.</param>
-    /// <param name="overlay">
-    /// Extra instructions appended after the root stream, in their own
-    /// coordinate space. No state is reset between the streams, so the overlay
-    /// inherits any clip, opacity or transform left pushed by the root.
-    /// </param>
-    /// <param name="overlayConstants">
-    /// Constant pool that resolves the ids used by <paramref name="overlay"/>.
-    /// </param>
-    /// <remarks>
-    /// Both streams are processed before any draw call is issued, so an
-    /// overlay run that happens to match the pending run's state may join it.
-    /// Because runs execute in creation order the overlay still paints after
-    /// the root. Unbalanced pushes in the root stream leak into the overlay.
-    /// </remarks>
+    /// <param name="overlay">Instructions painted above the root.</param>
+    /// <param name="overlayConstants">Constant pool for <paramref name="overlay"/>.</param>
     public void Render(
         LayoutResult result,
         ReadOnlySpan<Instruction> overlay,
         ConstantPool overlayConstants)
     {
-        Process(result.Opcodes, result.Constants);
-        Process(overlay, overlayConstants);
-        ExecuteRuns();
+        Submit(result.Opcodes, result.Constants);
+        Submit(overlay, overlayConstants);
+        Flush();
     }
 
-    /// <summary>
-    /// Consumes the app result, host overlays and a second independent root
-    /// (the inspector) in one batch, so the second root always paints last.
-    /// </summary>
+    /// <summary>Consumes two independent roots and draws them in order.</summary>
     /// <param name="result">The primary root layout output.</param>
     /// <param name="overlay">Instructions painted above <paramref name="result"/>.</param>
     /// <param name="overlayConstants">Constant pool for <paramref name="overlay"/>.</param>
-    /// <param name="second">
-    /// An optional second root, such as an inspector tree, painted above the
-    /// overlay. <see langword="null"/> skips it.
-    /// </param>
-    /// <remarks>
-    /// Processing continues across all three streams without resetting state,
-    /// so an unbalanced clip, opacity or transform push can affect the next
-    /// stream. Draw runs are still created in order and executed in order.
-    /// </remarks>
-    /// <seealso cref="Render(LayoutResult, LayoutResult)"/>
+    /// <param name="second">An optional second root painted above the overlay.</param>
     public void Render(
         LayoutResult result,
         ReadOnlySpan<Instruction> overlay,
         ConstantPool overlayConstants,
         LayoutResult? second)
     {
-        Process(result.Opcodes, result.Constants);
-        Process(overlay, overlayConstants);
+        Submit(result);
+        Submit(overlay, overlayConstants);
 
         if (second is not null)
         {
-            Process(second.Opcodes, second.Constants);
+            Submit(second);
         }
 
-        ExecuteRuns();
+        Flush();
     }
 
-    /// <summary>
-    /// Consumes the app result, host overlays, a second root (the inspector)
-    /// and an overlay that must paint above that second root.
-    /// </summary>
+    /// <summary>Consumes four streams and draws them in argument order.</summary>
     /// <param name="result">The primary root layout output.</param>
     /// <param name="overlay">Instructions painted above <paramref name="result"/>.</param>
     /// <param name="overlayConstants">Constant pool for <paramref name="overlay"/>.</param>
-    /// <param name="second">
-    /// An optional second root painted above the first overlay.
-    /// <see langword="null"/> skips it, in which case the second overlay follows
-    /// the first directly.
-    /// </param>
-    /// <param name="secondOverlay">
-    /// Instructions painted above <paramref name="second"/>, such as tooltips
-    /// owned by the inspector.
-    /// </param>
-    /// <param name="secondOverlayConstants">
-    /// Constant pool for <paramref name="secondOverlay"/>.
-    /// </param>
-    /// <remarks>
-    /// This is the richest overload: the paint order is exactly the argument
-    /// order, and all streams share one batching pass and one flush. It exists
-    /// so the inspector cannot accidentally be occluded by host chrome.
-    /// </remarks>
+    /// <param name="second">An optional second root painted above the first overlay.</param>
+    /// <param name="secondOverlay">Instructions painted above <paramref name="second"/>.</param>
+    /// <param name="secondOverlayConstants">Constant pool for <paramref name="secondOverlay"/>.</param>
     public void Render(
         LayoutResult result,
         ReadOnlySpan<Instruction> overlay,
@@ -465,64 +450,106 @@ public sealed unsafe class GLRenderer : IDisposable
         ReadOnlySpan<Instruction> secondOverlay,
         ConstantPool secondOverlayConstants)
     {
-        Process(result.Opcodes, result.Constants);
-        Process(overlay, overlayConstants);
+        Submit(result);
+        Submit(overlay, overlayConstants);
 
         if (second is not null)
         {
-            Process(second.Opcodes, second.Constants);
+            Submit(second);
         }
 
-        Process(secondOverlay, secondOverlayConstants);
-        ExecuteRuns();
+        Submit(secondOverlay, secondOverlayConstants);
+        Flush();
     }
 
-    /// <summary>Consumes the app result followed by a second independent root.</summary>
+    /// <summary>Consumes two independent roots and draws them in order.</summary>
     /// <param name="result">The primary root layout output.</param>
-    /// <param name="second">
-    /// An optional second root painted above <paramref name="result"/>;
-    /// <see langword="null"/> draws only the first.
-    /// </param>
-    /// <remarks>
-    /// Convenience overload equivalent to passing an empty overlay to
-    /// <see cref="Render(LayoutResult, ReadOnlySpan{Instruction}, ConstantPool, LayoutResult)"/>:
-    /// both streams share one batch and one flush.
-    /// </remarks>
+    /// <param name="second">An optional second root painted above <paramref name="result"/>.</param>
     public void Render(LayoutResult result, LayoutResult? second)
     {
-        Process(result.Opcodes, result.Constants);
+        Submit(result);
 
         if (second is not null)
         {
-            Process(second.Opcodes, second.Constants);
+            Submit(second);
         }
 
-        ExecuteRuns();
+        Flush();
     }
 
     /// <summary>
-    /// Translates an instruction stream into draw runs, updating the clip,
-    /// opacity, transform and blend stacks as push/pop opcodes are seen.
+    /// Appends one layout result to the current scene without submitting it.
     /// </summary>
-    /// <param name="opcodes">The instructions to consume, in paint order.</param>
-    /// <param name="constants">
-    /// Pool used to resolve payload ids for radii, borders, shadows,
-    /// backgrounds, text, images, scrollbars and transforms.
-    /// </param>
+    /// <param name="result">The layout output to append.</param>
     /// <remarks>
-    /// <para>
-    /// Nothing is drawn here; geometry is only appended to runs, which
-    /// <see cref="ExecuteRuns"/> later submits. Opcodes the renderer cannot
-    /// execute in this pass (<c>SetScrollOffset</c>, filters, backdrop filters,
-    /// clip paths, masks, layers, <c>Nop</c> and frame markers) are intentionally
-    /// ignored rather than treated as errors.
-    /// </para>
-    /// <para>
-    /// <c>PushOpacity</c> multiplies and clamps the incoming value to 0..1;
-    /// <c>PopOpacity</c>, <c>PopClip</c> and <c>PopTransform</c> silently do
-    /// nothing when their stack is empty instead of throwing, so an unbalanced
-    /// stream degrades paint state rather than crashing the frame.
-    /// </para>
+    /// Call <see cref="Flush"/> after the last <c>Submit</c> of the frame. This
+    /// split lets host-owned overlays and canvas paint lists join the same
+    /// indirect batch as the main display list.
+    /// </remarks>
+    public void Submit(LayoutResult result) => Process(result.Opcodes, result.Constants);
+
+    /// <summary>Appends an instruction stream to the current scene.</summary>
+    /// <param name="opcodes">Instructions in paint order.</param>
+    /// <param name="constants">Pool resolving the payload ids.</param>
+    public void Submit(ReadOnlySpan<Instruction> opcodes, ConstantPool constants) =>
+        Process(opcodes, constants);
+
+    /// <summary>
+    /// Submits every recorded instance and resets the per-frame counters.
+    /// </summary>
+    /// <remarks>
+    /// This is where indirect rendering happens. The CPU builds one command per
+    /// batch segment, uploads the instance and command buffers, then lets the
+    /// GPU expand the instances. No work is done per object beyond appending its
+    /// 160-byte record during <see cref="Process"/>.
+    /// </remarks>
+    public void Flush()
+    {
+        CloseSegment();
+        var start = Stopwatch.GetTimestamp();
+        LastInstanceCount = _instances.Count;
+        LastCommandCount = _segmentCount;
+        LastBatchCount = 0;
+
+        if (_instances.Count == 0)
+        {
+            LastDrawCalls = 0;
+            LastSubmissionMilliseconds = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+            return;
+        }
+
+        _program.Use();
+        SetCommonUniforms();
+        EnsureInstanceCapacity(_instances.Count * InstanceStride);
+        _gl.BindVertexArray(_shapeVao);
+        WaitForSlot(_instanceFences, _instanceMapping != null);
+        WaitForSlot(_commandFences, _commandMapping != null);
+        if (EffectivePath == RenderPath.Indirect)
+        {
+            ExecuteIndirect();
+        }
+        else
+        {
+            ExecuteDirect();
+        }
+
+        RecordFence(_instanceFences, _instanceMapping != null);
+
+        if (EffectivePath == RenderPath.Indirect)
+        {
+            RecordFence(_commandFences, _commandMapping != null);
+        }
+        _streamSlot = (_streamSlot + 1) % StreamSlotCount;
+        LastSubmissionMilliseconds = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+    }
+
+    /// <summary>Translates an instruction stream into GPU instance records.</summary>
+    /// <param name="opcodes">The instructions to consume, in paint order.</param>
+    /// <param name="constants">Pool used to resolve payload ids.</param>
+    /// <remarks>
+    /// Clip, opacity, transform and blend opcodes update the paint state; every
+    /// draw opcode appends one or more <see cref="GpuInstance"/> records that
+    /// snapshot the current state. Nothing is uploaded or drawn here.
     /// </remarks>
     private void Process(ReadOnlySpan<Instruction> opcodes, ConstantPool constants)
     {
@@ -623,11 +650,11 @@ public sealed unsafe class GLRenderer : IDisposable
 
                 case InstructionOpCode.PushBlendMode:
                     _blends.Push(_blend);
-                    _blend = (MixBlendMode)instruction.Payload;
+                    SetBlend((MixBlendMode)instruction.Payload);
                     break;
 
                 case InstructionOpCode.PopBlendMode:
-                    _blend = _blends.Count > 0 ? _blends.Pop() : MixBlendMode.Normal;
+                    SetBlend(_blends.Count > 0 ? _blends.Pop() : MixBlendMode.Normal);
                     break;
 
                 case InstructionOpCode.SetScrollOffset:
@@ -649,16 +676,9 @@ public sealed unsafe class GLRenderer : IDisposable
         }
     }
 
-    /// <summary>Appends an axis-aligned filled rectangle to the current solid run.</summary>
+    /// <summary>Appends an axis-aligned filled rectangle.</summary>
     /// <param name="rect">Destination rectangle in CSS pixels.</param>
     /// <param name="color">Fill colour as packed <c>0xAARRGGBB</c>.</param>
-    /// <remarks>
-    /// Uses SDF mode 0 (plain box) with zero radii, so no fragment discard is
-    /// needed unless a clip applies. Empty rectangles and fully transparent
-    /// colours are dropped before a run is created, which keeps invisible
-    /// instructions from splitting batches. The accumulated opacity is folded
-    /// into the alpha channel.
-    /// </remarks>
     private void AddRect(in Rect rect, uint color)
     {
         if (rect.IsEmpty || (color >> 24) == 0)
@@ -666,28 +686,19 @@ public sealed unsafe class GLRenderer : IDisposable
             return;
         }
 
-        var run = EnsureShapeRun();
-        run.Shapes.Add(new ShapeInstance(
+        Append(Build(
             new Vector4(rect.X, rect.Y, rect.Width, rect.Height),
             ColorOf(color, _opacity),
             Vector4.Zero,
             Vector4.Zero,
-            new Vector4(rect.X, rect.Y, rect.Width, rect.Height)));
+            new Vector4(rect.X, rect.Y, rect.Width, rect.Height),
+            Vector4.Zero));
     }
 
     /// <summary>Appends a filled rectangle with per-corner rounding (SDF mode 1).</summary>
     /// <param name="rect">Destination rectangle in CSS pixels.</param>
     /// <param name="color">Fill colour as packed <c>0xAARRGGBB</c>.</param>
-    /// <param name="radius">
-    /// Corner radii in CSS pixels; negative values are not clamped here.
-    /// </param>
-    /// <remarks>
-    /// The fragment shader evaluates a rounded-box distance field and applies a
-    /// one-pixel smoothstep, so edges stay anti-aliased at any scale without
-    /// multi-sampling. Radii are used exactly as given: values larger than half
-    /// the box are not scaled down proportionally the way CSS does, so the field
-    /// degenerates instead. Empty or transparent input is ignored.
-    /// </remarks>
+    /// <param name="radius">Corner radii in CSS pixels.</param>
     private void AddRoundedRect(in Rect rect, uint color, CornerRadius radius)
     {
         if (rect.IsEmpty || (color >> 24) == 0)
@@ -695,27 +706,18 @@ public sealed unsafe class GLRenderer : IDisposable
             return;
         }
 
-        var radii = ToRadii(radius);
-        var run = EnsureShapeRun();
-        run.Shapes.Add(new ShapeInstance(
+        Append(Build(
             new Vector4(rect.X, rect.Y, rect.Width, rect.Height),
             ColorOf(color, _opacity),
-            radii,
+            ToRadii(radius),
             new Vector4(1, 0, 0, 0),
-            new Vector4(rect.X, rect.Y, rect.Width, rect.Height)));
+            new Vector4(rect.X, rect.Y, rect.Width, rect.Height),
+            Vector4.Zero));
     }
 
     /// <summary>Appends an ellipse inscribed in <paramref name="rect"/> (SDF mode 5).</summary>
     /// <param name="rect">Bounding rectangle in CSS pixels.</param>
     /// <param name="color">Fill colour as packed <c>0xAARRGGBB</c>.</param>
-    /// <remarks>
-    /// The shader normalises the local quad coordinates by half the box and
-    /// tests <c>length(p) - 1</c>, so the anti-aliased band is a fixed fraction
-    /// of each axis rather than a fixed pixel width. On a very elongated
-    /// rectangle the rim therefore looks thicker at the ends of the long axis and
-    /// thinner at the ends of the short axis. Zero radii are sent, and the
-    /// unused shadow parameters are left at zero.
-    /// </remarks>
     private void AddEllipse(in Rect rect, uint color)
     {
         if (rect.IsEmpty || (color >> 24) == 0)
@@ -723,42 +725,18 @@ public sealed unsafe class GLRenderer : IDisposable
             return;
         }
 
-        var run = EnsureShapeRun();
-        run.Shapes.Add(new ShapeInstance(
+        Append(Build(
             new Vector4(rect.X, rect.Y, rect.Width, rect.Height),
             ColorOf(color, _opacity),
             Vector4.Zero,
             new Vector4(5, 0, 0, 0),
-            new Vector4(rect.X, rect.Y, rect.Width, rect.Height)));
+            new Vector4(rect.X, rect.Y, rect.Width, rect.Height),
+            Vector4.Zero));
     }
 
-    /// <summary>Appends a border as either one SDF ring or up to four solid rectangles.</summary>
+    /// <summary>Appends a border as either one SDF ring or up to four rectangles.</summary>
     /// <param name="rect">Border box in CSS pixels.</param>
-    /// <param name="border">
-    /// Per-side widths, styles, colours and the shared corner radius.
-    /// <see cref="BorderStyle.None"/> and <see cref="BorderStyle.Hidden"/> sides
-    /// are treated as zero width.
-    /// </param>
-    /// <remarks>
-    /// <para>
-    /// When all four widths and colours match, a single instance with SDF mode 2
-    /// is emitted: the ring is carved out of the rounded box using
-    /// <c>max(1, width)</c> as the thickness, which also honours
-    /// <see cref="BorderSpec.Radius"/>.
-    /// </para>
-    /// <para>
-    /// Otherwise each visible side becomes its own plain rectangle. The left and
-    /// right strips are shortened by the top and bottom widths so the sides do
-    /// not overlap the horizontal strips, and the rounded radius is lost. The
-    /// four-rectangle fallback therefore paints square corners.
-    /// </para>
-    /// <para>
-    /// Only <see cref="BorderStyle.None"/> and <see cref="BorderStyle.Hidden"/>
-    /// suppress a side. Every other style, including dashed, dotted, double and
-    /// the 3D variants, is painted solid in the side colour; only widths and
-    /// colours are used.
-    /// </para>
-    /// </remarks>
+    /// <param name="border">Per-side widths, styles, colours and the shared radius.</param>
     private void AddBorder(in Rect rect, in BorderSpec border)
     {
         if (border.IsEmpty || rect.IsEmpty)
@@ -787,24 +765,18 @@ public sealed unsafe class GLRenderer : IDisposable
             && top.Color == bottom.Color
             && top.Color == left.Color)
         {
-            var run = EnsureShapeRun();
-            run.Shapes.Add(new ShapeInstance(
+            Append(Build(
                 new Vector4(rect.X, rect.Y, rect.Width, rect.Height),
                 ColorOf(top.Color, _opacity),
                 ToRadii(border.Radius),
-                new Vector4(2, 0, MathF.Max(1, topWidth), ShapeInstance.AllBorderSides),
-                new Vector4(rect.X, rect.Y, rect.Width, rect.Height)));
+                new Vector4(2, 0, MathF.Max(1, topWidth), GpuInstance.AllBorderSides),
+                new Vector4(rect.X, rect.Y, rect.Width, rect.Height),
+                Vector4.Zero));
             return;
         }
 
         if (!border.Radius.IsZero)
         {
-            // Rounded borders with per-side colours are a ring split along the
-            // corner bisectors. Emit one sector per painted side so the shape
-            // stays round under a rotation instead of becoming four axis-aligned
-            // strips; the fragment shader picks the sector from the local
-            // position, so the colour boundaries meet on the diagonals exactly
-            // like CSS.
             AddRoundedSide(rect, border, top, topWidth, 0);
             AddRoundedSide(rect, border, right, rightWidth, 1);
             AddRoundedSide(rect, border, bottom, bottomWidth, 2);
@@ -812,10 +784,6 @@ public sealed unsafe class GLRenderer : IDisposable
             return;
         }
 
-        // Side strips use the anti-aliased box mode rather than a plain quad.
-        // A one-pixel strip placed between device-pixel centres would otherwise
-        // receive no coverage at all, which made horizontal table borders vanish
-        // while the taller vertical strips stayed visible.
         if (topWidth > 0)
         {
             AddRoundedRect(
@@ -862,40 +830,19 @@ public sealed unsafe class GLRenderer : IDisposable
             return;
         }
 
-        var run = EnsureShapeRun();
-        run.Shapes.Add(new ShapeInstance(
+        Append(Build(
             new Vector4(rect.X, rect.Y, rect.Width, rect.Height),
             ColorOf(side.Color, _opacity),
             ToRadii(border.Radius),
             new Vector4(2, 0, width, sector),
-            new Vector4(rect.X, rect.Y, rect.Width, rect.Height)));
+            new Vector4(rect.X, rect.Y, rect.Width, rect.Height),
+            Vector4.Zero));
     }
 
     /// <summary>Appends an outer or inset box shadow as a single SDF instance.</summary>
     /// <param name="rect">The element's border box in CSS pixels.</param>
     /// <param name="shadow">Colour, offset, blur radius and spread in CSS pixels.</param>
-    /// <param name="inset">
-    /// <see langword="true"/> for an inner shadow (SDF mode 4), which is clipped
-    /// to <paramref name="rect"/>; <see langword="false"/> for an outer shadow
-    /// (SDF mode 3).
-    /// </param>
-    /// <remarks>
-    /// <para>
-    /// The blur is clamped to at least 1 and the spread to at least 0, so a
-    /// <c>0</c> blur still produces a softened edge rather than a hard one: a
-    /// two-pixel ramp for an outer shadow and a one-pixel ramp for an inset one.
-    /// The shape being shadowed is offset and inflated by the spread; the quad
-    /// itself is inflated by <c>blur * 1.5</c> so the falloff fits without
-    /// clipping. That is why the instance carries a separate SDF rectangle from
-    /// its quad rectangle.
-    /// </para>
-    /// <para>
-    /// An inset shadow does not translate its shape: the quad and the SDF
-    /// rectangle are both the element box, the shader discards fragments outside
-    /// it and fades the inside edge, and the spread only widens the corner
-    /// radii. Shadows with zero alpha are dropped.
-    /// </para>
-    /// </remarks>
+    /// <param name="inset">Whether this is an inset shadow (SDF mode 4).</param>
     private void AddShadow(in Rect rect, in ShadowSpec shadow, bool inset)
     {
         if ((shadow.Color >> 24) == 0 || rect.IsEmpty)
@@ -915,27 +862,18 @@ public sealed unsafe class GLRenderer : IDisposable
             : rect.Translate(shadow.OffsetX, shadow.OffsetY).Inflate(spread);
         var quad = inset ? rect : shapeRect.Inflate(blur * 1.5f);
 
-        var run = EnsureShapeRun();
-        run.Shapes.Add(new ShapeInstance(
+        Append(Build(
             new Vector4(quad.X, quad.Y, quad.Width, quad.Height),
             ColorOf(shadow.Color, _opacity),
             ToRadii(radius),
             new Vector4(inset ? 4 : 3, blur, spread, 0),
-            new Vector4(shapeRect.X, shapeRect.Y, shapeRect.Width, shapeRect.Height)));
+            new Vector4(shapeRect.X, shapeRect.Y, shapeRect.Width, shapeRect.Height),
+            Vector4.Zero));
     }
 
     /// <summary>Appends a scrollbar track and thumb as two rounded rectangles.</summary>
     /// <param name="rect">Track rectangle in CSS pixels.</param>
-    /// <param name="scrollbar">
-    /// Orientation, thumb offset and length, thickness and the two colours.
-    /// </param>
-    /// <remarks>
-    /// Both pieces use a radius of half <see cref="ScrollbarSpec.Width"/>, which
-    /// produces a fully rounded (pill) bar. The thumb offset is measured from
-    /// the start of the track and is applied to Y for vertical bars and to X for
-    /// horizontal bars. Transparent track or thumb colours simply produce no
-    /// geometry for that piece.
-    /// </remarks>
+    /// <param name="scrollbar">Orientation, thumb offset and length, thickness and colours.</param>
     private void AddScrollbar(in Rect rect, in ScrollbarSpec scrollbar)
     {
         if (rect.IsEmpty)
@@ -962,38 +900,9 @@ public sealed unsafe class GLRenderer : IDisposable
         }
     }
 
-    /// <summary>Appends a URL background or a cached gradient texture as a textured quad.</summary>
-    /// <param name="spec">
-    /// The parsed background layer, already normalised by the paint pass.
-    /// </param>
+    /// <summary>Appends a URL background or a cached gradient texture.</summary>
+    /// <param name="spec">The parsed background layer.</param>
     /// <param name="rect">Destination box in CSS pixels.</param>
-    /// <remarks>
-    /// <para>
-    /// <see cref="ImageKind.Url"/> layers are fetched from
-    /// <see cref="ImageCache"/>. When the repeat mode includes a tiled axis the
-    /// texture's wrap mode is set to <c>GL_REPEAT</c> and the UV range is scaled
-    /// by <c>box size / image size</c>; otherwise the layer is stretched once.
-    /// Note that scaling uses CSS pixels against image texels, so a DPI other
-    /// than 1 changes the apparent tile size.
-    /// </para>
-    /// <para>
-    /// <see cref="BackgroundRepeat.Space"/> and
-    /// <see cref="BackgroundRepeat.Round"/> are not implemented and behave like
-    /// <see cref="BackgroundRepeat.NoRepeat"/>. For single-axis repeats both
-    /// wrap axes are still set to <c>GL_REPEAT</c>, even though only the tiled
-    /// axis receives a scaled UV range, so the other axis samples exactly 0 to 1.
-    /// </para>
-    /// <para>
-    /// Gradient layers are rasterised to a 256x256 texture by
-    /// <see cref="GradientCache"/> and sampled with UVs from 0 to 1, so the
-    /// gradient is stretched to the box and its stops are spaced in normalised
-    /// box space.
-    /// </para>
-    /// <para>
-    /// The wrap mode is written onto the shared cached texture and persists
-    /// until another draw changes it, so the last user of a texture wins.
-    /// </para>
-    /// </remarks>
     private void AddBackground(in BackgroundImageSpec spec, in Rect rect)
     {
         if (rect.IsEmpty || spec.Kind == ImageKind.None)
@@ -1040,28 +949,6 @@ public sealed unsafe class GLRenderer : IDisposable
     /// <summary>Appends a bitmap image, applying its object-fit rule and tint.</summary>
     /// <param name="spec">Image source, fit mode, opacity and tint.</param>
     /// <param name="rect">Content box in CSS pixels.</param>
-    /// <remarks>
-    /// <para>
-    /// <see cref="ObjectFit.Fill"/> stretches the whole texture over the box.
-    /// <see cref="ObjectFit.Contain"/> picks the smaller scale,
-    /// <see cref="ObjectFit.Cover"/> the larger, and
-    /// <see cref="ObjectFit.ScaleDown"/> behaves like contain but never scales
-    /// up; <see cref="ObjectFit.None"/> keeps natural size. Except for cover, the
-    /// fitted image is centred and its size is clamped to the box, so an axis
-    /// where the image overflows is rescaled rather than cropped. Cover instead
-    /// keeps the box size and crops by shrinking the UV range symmetrically.
-    /// </para>
-    /// <para>
-    /// Wrap mode is forced to <c>GL_CLAMP_TO_EDGE</c> so cropped or stretched
-    /// sampling cannot repeat neighbours. The tint is multiplied with the
-    /// texture and with the accumulated opacity times
-    /// <see cref="ImageSpec.Opacity"/>.
-    /// </para>
-    /// <para>
-    /// Missing sources, zero-sized textures, empty rectangles and non-positive
-    /// alpha produce no geometry.
-    /// </para>
-    /// </remarks>
     private void AddImage(in ImageSpec spec, in Rect rect)
     {
         if (rect.IsEmpty || string.IsNullOrEmpty(spec.Source))
@@ -1117,37 +1004,10 @@ public sealed unsafe class GLRenderer : IDisposable
         AddTexturedQuad(texture, rect, uv0, uv1, ColorOf(spec.Tint, _opacity * spec.Opacity), alphaTexture: false);
     }
 
-    /// <summary>
-    /// Appends one textured quad per glyph, handling shaping, kerning and
-    /// spacing.
-    /// </summary>
-    /// <param name="rect">
-    /// The text box in CSS pixels; only its left and vertical centre are used.
-    /// </param>
+    /// <summary>Appends one textured quad per glyph, handling shaping and kerning.</summary>
+    /// <param name="rect">The text box in CSS pixels.</param>
     /// <param name="command">The string to draw and the style that selects the font.</param>
     /// <param name="flags">Per-instruction flags; currently ignored by the glyph path.</param>
-    /// <remarks>
-    /// <para>
-    /// The baseline is derived from the style's line height (falling back to
-    /// <c>1.2 * fontSize</c>) plus the font's ascent and descent measured from an
-    /// empty string, which vertically centres the line box in
-    /// <paramref name="rect"/>. Each rune is resolved through
-    /// <see cref="FontManager"/>, which also performs font fallback; kerning is
-    /// applied only when consecutive runes resolve to the same face.
-    /// </para>
-    /// <para>
-    /// Glyph quads are snapped to whole pixels after the fractional pen position
-    /// and glyph offset are added. This keeps sampling inside texel centres of
-    /// the linearly filtered atlas and avoids washed-out thin stems, while the
-    /// unsnapped pen still accumulates advances, kerning and letter spacing.
-    /// </para>
-    /// <para>
-    /// Each glyph becomes a quad in an alpha-texture run, so a paragraph
-    /// alternates runs whenever it mixes atlas pages, i.e. when fonts fall back
-    /// or the atlas grows mid-text. Glyphs with no texture or zero size are
-    /// skipped but still advance the pen.
-    /// </para>
-    /// </remarks>
     private void AddText(in Rect rect, in TextCommand command, InstructionFlags flags)
     {
         var text = command.Text;
@@ -1179,28 +1039,15 @@ public sealed unsafe class GLRenderer : IDisposable
 
             if (glyph.Texture != 0 && glyph.Width > 0 && glyph.Height > 0)
             {
-                var run = EnsureTextRun(glyph.Texture, alphaTexture: true);
-
-                // Glyph quads are sampled from a linearly filtered atlas. If a
-                // quad lands on a fractional pixel the sample point can fall on
-                // a texel boundary, blending the glyph with its transparent
-                // atlas padding. That washes out thin stems (white-on-blue
-                // small text in particular). Snapping the origin keeps the
-                // sample on texel centres while the fractional pen still
-                // carries kerning and advances.
                 var x = MathF.Round(pen + glyph.OffsetX);
                 var y = MathF.Round(baseline + glyph.OffsetY);
-                AddQuadVertices(
-                    run,
-                    x,
-                    y,
-                    glyph.Width,
-                    glyph.Height,
-                    glyph.U0,
-                    glyph.V0,
-                    glyph.U1,
-                    glyph.V1,
-                    color);
+                AddTexturedQuad(
+                    glyph.Texture,
+                    new Rect(x, y, glyph.Width, glyph.Height),
+                    new Vector2(glyph.U0, glyph.V0),
+                    new Vector2(glyph.U1, glyph.V1),
+                    color,
+                    alphaTexture: true);
             }
 
             pen += glyph.Advance + style.LetterSpacing;
@@ -1209,28 +1056,13 @@ public sealed unsafe class GLRenderer : IDisposable
         }
     }
 
-    /// <summary>
-    /// Starts or extends a textured run and emits one quad for
-    /// <paramref name="rect"/>.
-    /// </summary>
+    /// <summary>Appends one textured quad for a cached texture.</summary>
     /// <param name="texture">GL texture name; zero produces no geometry.</param>
     /// <param name="rect">Destination rectangle in CSS pixels.</param>
-    /// <param name="uv0">Top-left texture coordinate, normally (0, 0).</param>
-    /// <param name="uv1">
-    /// Bottom-right texture coordinate; values above 1 tile when the texture
-    /// wraps.
-    /// </param>
+    /// <param name="uv0">Top-left texture coordinate.</param>
+    /// <param name="uv1">Bottom-right texture coordinate.</param>
     /// <param name="color">Straight-alpha RGBA multiplied with the sampled texel.</param>
-    /// <param name="alphaTexture">
-    /// <see langword="true"/> for single-channel glyph atlases, where the shader
-    /// uses the red channel as coverage and forces RGB to white; otherwise the
-    /// texture is sampled as RGBA.
-    /// </param>
-    /// <remarks>
-    /// Switching <paramref name="texture"/> or <paramref name="alphaTexture"/>
-    /// starts a new run and therefore a new draw call. Empty rectangles and
-    /// non-positive alpha are dropped.
-    /// </remarks>
+    /// <param name="alphaTexture">Whether coverage comes from the red channel.</param>
     private void AddTexturedQuad(
         uint texture,
         in Rect rect,
@@ -1244,401 +1076,335 @@ public sealed unsafe class GLRenderer : IDisposable
             return;
         }
 
-        var run = EnsureTextRun(texture, alphaTexture);
-        AddQuadVertices(run, rect.X, rect.Y, rect.Width, rect.Height, uv0.X, uv0.Y, uv1.X, uv1.Y, color);
+        var slot = EnsureTextureSlot(texture);
+        Append(Build(
+            new Vector4(rect.X, rect.Y, rect.Width, rect.Height),
+            color,
+            Vector4.Zero,
+            new Vector4(6, slot, alphaTexture ? 1 : 0, 0),
+            new Vector4(rect.X, rect.Y, rect.Width, rect.Height),
+            new Vector4(uv0.X, uv0.Y, uv1.X, uv1.Y)));
     }
 
-    /// <summary>
-    /// Appends the four vertices of an axis-aligned quad in triangle-strip
-    /// order.
-    /// </summary>
-    /// <param name="run">The textured run that receives the vertices.</param>
-    /// <param name="x">Left edge in CSS pixels.</param>
-    /// <param name="y">Top edge in CSS pixels.</param>
-    /// <param name="width">Quad width in CSS pixels.</param>
-    /// <param name="height">Quad height in CSS pixels.</param>
-    /// <param name="u0">Left texture coordinate.</param>
-    /// <param name="v0">Top texture coordinate.</param>
-    /// <param name="u1">Right texture coordinate.</param>
-    /// <param name="v1">Bottom texture coordinate.</param>
-    /// <param name="color">Straight-alpha RGBA vertex colour.</param>
-    /// <remarks>
-    /// The strip order is top-left, top-right, bottom-left, bottom-right, so the
-    /// two triangles share the top-left to bottom-right diagonal. Textured runs
-    /// are drawn with <c>DrawElements</c>, not as a strip; the matching index
-    /// pattern is generated per quad in <see cref="ExecuteRuns"/>.
-    /// </remarks>
-    private static void AddQuadVertices(
-        DrawRun run,
-        float x,
-        float y,
-        float width,
-        float height,
-        float u0,
-        float v0,
-        float u1,
-        float v1,
-        Vector4 color)
+    /// <summary>Builds an instance snapshot of the current paint state.</summary>
+    /// <param name="rect">Quad bounds in CSS pixels.</param>
+    /// <param name="color">Straight-alpha RGBA with opacity already folded in.</param>
+    /// <param name="radii">Corner radii for the SDF, or zero.</param>
+    /// <param name="parameters">SDF mode and mode-specific parameters.</param>
+    /// <param name="sdfRect">Rectangle the distance field is measured against.</param>
+    /// <param name="uv">Texture coordinates, or zero for solid geometry.</param>
+    /// <returns>The record to append to the frame's instance buffer.</returns>
+    private GpuInstance Build(
+        Vector4 rect,
+        Vector4 color,
+        Vector4 radii,
+        Vector4 parameters,
+        Vector4 sdfRect,
+        Vector4 uv)
     {
-        var verts = run.Vertices;
+        var clipRect = _clip.HasClip
+            ? new Vector4(_clip.Rect.X, _clip.Rect.Y, _clip.Rect.Width, _clip.Rect.Height)
+            : NoClipRect;
+        var clipRadii = _clip.HasClip ? _clip.Radii : Vector4.Zero;
 
-        // A four-vertex triangle strip. Strip order keeps the two triangles
-        // sharing the TL-BR diagonal: (TL, TR, BL) and (TR, BL, BR).
-        verts.Add(new TexturedVertex(x, y, u0, v0, color));
-        verts.Add(new TexturedVertex(x + width, y, u1, v0, color));
-        verts.Add(new TexturedVertex(x, y + height, u0, v1, color));
-        verts.Add(new TexturedVertex(x + width, y + height, u1, v1, color));
+        return new GpuInstance(
+            rect,
+            color,
+            radii,
+            parameters,
+            sdfRect,
+            clipRect,
+            clipRadii,
+            new Vector4(_transform.M11, _transform.M21, _transform.M31, 0),
+            new Vector4(_transform.M12, _transform.M22, _transform.M32, 0),
+            uv);
     }
 
-    /// <summary>
-    /// Intersects a new rectangle with the active clip and makes it current,
-    /// saving the previous state on the clip stack.
-    /// </summary>
-    /// <param name="rect">The new clip rectangle in CSS pixels.</param>
-    /// <param name="radii">
-    /// Rounded-clip radii packed as top-right, bottom-right, top-left,
-    /// bottom-left; ignored when <paramref name="rounded"/> is
-    /// <see langword="false"/> and no rounded ancestor exists.
-    /// </param>
-    /// <param name="rounded">
-    /// Whether this clip should be applied with an SDF rounded-box test in the
-    /// fragment shader in addition to the scissor rectangle.
-    /// </param>
-    /// <remarks>
-    /// <para>
-    /// Rectangles always intersect, so a child clip can only shrink its parent;
-    /// the saved state is what <see cref="PopClip"/> restores.
-    /// </para>
-    /// <para>
-    /// Once any clip in the chain is rounded, all descendants report
-    /// <see cref="ClipState.Rounded"/>. A rectangular clip pushed inside a
-    /// rounded ancestor keeps the ancestor's radii so the rounded test stays
-    /// active for the subtree; only an explicitly rounded push replaces them.
-    /// </para>
-    /// <para>
-    /// Scissor state is not touched here; it is applied per run from the final
-    /// <see cref="ClipState"/>.
-    /// </para>
-    /// </remarks>
-    private void PushClip(in Rect rect, Vector4 radii, bool rounded)
+    /// <summary>Appends an instance to the open segment, starting one if needed.</summary>
+    /// <param name="instance">The record to append.</param>
+    private void Append(in GpuInstance instance)
     {
-        _clips.Push(_clip);
-        var next = _clip.Rect.Intersect(rect);
-        var useRounded = rounded || _clip.Rounded;
-        // Preserve an ancestor's rounding when a rectangular clip is pushed
-        // inside a rounded one: zeroing the radii here discarded the ancestor's
-        // corners (see PushClip remarks). Keeping the ancestor radii keeps the
-        // rounded test active for the subtree.
-        var effectiveRadii = rounded
-            ? radii
-            : (useRounded ? _clip.Radii : Vector4.Zero);
-        _clip = new ClipState(
-            next,
-            effectiveRadii,
-            true,
-            useRounded);
-    }
-
-    /// <summary>Restores the clip saved by the matching <see cref="PushClip"/>.</summary>
-    /// <remarks>
-    /// An empty stack is tolerated: the call is ignored and the current clip is
-    /// left untouched. Each pop closes exactly one push, so the stacks must be
-    /// balanced by the instruction stream for subsequent geometry to inherit the
-    /// intended clip.
-    /// </remarks>
-    private void PopClip()
-    {
-        if (_clips.Count > 0)
+        if (_current is null)
         {
-            _clip = _clips.Pop();
-        }
-    }
-
-    /// <summary>
-    /// Returns a solid run that can accept another instance for the current
-    /// state.
-    /// </summary>
-    /// <returns>
-    /// The pending solid run when the current clip, transform and blend mode
-    /// match; otherwise a newly started solid run.
-    /// </returns>
-    /// <remarks>
-    /// Only the most recently started run is considered, so returning to a
-    /// previous state after a state change begins a new run instead of reopening
-    /// the older one. This preserves paint order at the cost of extra draw
-    /// calls when state alternates.
-    /// </remarks>
-    private DrawRun EnsureShapeRun()
-    {
-        if (_current is { IsTextured: false } current && MatchesState(current))
-        {
-            return current;
+            StartSegment();
         }
 
-        return StartRun(textured: false, texture: 0, alphaTexture: false);
+        _instances.Add(instance);
+        _current!.InstanceCount++;
     }
 
-    /// <summary>
-    /// Returns a textured run that can accept another quad for the given
-    /// texture and clip/transform/blend state.
-    /// </summary>
-    /// <param name="texture">The GL texture the quad samples.</param>
-    /// <param name="alphaTexture">
-    /// Whether the shader should read coverage from the red channel, as it does
-    /// for glyph atlases.
-    /// </param>
-    /// <returns>
-    /// The pending textured run when both the texture identity and the state
-    /// match; otherwise a newly started textured run.
-    /// </returns>
-    /// <remarks>
-    /// Texture identity is the raw GL name rather than the source URL, so
-    /// different URLs that resolve to the same cached texture share a run.
-    /// Alternating textures (for example an icon between two text runs) splits
-    /// the run each time.
-    /// </remarks>
-    private DrawRun EnsureTextRun(uint texture, bool alphaTexture)
+    /// <summary>Starts a new batch segment at the current instance position.</summary>
+    private void StartSegment()
     {
-        if (_current is { IsTextured: true } current
-            && current.Texture == texture
-            && current.AlphaTexture == alphaTexture
-            && MatchesState(current))
+        Segment segment;
+        if (_segmentCount < _segments.Count)
         {
-            return current;
-        }
-
-        return StartRun(textured: true, texture, alphaTexture);
-    }
-
-    /// <summary>
-    /// Tests whether a run was recorded with the same clip, transform and blend
-    /// mode as the current state.
-    /// </summary>
-    /// <param name="run">The candidate run.</param>
-    /// <returns><see langword="true"/> when the run can accept more geometry.</returns>
-    /// <remarks>
-    /// Opacity is not compared because it is baked into colours; geometry drawn
-    /// at different opacities can therefore share one run. <see cref="ClipState"/>
-    /// is a record struct, so its rectangle, radii and flags are all compared by
-    /// value.
-    /// </remarks>
-    private bool MatchesState(DrawRun run) =>
-        run.Clip.Equals(_clip)
-        && run.WindowMask.Equals(_windowMask)
-        && run.Transform.Equals(_transform)
-        && run.Blend == _blend;
-
-    /// <summary>Starts a new run with the current state and makes it current.</summary>
-    /// <param name="textured">
-    /// Whether the run holds textured quads instead of shape instances.
-    /// </param>
-    /// <param name="texture">The sampled texture for textured runs; 0 for solid runs.</param>
-    /// <param name="alphaTexture">
-    /// Whether textured quads read coverage from the red channel.
-    /// </param>
-    /// <returns>The new run, which is empty.</returns>
-    /// <remarks>
-    /// Runs are pooled per frame: while <see cref="_runCount"/> is below the
-    /// list length, an existing <see cref="DrawRun"/> is reset and reused, which
-    /// keeps its vertex and instance list capacities alive across frames. This
-    /// is why steady-state rendering allocates little. The previous
-    /// <see cref="_current"/> run is not explicitly closed; its recorded state
-    /// and geometry are already fixed.
-    /// </remarks>
-    private DrawRun StartRun(bool textured, uint texture, bool alphaTexture)
-    {
-        DrawRun run;
-
-        if (_runCount < _runs.Count)
-        {
-            run = _runs[_runCount];
-            run.Reset(textured, texture, alphaTexture, _clip, _windowMask, _transform, _blend);
+            segment = _segments[_segmentCount];
         }
         else
         {
-            run = new DrawRun(textured, texture, alphaTexture, _clip, _windowMask, _transform, _blend);
-            _runs.Add(run);
+            segment = new Segment();
+            _segments.Add(segment);
         }
 
-        _runCount++;
-        _current = run;
-        return run;
+        segment.Reset(_instances.Count, _blend, _textureEpoch);
+        _segmentCount++;
+        _current = segment;
     }
 
-    /// <summary>
-    /// Submits every run recorded for the frame, in creation order, applying
-    /// its scissor, blend mode, program, uniforms and vertex data.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Runs with no geometry, or whose clip has collapsed to zero width or
-    /// height, are skipped without touching GL state.
-    /// </para>
-    /// <para>
-    /// Solid runs bind <see cref="_shapeVao"/>, upload the instance array with
-    /// <c>glBufferData</c> (which orphans the previous storage, avoiding a
-    /// pipeline stall) and issue one <c>DrawArraysInstanced</c> call over four
-    /// vertices. Textured runs bind <see cref="_textureVao"/>, upload the
-    /// vertices, regenerate the triangle index pattern for the run's quads,
-    /// upload that index array and issue one <c>DrawElements</c> call.
-    /// </para>
-    /// <para>
-    /// The index pattern is rebuilt on the CPU for every textured run; the cost
-    /// is six indices per quad but no extra draw calls. Each run with geometry
-    /// costs exactly one draw call, so the frame's draw-call count equals the
-    /// number of batches created during <see cref="Process"/>.
-    /// </para>
-    /// <para>
-    /// Program, texture unit, VAO and buffer bindings are left as the last run
-    /// set them. Buffers are always re-uploaded rather than updated in place, so
-    /// no assumption is made about the previous contents.
-    /// </para>
-    /// </remarks>
-    private void ExecuteRuns()
+    /// <summary>Finalises the open segment and records its texture bindings.</summary>
+    private void CloseSegment()
     {
-        for (var r = 0; r < _runCount; r++)
+        if (_current is not { } segment)
         {
-            var run = _runs[r];
-
-            if (run.IsTextured ? run.Vertices.Count == 0 : run.Shapes.Count == 0)
-            {
-                continue;
-            }
-
-            if (run.Clip.HasClip && (run.Clip.Rect.Width <= 0 || run.Clip.Rect.Height <= 0))
-            {
-                continue;
-            }
-
-            ApplyScissor(run.Clip);
-            ApplyBlend(run.Blend);
-
-            if (!run.IsTextured)
-            {
-                _shapeProgram.Use();
-                SetCommonUniforms(_shapeProgram, run.Clip, run.WindowMask, run.Transform);
-
-                _gl.BindVertexArray(_shapeVao);
-                _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _instanceVbo);
-                _gl.BufferData(
-                    BufferTargetARB.ArrayBuffer,
-                    CollectionsMarshal.AsSpan(run.Shapes),
-                    BufferUsageARB.DynamicDraw);
-
-                _gl.DrawArraysInstanced(PrimitiveType.TriangleStrip, 0, 4, (uint)run.Shapes.Count);
-            }
-            else
-            {
-                if (run.Texture == 0 || run.Vertices.Count == 0)
-                {
-                    continue;
-                }
-
-                _textureProgram.Use();
-                SetCommonUniforms(_textureProgram, run.Clip, run.WindowMask, run.Transform);
-                _textureProgram.Uniform1("uAlphaTexture", run.AlphaTexture ? 1 : 0);
-                _textureProgram.Uniform1("uTexture", 0);
-                _gl.ActiveTexture(TextureUnit.Texture0);
-                _gl.BindTexture(TextureTarget.Texture2D, run.Texture);
-
-                _gl.BindVertexArray(_textureVao);
-                _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _textureVbo);
-                _gl.BufferData(
-                    BufferTargetARB.ArrayBuffer,
-                    CollectionsMarshal.AsSpan(run.Vertices),
-                    BufferUsageARB.DynamicDraw);
-
-                var quadCount = run.Vertices.Count / 4;
-                var indexCount = quadCount * 6;
-                EnsureTextureIndexCapacity(indexCount);
-
-                for (var q = 0; q < quadCount; q++)
-                {
-                    var vertex = (uint)(q * 4);
-                    var offset = q * 6;
-                    _textureIndices[offset] = vertex;
-                    _textureIndices[offset + 1] = vertex + 1;
-                    _textureIndices[offset + 2] = vertex + 2;
-                    _textureIndices[offset + 3] = vertex + 2;
-                    _textureIndices[offset + 4] = vertex + 1;
-                    _textureIndices[offset + 5] = vertex + 3;
-                }
-
-                _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, _textureIndexVbo);
-                _gl.BufferData(
-                    BufferTargetARB.ElementArrayBuffer,
-                    _textureIndices.AsSpan(0, indexCount),
-                    BufferUsageARB.DynamicDraw);
-
-                _gl.DrawElements(
-                    PrimitiveType.Triangles,
-                    (uint)indexCount,
-                    DrawElementsType.UnsignedInt,
-                    (void*)0);
-            }
-        }
-    }
-
-    /// <summary>Configures the GL scissor rectangle for a run from its CSS-pixel clip.</summary>
-    /// <param name="clip">The clip recorded on the run.</param>
-    /// <remarks>
-    /// <para>
-    /// The rectangle is scaled by <see cref="_dpi"/> and flipped because GL's
-    /// scissor origin is the bottom-left of the framebuffer. The left and top
-    /// edges are floored and the size is ceiled so the scissor fully covers the
-    /// intended area; negative sizes clamp to zero rather than wrapping to a huge
-    /// unsigned value.
-    /// </para>
-    /// <para>
-    /// GL scissor state has no stack of its own, so this is called for every run
-    /// and <c>GL_SCISSOR_TEST</c> is disabled when the run is unclipped.
-    /// </para>
-    /// <para>
-    /// The conversion uses the logical viewport height, not the framebuffer
-    /// height, and does not apply the run's affine transform, so a translated,
-    /// scaled or rotated run is scissored at its untransformed position.
-    /// </para>
-    /// </remarks>
-    private void ApplyScissor(in ClipState clip)
-    {
-        if (!clip.HasClip)
-        {
-            _gl.Disable(EnableCap.ScissorTest);
             return;
         }
 
-        var x = (int)MathF.Floor(clip.Rect.X * _dpi);
-        var y = (int)MathF.Floor((_viewportHeight - clip.Rect.Bottom) * _dpi);
-        var width = (int)MathF.Ceiling(clip.Rect.Width * _dpi);
-        var height = (int)MathF.Ceiling(clip.Rect.Height * _dpi);
-
-        _gl.Enable(EnableCap.ScissorTest);
-        _gl.Scissor(x, y, (uint)Math.Max(0, width), (uint)Math.Max(0, height));
+        segment.Capture(_textureSlots, _textureSlotCount);
+        _current = null;
     }
 
-    /// <summary>Applies the separable blend function that approximates a mix-blend mode.</summary>
-    /// <param name="blend">The mode recorded on the run.</param>
+    /// <summary>Changes the blend mode and closes the current batch if it differs.</summary>
+    /// <param name="blend">The new blend mode.</param>
+    private void SetBlend(MixBlendMode blend)
+    {
+        if (blend == _blend)
+        {
+            return;
+        }
+
+        CloseSegment();
+        _blend = blend;
+    }
+
+    /// <summary>Finds or assigns a texture unit for the current texture epoch.</summary>
+    /// <param name="texture">The GL texture to sample.</param>
+    /// <returns>The texture unit index, in <c>0..MaxTextureSlots-1</c>.</returns>
     /// <remarks>
-    /// <para>
-    /// Only <see cref="MixBlendMode.Multiply"/>,
-    /// <see cref="MixBlendMode.Screen"/> and
-    /// <see cref="MixBlendMode.PlusLighter"/> have dedicated factors; every
-    /// other mode, including <see cref="MixBlendMode.Normal"/>, falls through to
-    /// source-over. The blend equation is always <c>GL_FUNC_ADD</c>; there is no
-    /// support for difference, overlay or hue-style blending, and no colour
-    /// space conversion.
-    /// </para>
-    /// <para>
-    /// The RGB and alpha factors are set separately. Multiply and screen use the
-    /// destination colour, so they are not the same as the CSS
-    /// <c>mix-blend-mode</c> definitions, which mix on top of source-over
-    /// compositing.
-    /// </para>
-    /// <para>
-    /// The state persists until the next run changes it, so it must be applied
-    /// for every run rather than only when it differs.
-    /// </para>
+    /// A new epoch starts when all slots are occupied. Closing the segment at
+    /// that point is what preserves paint order across a texture-set change.
     /// </remarks>
+    private int EnsureTextureSlot(uint texture)
+    {
+        for (var i = 0; i < _textureSlotCount; i++)
+        {
+            if (_textureSlots[i] == texture)
+            {
+                return i;
+            }
+        }
+
+        if (_textureSlotCount == MaxTextureSlots)
+        {
+            CloseSegment();
+            _textureSlotCount = 0;
+            _textureEpoch++;
+        }
+
+        _textureSlots[_textureSlotCount] = texture;
+        return _textureSlotCount++;
+    }
+
+    /// <summary>Submits the recorded segments through indirect draw commands.</summary>
+    private void ExecuteIndirect()
+    {
+        UploadInstances(CollectionsMarshal.AsSpan(_instances));
+        var instanceBase = InstanceSlotBase();
+        BuildCommands(instanceBase);
+        EnsureCommandCapacity(_commands.Count * CommandStride);
+        UploadCommands(CollectionsMarshal.AsSpan(_commands));
+        _gl.BindBuffer(BufferTargetARB.DrawIndirectBuffer, _commandVbo);
+        var commandOffset = _commandMapping != null ? _streamSlot * _commandSlotBytes : 0;
+
+        var calls = 0;
+        var i = 0;
+        while (i < _segmentCount)
+        {
+            var blend = _segments[i].Blend;
+            var epoch = _segments[i].Epoch;
+            var end = i + 1;
+
+            while (end < _segmentCount
+                && _segments[end].Blend == blend
+                && _segments[end].Epoch == epoch)
+            {
+                end++;
+            }
+
+            ApplyBlend(blend);
+            BindTextureTable(_segments[end - 1], _segments[end - 1].SlotCount);
+
+            if (_hasMultiDrawIndirect)
+            {
+                _gl.MultiDrawArraysIndirect(
+                    PrimitiveType.TriangleStrip,
+                    (void*)(nint)(commandOffset + i * CommandStride),
+                    (uint)(end - i),
+                    CommandStride);
+            }
+            else
+            {
+                for (var command = i; command < end; command++)
+                {
+                    _gl.DrawArraysIndirect(
+                        PrimitiveType.TriangleStrip,
+                        (void*)(nint)(commandOffset + command * CommandStride));
+                }
+            }
+
+            calls++;
+            i = end;
+        }
+
+        LastDrawCalls = calls;
+        LastBatchCount = calls;
+    }
+
+    /// <summary>Submits the recorded segments with one direct instanced call each.</summary>
+    private void ExecuteDirect()
+    {
+        UploadInstances(CollectionsMarshal.AsSpan(_instances));
+        var calls = 0;
+        var instanceBase = InstanceSlotBase();
+
+        for (var i = 0; i < _segmentCount; i++)
+        {
+            var segment = _segments[i];
+
+            if (segment.InstanceCount == 0)
+            {
+                continue;
+            }
+
+            ApplyBlend(segment.Blend);
+            BindTextureTable(segment, segment.SlotCount);
+
+            if (_hasBaseInstance)
+            {
+                _gl.DrawArraysInstancedBaseInstance(
+                    PrimitiveType.TriangleStrip,
+                    0,
+                    4,
+                    (uint)segment.InstanceCount,
+                    (uint)(instanceBase + segment.FirstInstance));
+            }
+            else
+            {
+                SetInstanceAttributeBase(instanceBase + segment.FirstInstance);
+                _gl.DrawArraysInstanced(
+                    PrimitiveType.TriangleStrip,
+                    0,
+                    4,
+                    (uint)segment.InstanceCount);
+            }
+
+            calls++;
+        }
+
+        if (!_hasBaseInstance)
+        {
+            SetInstanceAttributeBase(0);
+        }
+
+        LastDrawCalls = calls;
+        LastBatchCount = calls;
+        LastCommandCount = 0;
+    }
+
+    /// <summary>Writes one indirect command per live segment.</summary>
+    /// <param name="instanceBase">First instance of the active stream slot.</param>
+    private void BuildCommands(int instanceBase)
+    {
+        _commands.Clear();
+
+        for (var i = 0; i < _segmentCount; i++)
+        {
+            var segment = _segments[i];
+
+            _commands.Add(new DrawArraysIndirectCommand(
+                4,
+                (uint)segment.InstanceCount,
+                0,
+                (uint)(instanceBase + segment.FirstInstance)));
+        }
+
+        LastCommandCount = _commands.Count;
+    }
+
+    /// <summary>Gets the first instance index of the active stream slot.</summary>
+    private int InstanceSlotBase() =>
+        _instanceMapping != null ? _streamSlot * _instanceSlotBytes / InstanceStride : 0;
+
+    /// <summary>Uploads the instance list as raw bytes.</summary>
+    /// <param name="instances">Records to upload.</param>
+    private void UploadInstances(ReadOnlySpan<GpuInstance> instances)
+    {
+        var bytes = MemoryMarshal.AsBytes(instances);
+
+        if (_instanceMapping != null)
+        {
+            var target = new Span<byte>(
+                (byte*)_instanceMapping + _streamSlot * _instanceSlotBytes,
+                bytes.Length);
+            bytes.CopyTo(target);
+            return;
+        }
+
+        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _instanceVbo);
+
+        if (_instanceImmutable)
+        {
+            _gl.BufferSubData(BufferTargetARB.ArrayBuffer, 0, bytes);
+        }
+        else
+        {
+            _gl.BufferData(BufferTargetARB.ArrayBuffer, bytes, BufferUsageARB.DynamicDraw);
+        }
+    }
+
+    /// <summary>Uploads the indirect command list.</summary>
+    /// <param name="commands">Commands to upload.</param>
+    private void UploadCommands(ReadOnlySpan<DrawArraysIndirectCommand> commands)
+    {
+        var bytes = MemoryMarshal.AsBytes(commands);
+
+        if (_commandMapping != null)
+        {
+            var target = new Span<byte>(
+                (byte*)_commandMapping + _streamSlot * _commandSlotBytes,
+                bytes.Length);
+            bytes.CopyTo(target);
+            return;
+        }
+
+        _gl.BindBuffer(BufferTargetARB.DrawIndirectBuffer, _commandVbo);
+
+        if (_commandImmutable)
+        {
+            _gl.BufferSubData(BufferTargetARB.DrawIndirectBuffer, 0, bytes);
+        }
+        else
+        {
+            _gl.BufferData(BufferTargetARB.DrawIndirectBuffer, bytes, BufferUsageARB.DynamicDraw);
+        }
+    }
+
+    /// <summary>Binds a segment's texture table to consecutive texture units.</summary>
+    /// <param name="segment">Segment whose captured table is used.</param>
+    /// <param name="count">Number of occupied slots.</param>
+    private void BindTextureTable(Segment segment, int count)
+    {
+        for (var i = 0; i < count; i++)
+        {
+            _gl.ActiveTexture((TextureUnit)((int)TextureUnit.Texture0 + i));
+            _gl.BindTexture(TextureTarget.Texture2D, segment.Slots[i]);
+        }
+
+        _gl.ActiveTexture(TextureUnit.Texture0);
+    }
+
+    /// <summary>Applies the separable blend function for a mix-blend mode.</summary>
+    /// <param name="blend">The mode recorded on the batch.</param>
     private void ApplyBlend(MixBlendMode blend)
     {
         switch (blend)
@@ -1677,88 +1443,37 @@ public sealed unsafe class GLRenderer : IDisposable
         }
     }
 
-    /// <summary>
-    /// Uploads the viewport, affine transform and clip uniforms shared by both
-    /// programs.
-    /// </summary>
-    /// <param name="program">
-    /// The program whose uniforms are written; it must already be in use.
-    /// </param>
-    /// <param name="clip">The clip for the run being drawn.</param>
-    /// <param name="windowMask">The window mask for the run being drawn.</param>
-    /// <param name="transform">The accumulated CSS-pixel affine transform for the run.</param>
-    /// <remarks>
-    /// <para>
-    /// The matrix is sent so the shader reproduces
-    /// <see cref="Vector2.Transform(Vector2, Matrix3x2)"/> (row-vector)
-    /// convention: <c>uTransform0 = (M11, M21, M31)</c> and
-    /// <c>uTransform1 = (M12, M22, M32)</c>. Each pair is dotted with the
-    /// position before adding the translation and projecting through
-    /// <c>uViewport</c>; there is no perspective divide beyond the fixed
-    /// <c>w = 1</c>. Sending <c>(M11, M12, M31)</c> instead transposed the
-    /// linear part, which made a rotating box orbit its own centre.
-    /// </para>
-    /// <para>
-    /// An unclipped run receives a very large rectangle (±1e7) and zero radii
-    /// instead of an enabled/disabled flag, so the fragment shader's clip test
-    /// is always evaluated and the branches stay uniform across runs. The window
-    /// mask uses the same convention: zero radii disable the rounded window
-    /// test, so square windows keep the same shader path.
-    /// </para>
-    /// </remarks>
-    private void SetCommonUniforms(
-        ShaderProgram program,
-        in ClipState clip,
-        in WindowMaskState windowMask,
-        Matrix3x2 transform)
+    /// <summary>Writes the per-frame uniforms shared by every batch.</summary>
+    private void SetCommonUniforms()
     {
-        program.Uniform2("uViewport", _viewportWidth, _viewportHeight);
-        program.Uniform3("uTransform0", transform.M11, transform.M21, transform.M31);
-        program.Uniform3("uTransform1", transform.M12, transform.M22, transform.M32);
+        _program.Uniform2("uViewport", _viewportWidth, _viewportHeight);
 
-        if (clip.HasClip)
+        if (_windowMask.HasMask)
         {
-            program.Uniform4("uClipRect", clip.Rect.X, clip.Rect.Y, clip.Rect.Width, clip.Rect.Height);
-            program.Uniform4("uClipRadii", clip.Radii.X, clip.Radii.Y, clip.Radii.Z, clip.Radii.W);
-        }
-        else
-        {
-            program.Uniform4("uClipRect", -1e7f, -1e7f, 2e7f, 2e7f);
-            program.Uniform4("uClipRadii", 0, 0, 0, 0);
-        }
-
-        if (windowMask.HasMask)
-        {
-            program.Uniform4(
+            _program.Uniform4(
                 "uWindowRect",
-                windowMask.Rect.X,
-                windowMask.Rect.Y,
-                windowMask.Rect.Width,
-                windowMask.Rect.Height);
-            program.Uniform4(
+                _windowMask.Rect.X,
+                _windowMask.Rect.Y,
+                _windowMask.Rect.Width,
+                _windowMask.Rect.Height);
+            _program.Uniform4(
                 "uWindowRadii",
-                windowMask.Radii.X,
-                windowMask.Radii.Y,
-                windowMask.Radii.Z,
-                windowMask.Radii.W);
+                _windowMask.Radii.X,
+                _windowMask.Radii.Y,
+                _windowMask.Radii.Z,
+                _windowMask.Radii.W);
         }
         else
         {
-            program.Uniform4("uWindowRect", 0, 0, _viewportWidth, _viewportHeight);
-            program.Uniform4("uWindowRadii", 0, 0, 0, 0);
+            _program.Uniform4("uWindowRect", 0, 0, _viewportWidth, _viewportHeight);
+            _program.Uniform4("uWindowRadii", 0, 0, 0, 0);
         }
     }
 
     /// <summary>Unpacks a packed ARGB colour into straight-alpha RGBA components.</summary>
     /// <param name="color">Colour packed as <c>0xAARRGGBB</c>.</param>
     /// <param name="opacity">Opacity multiplier applied to the packed alpha.</param>
-    /// <returns>Components in the range 0 to 1, in RGB A order.</returns>
-    /// <remarks>
-    /// The result is not premultiplied; the shaders multiply RGB and alpha
-    /// independently and rely on the <c>SrcAlpha</c> blend factor. Opacity is not
-    /// clamped, so a caller passing more than 1 can produce alpha above 1, which
-    /// GL clamps when the fragment is written.
-    /// </remarks>
+    /// <returns>Components in the range 0 to 1, in RGBA order.</returns>
     private static Vector4 ColorOf(uint color, float opacity)
     {
         var alpha = Math.Clamp(((color >> 24) & 0xFF) / 255f * opacity, 0, 1);
@@ -1769,20 +1484,9 @@ public sealed unsafe class GLRenderer : IDisposable
             alpha);
     }
 
-    /// <summary>
-    /// Packs corner radii into the shader's expected order: top-right,
-    /// bottom-right, top-left, bottom-left.
-    /// </summary>
+    /// <summary>Packs corner radii into the shader's expected order.</summary>
     /// <param name="radius">The four CSS-pixel radii.</param>
-    /// <returns>
-    /// A vector whose XY pair holds the right-side radii and ZW the left-side
-    /// radii.
-    /// </returns>
-    /// <remarks>
-    /// <see cref="CornerRadius"/> stores the corners clockwise from top-left
-    /// whereas the SDF function selects an XY pair by the sign of X and then a
-    /// component by the sign of Y, hence the reordering.
-    /// </remarks>
+    /// <returns>Top-right, bottom-right, top-left, bottom-left.</returns>
     private static Vector4 ToRadii(CornerRadius radius) => new(
         radius.TopRight,
         radius.BottomRight,
@@ -1790,68 +1494,227 @@ public sealed unsafe class GLRenderer : IDisposable
         radius.BottomLeft);
 
     /// <summary>Binds a texture and writes its wrap mode for both axes.</summary>
-    /// <param name="texture">The GL texture name to modify; 0 is not filtered here.</param>
-    /// <param name="repeat">
-    /// <see langword="true"/> for <c>GL_REPEAT</c>, <see langword="false"/> for
-    /// <c>GL_CLAMP_TO_EDGE</c>.
-    /// </param>
-    /// <remarks>
-    /// This mutates the texture object owned by <see cref="ImageCache"/>, not
-    /// renderer state, and the binding side effect remains after the call. The
-    /// mode therefore persists across draws and frames: whichever consumer last
-    /// drew the texture decides how later draws sample it until someone changes
-    /// it again. Minification and magnification filters are untouched.
-    /// </remarks>
+    /// <param name="texture">The GL texture name to modify.</param>
+    /// <param name="repeat">Whether to use <c>GL_REPEAT</c> instead of clamp-to-edge.</param>
     private void SetWrap(uint texture, bool repeat)
     {
         _gl.BindTexture(TextureTarget.Texture2D, texture);
         var mode = (int)(repeat ? GLEnum.Repeat : GLEnum.ClampToEdge);
         _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, mode);
         _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, mode);
+        _gl.ActiveTexture(TextureUnit.Texture0);
     }
 
-    /// <summary>
-    /// Grows the CPU index scratch array so it can hold at least the requested
-    /// count.
-    /// </summary>
-    /// <param name="required">The number of indices the next textured run needs.</param>
-    /// <remarks>
-    /// Growth is geometric (at least double, never below 256) to keep repeated
-    /// runs amortised constant time. The array is never shrunk, so a frame with
-    /// many quads keeps that capacity for the process lifetime. Six indices are
-    /// required per quad.
-    /// </remarks>
-    private void EnsureTextureIndexCapacity(int required)
+    /// <summary>Creates the 1x1 opaque white texture used for unused samplers.</summary>
+    /// <returns>The new texture name, owned by the renderer.</returns>
+    private uint CreateWhiteTexture()
     {
-        if (required <= _textureIndices.Length)
+        var texture = _gl.GenTexture();
+        _gl.BindTexture(TextureTarget.Texture2D, texture);
+        ReadOnlySpan<byte> white = [255, 255, 255, 255];
+        _gl.TexImage2D(
+            TextureTarget.Texture2D,
+            0,
+            InternalFormat.Rgba8,
+            1,
+            1,
+            0,
+            PixelFormat.Rgba,
+            PixelType.UnsignedByte,
+            white);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)GLEnum.Linear);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)GLEnum.Linear);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.ClampToEdge);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)GLEnum.ClampToEdge);
+        return texture;
+    }
+
+    /// <summary>Binds the white texture to every sampler unit once.</summary>
+    private void BindSamplerUnits()
+    {
+        _program.Use();
+
+        for (var i = 0; i < MaxTextureSlots; i++)
+        {
+            _program.Uniform1($"uTexture{i}", i);
+            _gl.ActiveTexture((TextureUnit)((int)TextureUnit.Texture0 + i));
+            _gl.BindTexture(TextureTarget.Texture2D, _whiteTexture);
+        }
+
+        _gl.ActiveTexture(TextureUnit.Texture0);
+    }
+
+    /// <summary>Ensures the instance buffer can hold at least the requested bytes.</summary>
+    /// <param name="bytes">Required capacity in bytes.</param>
+    private void EnsureInstanceCapacity(int bytes)
+    {
+        var required = _hasBufferStorage ? bytes * StreamSlotCount : bytes;
+
+        if (required <= (int)_instanceCapacity)
         {
             return;
         }
 
-        var size = Math.Max(required, Math.Max(256, _textureIndices.Length * 2));
-        Array.Resize(ref _textureIndices, size);
+        var capacity = Math.Max(required, Math.Max(64 * 1024, (int)_instanceCapacity * 2));
+
+        if (_instanceVbo != 0)
+        {
+            DeleteFences(_instanceFences);
+            _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _instanceVbo);
+
+            if (_instanceMapping != null)
+            {
+                _gl.UnmapBuffer(BufferTargetARB.ArrayBuffer);
+                _instanceMapping = null;
+            }
+
+            _gl.DeleteBuffer(_instanceVbo);
+        }
+
+        _instanceVbo = _gl.GenBuffer();
+        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _instanceVbo);
+        Allocate(BufferTargetARB.ArrayBuffer, capacity, ref _instanceMapping);
+        _instanceImmutable = _instanceMapping != null || _hasBufferStorage;
+        _instanceCapacity = (nuint)capacity;
+        _instanceSlotBytes = _instanceMapping != null
+            ? capacity / StreamSlotCount / InstanceStride * InstanceStride
+            : capacity;
+        ConfigureInstanceVao();
     }
 
-    /// <summary>
-    /// Fills <see cref="_shapeVao"/> with the unit quad at attribute 0 and the
-    /// five per-instance vectors at attributes 1 to 5.
-    /// </summary>
+    /// <summary>Ensures the indirect command buffer can hold at least the requested bytes.</summary>
+    /// <param name="bytes">Required capacity in bytes.</param>
+    private void EnsureCommandCapacity(int bytes)
+    {
+        var required = _hasBufferStorage ? bytes * StreamSlotCount : bytes;
+
+        if (required <= (int)_commandCapacity)
+        {
+            return;
+        }
+
+        var capacity = Math.Max(required, Math.Max(4096, (int)_commandCapacity * 2));
+
+        if (_commandVbo != 0)
+        {
+            DeleteFences(_commandFences);
+            _gl.BindBuffer(BufferTargetARB.DrawIndirectBuffer, _commandVbo);
+
+            if (_commandMapping != null)
+            {
+                _gl.UnmapBuffer(BufferTargetARB.DrawIndirectBuffer);
+                _commandMapping = null;
+            }
+
+            _gl.DeleteBuffer(_commandVbo);
+        }
+
+        _commandVbo = _gl.GenBuffer();
+        _gl.BindBuffer(BufferTargetARB.DrawIndirectBuffer, _commandVbo);
+        Allocate(BufferTargetARB.DrawIndirectBuffer, capacity, ref _commandMapping);
+        _commandImmutable = _commandMapping != null || _hasBufferStorage;
+        _commandCapacity = (nuint)capacity;
+        _commandSlotBytes = _commandMapping != null
+            ? capacity / StreamSlotCount / CommandStride * CommandStride
+            : capacity;
+    }
+
+    /// <summary>Waits for the fence guarding the stream slot about to be reused.</summary>
+    /// <param name="fences">Fence array for the buffer kind.</param>
+    /// <param name="enabled">Whether the buffer is persistently mapped.</param>
     /// <remarks>
-    /// <para>
-    /// Attribute 0 is a static four-vertex triangle strip covering (0,0) to
-    /// (1,1) in local space, with a stride of two floats. The instance buffer
-    /// uses location 1 for the rectangle, 2 for colour, 3 for radii, 4 for SDF
-    /// parameters and 5 for the SDF rectangle, each a <c>vec4</c> of floats.
-    /// </para>
-    /// <para>
-    /// The instance stride is therefore 80 bytes and every instance attribute
-    /// has divisor 1, so one record is advanced per drawn instance rather than
-    /// per vertex. The VAO is unbound at the end; the vertex buffer and
-    /// attribute pointers remain part of its state. The instance buffer contents
-    /// are not set here and are uploaded per run.
-    /// </para>
+    /// Three slots give the GPU two full frames of headroom, so this normally
+    /// returns immediately. Waiting is the only correct way to overwrite a
+    /// coherent persistent mapping that the GPU may still be reading.
     /// </remarks>
-    private void ConfigureShapeVao()
+    private void WaitForSlot(IntPtr[] fences, bool enabled)
+    {
+        if (!enabled)
+        {
+            return;
+        }
+
+        var fence = fences[_streamSlot];
+
+        if (fence == IntPtr.Zero)
+        {
+            return;
+        }
+
+        _gl.ClientWaitSync(fence, SyncObjectMask.Bit, ulong.MaxValue);
+        _gl.DeleteSync(fence);
+        fences[_streamSlot] = IntPtr.Zero;
+    }
+
+    /// <summary>Records a GPU completion fence for the stream slot just submitted.</summary>
+    /// <param name="fences">Fence array for the buffer kind.</param>
+    /// <param name="enabled">Whether the buffer is persistently mapped.</param>
+    private void RecordFence(IntPtr[] fences, bool enabled)
+    {
+        if (!enabled)
+        {
+            return;
+        }
+
+        fences[_streamSlot] = _gl.FenceSync(SyncCondition.SyncGpuCommandsComplete, 0u);
+    }
+
+    /// <summary>Deletes every outstanding fence in an array.</summary>
+    /// <param name="fences">Fence array to clear.</param>
+    private void DeleteFences(IntPtr[] fences)
+    {
+        for (var i = 0; i < fences.Length; i++)
+        {
+            if (fences[i] != IntPtr.Zero)
+            {
+                _gl.DeleteSync(fences[i]);
+                fences[i] = IntPtr.Zero;
+            }
+        }
+    }
+
+    /// <summary>Allocates immutable storage and maps it persistently when supported.</summary>
+    /// <param name="bufferTarget">The buffer binding point.</param>
+    /// <param name="bytes">Storage size in bytes.</param>
+    /// <param name="mapping">Receives the persistent mapping, if any.</param>
+    /// <returns><see langword="true"/> when immutable storage was allocated.</returns>
+    private bool Allocate(BufferTargetARB bufferTarget, int bytes, ref void* mapping)
+    {
+        if (_hasBufferStorage)
+        {
+            _gl.BufferStorage(
+                (GLEnum)bufferTarget,
+                (nuint)bytes,
+                (void*)0,
+                (uint)(BufferStorageMask.DynamicStorageBit
+                | BufferStorageMask.MapReadBit
+                | BufferStorageMask.MapWriteBit
+                | BufferStorageMask.MapPersistentBit
+                | BufferStorageMask.MapCoherentBit));
+
+            mapping = _gl.MapBufferRange(
+                bufferTarget,
+                0,
+                (nuint)bytes,
+                MapBufferAccessMask.ReadBit
+                | MapBufferAccessMask.WriteBit
+                | MapBufferAccessMask.PersistentBit
+                | MapBufferAccessMask.CoherentBit);
+
+            return true;
+        }
+
+        _gl.BufferData(bufferTarget, (nuint)bytes, (void*)0, BufferUsageARB.DynamicDraw);
+        mapping = null;
+        return false;
+    }
+
+    /// <summary>Configures the instance VAO against the current instance buffer.</summary>
+    /// <remarks>
+    /// Attribute 0 is the static unit quad; attributes 1 to 10 are the ten
+    /// <c>vec4</c> slots of <see cref="GpuInstance"/>, all with divisor 1.
+    /// </remarks>
+    private void ConfigureInstanceVao()
     {
         _gl.BindVertexArray(_shapeVao);
 
@@ -1868,9 +1731,21 @@ public sealed unsafe class GLRenderer : IDisposable
         _gl.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 2 * sizeof(float), (void*)0);
 
         _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _instanceVbo);
-        const uint instanceStride = 80;
+        SetInstanceAttributePointers(0);
+        _gl.BindVertexArray(0);
+    }
 
-        for (var i = 0; i < 5; i++)
+    /// <summary>Points the ten instance attributes at a base instance offset.</summary>
+    /// <param name="baseInstance">First instance the next draw should read.</param>
+    /// <remarks>
+    /// Drivers without <c>GL_ARB_base_instance</c> use this to emulate a base
+    /// instance by offsetting the attribute pointers instead.
+    /// </remarks>
+    private void SetInstanceAttributePointers(int baseInstance)
+    {
+        var offset = (void*)(nint)(baseInstance * InstanceStride);
+
+        for (var i = 0; i < InstanceAttributeCount; i++)
         {
             var location = (uint)(i + 1);
             _gl.EnableVertexAttribArray(location);
@@ -1879,59 +1754,76 @@ public sealed unsafe class GLRenderer : IDisposable
                 4,
                 VertexAttribPointerType.Float,
                 false,
-                instanceStride,
-                (void*)(i * 16));
+                InstanceStride,
+                (void*)((byte*)offset + i * 16));
             _gl.VertexAttribDivisor(location, 1);
         }
-
-        _gl.BindVertexArray(0);
     }
 
-    /// <summary>
-    /// Fills <see cref="_textureVao"/> with the interleaved textured-vertex
-    /// layout and binds its element buffer.
-    /// </summary>
-    /// <remarks>
-    /// Each vertex is 32 bytes: position (2 floats, offset 0), UV (2 floats,
-    /// offset 8) and straight-alpha RGBA colour (4 floats, offset 16). No
-    /// attributes are instanced. The index buffer is bound while the VAO is
-    /// active, so the element-array binding becomes part of the VAO's state and
-    /// survives the final <c>glBindVertexArray(0)</c>.
-    /// </remarks>
-    private void ConfigureTextureVao()
+    /// <summary>Sets the attribute base for the direct fallback path.</summary>
+    /// <param name="baseInstance">First instance to read.</param>
+    private void SetInstanceAttributeBase(int baseInstance)
     {
-        _gl.BindVertexArray(_textureVao);
-        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _textureVbo);
-        _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, _textureIndexVbo);
+        _gl.BindVertexArray(_shapeVao);
+        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _instanceVbo);
+        SetInstanceAttributePointers(baseInstance);
+    }
 
-        _gl.EnableVertexAttribArray(0);
-        _gl.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 32, (void*)0);
-        _gl.EnableVertexAttribArray(1);
-        _gl.VertexAttribPointer(1, 2, VertexAttribPointerType.Float, false, 32, (void*)8);
-        _gl.EnableVertexAttribArray(2);
-        _gl.VertexAttribPointer(2, 4, VertexAttribPointerType.Float, false, 32, (void*)16);
+    /// <summary>Parses the leading major/minor pair from <c>GL_VERSION</c>.</summary>
+    /// <returns>The context version, or (3, 3) when the string is unparseable.</returns>
+    private (int Major, int Minor) ParseGlVersion()
+    {
+        var text = _gl.GetStringS(StringName.Version);
+        var token = text.Split(' ', 2)[0];
+        var parts = token.Split('.');
 
-        _gl.BindVertexArray(0);
+        return parts.Length >= 2
+            && int.TryParse(parts[0], out var major)
+            && int.TryParse(parts[1], out var minor)
+            ? (major, minor)
+            : (3, 3);
+    }
+
+    /// <summary>Reads the context's extension list.</summary>
+    /// <returns>A case-sensitive set of extension names.</returns>
+    private HashSet<string> ReadExtensions()
+    {
+        var count = _gl.GetInteger(GetPName.NumExtensions);
+        var extensions = new HashSet<string>(StringComparer.Ordinal);
+
+        for (uint i = 0; i < count; i++)
+        {
+            extensions.Add(_gl.GetStringS(StringName.Extensions, i));
+        }
+
+        return extensions;
+    }
+
+    /// <summary>Intersects a new rectangle with the active clip and makes it current.</summary>
+    /// <param name="rect">The new clip rectangle in CSS pixels.</param>
+    /// <param name="radii">Rounded-clip radii; ignored when <paramref name="rounded"/> is false.</param>
+    /// <param name="rounded">Whether to apply an SDF rounded-box test.</param>
+    private void PushClip(in Rect rect, Vector4 radii, bool rounded)
+    {
+        _clips.Push(_clip);
+        var next = _clip.Rect.Intersect(rect);
+        var useRounded = rounded || _clip.Rounded;
+        var effectiveRadii = rounded
+            ? radii
+            : (useRounded ? _clip.Radii : Vector4.Zero);
+        _clip = new ClipState(next, effectiveRadii, true, useRounded);
+    }
+
+    /// <summary>Restores the clip saved by the matching <see cref="PushClip"/>.</summary>
+    private void PopClip()
+    {
+        if (_clips.Count > 0)
+        {
+            _clip = _clips.Pop();
+        }
     }
 
     /// <inheritdoc/>
-    /// <summary>
-    /// Releases the gradient cache, both shader programs, the two VAOs and the
-    /// four vertex/index buffers owned by the renderer.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// The method is idempotent: after the first call the renderer is inert and
-    /// further <c>Render</c> calls would use deleted GL objects. Dispose it only
-    /// once the context that created it is current and the frame loop has
-    /// stopped.
-    /// </para>
-    /// <para>
-    /// Borrowed dependencies are not disposed: <see cref="FontManager"/>,
-    /// <see cref="ImageCache"/> and the <see cref="GL"/> entry point remain
-    /// valid, because the host may share them with other renderers.
-    /// </para>
-    /// </remarks>
     public void Dispose()
     {
         if (_disposed)
@@ -1941,162 +1833,112 @@ public sealed unsafe class GLRenderer : IDisposable
 
         _disposed = true;
         _gradients.Dispose();
-        _shapeProgram.Dispose();
-        _textureProgram.Dispose();
+        _program.Dispose();
+        DeleteFences(_instanceFences);
+        DeleteFences(_commandFences);
+
+        if (_instanceMapping != null)
+        {
+            _gl.UnmapBuffer(BufferTargetARB.ArrayBuffer);
+            _instanceMapping = null;
+        }
+
+        if (_commandMapping != null)
+        {
+            _gl.UnmapBuffer(BufferTargetARB.DrawIndirectBuffer);
+            _commandMapping = null;
+        }
 
         _gl.DeleteVertexArray(_shapeVao);
-        _gl.DeleteVertexArray(_textureVao);
         _gl.DeleteBuffer(_quadVbo);
         _gl.DeleteBuffer(_instanceVbo);
-        _gl.DeleteBuffer(_textureVbo);
-        _gl.DeleteBuffer(_textureIndexVbo);
+        _gl.DeleteBuffer(_commandVbo);
+        _gl.DeleteTexture(_whiteTexture);
     }
 
-    /// <summary>
-    /// One batch of geometry sharing a clip, transform, blend mode and texture;
-    /// it becomes exactly one draw call.
-    /// </summary>
+    // ---------------------------------------------------------------------
+    // Canvas integration
+    // ---------------------------------------------------------------------
+
+    /// <summary>Pushes a rectangular clip for a batched canvas pass.</summary>
+    /// <param name="rect">Clip rectangle in absolute CSS pixels.</param>
+    internal void PushCanvasClip(in Rect rect) => PushClip(rect, Vector4.Zero, rounded: false);
+
+    /// <summary>Pops a clip pushed by <see cref="PushCanvasClip"/>.</summary>
+    internal void PopCanvasClip() => PopClip();
+
+    /// <summary>Replaces the current canvas transform and returns the previous one.</summary>
+    /// <param name="transform">The absolute canvas-to-screen transform.</param>
+    /// <returns>The transform that was active before the call.</returns>
     /// <remarks>
-    /// Instances are pooled by <see cref="GLRenderer"/> and reused on later
-    /// frames. A run is either solid (<see cref="Shapes"/> is populated) or
-    /// textured (<see cref="Vertices"/> is populated), never both. The lists are
-    /// cleared by <see cref="Reset"/> but keep their capacity, which is the
-    /// point of the pool.
+    /// Canvas recording owns the transform for the duration of one canvas, so it
+    /// can compose the element translation as the outermost transform instead of
+    /// relying on the instruction stream's nesting order.
     /// </remarks>
-    private sealed class DrawRun
+    internal Matrix3x2 SetCanvasTransform(Matrix3x2 transform)
     {
-        /// <summary>Creates an empty run with the supplied state.</summary>
-        /// <param name="textured">Whether the run will hold textured quads.</param>
-        /// <param name="texture">The sampled texture for textured runs.</param>
-        /// <param name="alphaTexture">Whether coverage comes from a single channel.</param>
-        /// <param name="clip">The clip active when the run started.</param>
-        /// <param name="windowMask">The window mask active when the run started.</param>
-        /// <param name="transform">The transform active when the run started.</param>
-        /// <param name="blend">The blend mode active when the run started.</param>
-        public DrawRun(
-            bool textured,
-            uint texture,
-            bool alphaTexture,
-            ClipState clip,
-            WindowMaskState windowMask,
-            Matrix3x2 transform,
-            MixBlendMode blend)
-        {
-            Reset(textured, texture, alphaTexture, clip, windowMask, transform, blend);
-        }
-
-        /// <summary>Reinitialises the run for a new batch and drops its geometry.</summary>
-        /// <param name="textured">Whether the run will hold textured quads.</param>
-        /// <param name="texture">The sampled texture for textured runs.</param>
-        /// <param name="alphaTexture">Whether coverage comes from a single channel.</param>
-        /// <param name="clip">The clip active when the run starts.</param>
-        /// <param name="windowMask">The window mask active when the run starts.</param>
-        /// <param name="transform">The transform active when the run starts.</param>
-        /// <param name="blend">The blend mode active when the run starts.</param>
-        /// <remarks>
-        /// Both geometry lists are cleared, so a reused run cannot leak vertices
-        /// from the previous frame, but the backing arrays stay allocated.
-        /// </remarks>
-        public void Reset(
-            bool textured,
-            uint texture,
-            bool alphaTexture,
-            ClipState clip,
-            WindowMaskState windowMask,
-            Matrix3x2 transform,
-            MixBlendMode blend)
-        {
-            IsTextured = textured;
-            Texture = texture;
-            AlphaTexture = alphaTexture;
-            Clip = clip;
-            WindowMask = windowMask;
-            Transform = transform;
-            Blend = blend;
-            Shapes.Clear();
-            Vertices.Clear();
-        }
-
-        /// <summary>
-        /// Gets whether this run draws textured quads rather than shape
-        /// instances.
-        /// </summary>
-        public bool IsTextured { get; private set; }
-
-        /// <summary>
-        /// Gets the GL texture sampled by every quad in this run; 0 for solid
-        /// runs.
-        /// </summary>
-        public uint Texture { get; private set; }
-
-        /// <summary>
-        /// Gets whether the texture's red channel is coverage (glyph atlas) rather
-        /// than RGBA colour.
-        /// </summary>
-        public bool AlphaTexture { get; private set; }
-
-        /// <summary>Gets the clip that was active when the run started.</summary>
-        public ClipState Clip { get; private set; }
-
-        /// <summary>Gets the window mask that was active when the run started.</summary>
-        public WindowMaskState WindowMask { get; private set; }
-
-        /// <summary>
-        /// Gets the CSS-pixel affine transform that was active when the run
-        /// started.
-        /// </summary>
-        public Matrix3x2 Transform { get; private set; }
-
-        /// <summary>Gets the blend mode that was active when the run started.</summary>
-        public MixBlendMode Blend { get; private set; }
-
-        /// <summary>
-        /// Gets the instances drawn by an instanced call; empty for textured
-        /// runs.
-        /// </summary>
-        public List<ShapeInstance> Shapes { get; } = [];
-
-        /// <summary>
-        /// Gets the raw quad vertices for a textured run, four per quad in
-        /// triangle-strip order; empty for solid runs.
-        /// </summary>
-        public List<TexturedVertex> Vertices { get; } = [];
+        var previous = _transform;
+        _transform = transform;
+        return previous;
     }
 
-    /// <summary>
-    /// The rounded shape of the native window, applied independently of the CSS
-    /// clip stack.
-    /// </summary>
-    /// <remarks>
-    /// Value equality lets <see cref="MatchesState"/> keep runs recorded with
-    /// different window shapes in separate batches. The rectangle and radii are
-    /// in CSS pixels and the shader evaluates the distance field against the
-    /// transformed screen position.
-    /// </remarks>
-    private readonly record struct WindowMaskState(Rect Rect, Vector4 Radii, bool HasMask)
+    /// <summary>Pushes an opacity multiplier for a batched canvas pass.</summary>
+    /// <param name="opacity">Multiplier clamped to the 0..1 range.</param>
+    internal void PushCanvasOpacity(float opacity)
     {
-        /// <summary>The square, unmasked state used for ordinary windows.</summary>
-        public static readonly WindowMaskState None = new(
-            new Rect(0, 0, 0, 0),
-            Vector4.Zero,
-            false);
+        _opacities.Push(_opacity);
+        _opacity *= Math.Clamp(opacity, 0, 1);
     }
 
-    /// <summary>
-    /// An immutable snapshot of the clipping state: the intersected rectangle,
-    /// the newest radii and whether any ancestor clip was rounded.
-    /// </summary>
-    /// <remarks>
-    /// Value equality is what lets <see cref="MatchesState"/> decide whether two
-    /// batches share a clip. The rectangle is stored in CSS pixels before any
-    /// transform is applied, matching the vertex shaders' clip test.
-    /// </remarks>
+    /// <summary>Pops an opacity pushed by <see cref="PushCanvasOpacity"/>.</summary>
+    internal void PopCanvasOpacity()
+    {
+        if (_opacities.Count > 0)
+        {
+            _opacity = _opacities.Pop();
+        }
+    }
+
+    /// <summary>Appends a canvas rectangle to the current frame batch.</summary>
+    /// <param name="rect">Destination rectangle in canvas-local CSS pixels.</param>
+    /// <param name="color">Fill colour as packed <c>0xAARRGGBB</c>.</param>
+    internal void AddCanvasRect(in Rect rect, uint color) => AddRect(rect, color);
+
+    /// <summary>Appends a rounded canvas rectangle to the current frame batch.</summary>
+    /// <param name="rect">Destination rectangle in canvas-local CSS pixels.</param>
+    /// <param name="color">Fill colour as packed <c>0xAARRGGBB</c>.</param>
+    /// <param name="radius">Corner radii in CSS pixels.</param>
+    internal void AddCanvasRoundedRect(in Rect rect, uint color, CornerRadius radius) =>
+        AddRoundedRect(rect, color, radius);
+
+    /// <summary>Appends a canvas ellipse to the current frame batch.</summary>
+    /// <param name="rect">Bounding rectangle in canvas-local CSS pixels.</param>
+    /// <param name="color">Fill colour as packed <c>0xAARRGGBB</c>.</param>
+    internal void AddCanvasEllipse(in Rect rect, uint color) => AddEllipse(rect, color);
+
+    /// <summary>Appends a canvas text run to the current frame batch.</summary>
+    /// <param name="rect">Text box in canvas-local CSS pixels.</param>
+    /// <param name="command">Text and style to draw.</param>
+    internal void AddCanvasText(in Rect rect, in TextCommand command) =>
+        AddText(rect, command, InstructionFlags.None);
+
+    /// <summary>Appends a canvas image to the current frame batch.</summary>
+    /// <param name="spec">Image source, fit, tint and opacity.</param>
+    /// <param name="rect">Destination rectangle in canvas-local CSS pixels.</param>
+    internal void AddCanvasImage(in ImageSpec spec, in Rect rect) => AddImage(spec, rect);
+
+    // ---------------------------------------------------------------------
+    // Nested types and shaders
+    // ---------------------------------------------------------------------
+
+    /// <summary>Clipping state snapshotted into an instance.</summary>
+    /// <param name="Rect">Intersected clip rectangle in CSS pixels.</param>
+    /// <param name="Radii">Rounded clip radii in shader order.</param>
+    /// <param name="HasClip">Whether a clip is active.</param>
+    /// <param name="Rounded">Whether the rounded test is active.</param>
     private readonly record struct ClipState(Rect Rect, Vector4 Radii, bool HasClip, bool Rounded)
     {
-        /// <summary>
-        /// The unclipped state: no scissor, no rounded test, and a sentinel
-        /// rectangle far larger than any plausible viewport.
-        /// </summary>
+        /// <summary>The unclipped state: a sentinel rectangle and zero radii.</summary>
         public static readonly ClipState None = new(
             new Rect(-1e7f, -1e7f, 2e7f, 2e7f),
             Vector4.Zero,
@@ -2104,135 +1946,153 @@ public sealed unsafe class GLRenderer : IDisposable
             false);
     }
 
+    /// <summary>The rounded window shape applied to every fragment.</summary>
+    /// <param name="Rect">Window rectangle in CSS pixels.</param>
+    /// <param name="Radii">Corner radii in shader order.</param>
+    /// <param name="HasMask">Whether masking is active.</param>
+    private readonly record struct WindowMaskState(Rect Rect, Vector4 Radii, bool HasMask)
+    {
+        /// <summary>The square, unmasked state.</summary>
+        public static readonly WindowMaskState None = new(
+            new Rect(0, 0, 0, 0),
+            Vector4.Zero,
+            false);
+    }
+
+    /// <summary>The clip sentinel written to unclipped instances.</summary>
+    private static readonly Vector4 NoClipRect = new(-1e7f, -1e7f, 2e7f, 2e7f);
+
     /// <summary>
-    /// The 80-byte GPU instance record consumed by the shape program: quad
-    /// bounds, colour, corner radii, SDF mode parameters and SDF bounds.
+    /// The 160-byte GPU record for one quad: geometry, colour, SDF parameters,
+    /// clip, transform and texture selection.
     /// </summary>
     /// <remarks>
-    /// The sequential layout must match the attribute configuration in
-    /// <see cref="ConfigureShapeVao"/> and the attribute declarations in
-    /// <see cref="ShapeVertexShader"/>. <see cref="Rect"/> is the quad in CSS
-    /// pixels, while <see cref="SdfRect"/> is the shape sampled by the distance
-    /// field; the two differ for shadows, where the quad is inflated to make
-    /// room for the blur falloff.
+    /// The sequential layout matches <see cref="ConfigureInstanceVao"/> and the
+    /// attribute declarations in <see cref="InstanceVertexShader"/>.
     /// </remarks>
     [StructLayout(LayoutKind.Sequential)]
-    private readonly struct ShapeInstance
+    private readonly struct GpuInstance
     {
-        /// <summary>Creates an instance from its five <c>vec4</c> slots.</summary>
-        /// <param name="rect">Quad bounds in CSS pixels: X, Y, width, height.</param>
-        /// <param name="color">Straight-alpha RGBA, with opacity already folded in.</param>
-        /// <param name="radii">
-        /// Corner radii packed as top-right, bottom-right, top-left,
-        /// bottom-left.
-        /// </param>
-        /// <param name="parameters">
-        /// X is the SDF mode (0 solid, 1 rounded rect, 2 border ring, 3 outer
-        /// shadow, 4 inset shadow, 5 ellipse); Y is the blur radius used by
-        /// modes 3 and 4; Z is the border thickness used by mode 2; W selects
-        /// the mode-2 border sector (0 top, 1 right, 2 bottom, 3 left) or
-        /// <see cref="AllBorderSides"/> for the whole ring.
-        /// </param>
-        /// <param name="sdfRect">
-        /// Bounds of the shape the distance field is evaluated against.
-        /// </param>
-        public ShapeInstance(Vector4 rect, Vector4 color, Vector4 radii, Vector4 parameters, Vector4 sdfRect)
+        /// <summary>Creates an instance from its ten <c>vec4</c> slots.</summary>
+        public GpuInstance(
+            Vector4 rect,
+            Vector4 color,
+            Vector4 radii,
+            Vector4 parameters,
+            Vector4 sdfRect,
+            Vector4 clipRect,
+            Vector4 clipRadii,
+            Vector4 transform0,
+            Vector4 transform1,
+            Vector4 uv)
         {
             Rect = rect;
             Color = color;
             Radii = radii;
             Parameters = parameters;
             SdfRect = sdfRect;
+            ClipRect = clipRect;
+            ClipRadii = clipRadii;
+            Transform0 = transform0;
+            Transform1 = transform1;
+            Uv = uv;
         }
 
-        /// <summary>Quad bounds in CSS pixels: X, Y, width, height.</summary>
         public readonly Vector4 Rect;
-
-        /// <summary>
-        /// Straight-alpha RGBA colour with the frame opacity folded into the
-        /// alpha channel.
-        /// </summary>
         public readonly Vector4 Color;
-
-        /// <summary>
-        /// Corner radii in CSS pixels packed as top-right, bottom-right,
-        /// top-left, bottom-left; all zero for square shapes.
-        /// </summary>
         public readonly Vector4 Radii;
-
-        /// <summary>
-        /// SDF selector and parameters: X is the mode, Y the blur, Z the border
-        /// thickness or spread and W is unused.
-        /// </summary>
         public readonly Vector4 Parameters;
-
-        /// <summary>Rectangle the distance field is measured against, in CSS pixels.</summary>
         public readonly Vector4 SdfRect;
+        public readonly Vector4 ClipRect;
+        public readonly Vector4 ClipRadii;
+        public readonly Vector4 Transform0;
+        public readonly Vector4 Transform1;
+        public readonly Vector4 Uv;
 
-        /// <summary>
-        /// <see cref="Parameters"/> W value that paints the whole border ring
-        /// instead of a single sector.
-        /// </summary>
+        /// <summary>Parameters W value that paints the whole border ring.</summary>
         public const float AllBorderSides = -1;
     }
 
-    /// <summary>
-    /// The 32-byte GPU vertex record for textured quads: position, texture
-    /// coordinate and colour.
-    /// </summary>
-    /// <remarks>
-    /// The layout is sequential and must match
-    /// <see cref="ConfigureTextureVao"/> (offsets 0, 8 and 16) and the attribute
-    /// declarations in <see cref="TextureVertexShader"/>. Positions are CSS
-    /// pixels and are transformed in the vertex shader; colours are
-    /// straight-alpha RGBA multipliers.
-    /// </remarks>
+    /// <summary>The four-uint command consumed by <c>glDrawArraysIndirect</c>.</summary>
     [StructLayout(LayoutKind.Sequential)]
-    private readonly struct TexturedVertex
+    private readonly struct DrawArraysIndirectCommand
     {
-        /// <summary>Creates a vertex from position, UV and colour.</summary>
-        /// <param name="x">X position in CSS pixels.</param>
-        /// <param name="y">Y position in CSS pixels.</param>
-        /// <param name="u">Horizontal texture coordinate.</param>
-        /// <param name="v">Vertical texture coordinate, 0 at the top.</param>
-        /// <param name="color">Straight-alpha RGBA multiplier.</param>
-        public TexturedVertex(float x, float y, float u, float v, Vector4 color)
+        public DrawArraysIndirectCommand(uint count, uint instanceCount, uint first, uint baseInstance)
         {
-            X = x;
-            Y = y;
-            U = u;
-            V = v;
-            Color = color;
+            Count = count;
+            InstanceCount = instanceCount;
+            First = first;
+            BaseInstance = baseInstance;
         }
 
-        /// <summary>X position in CSS pixels.</summary>
-        public readonly float X;
-
-        /// <summary>Y position in CSS pixels, increasing downwards.</summary>
-        public readonly float Y;
-
-        /// <summary>Horizontal texture coordinate, 0 at the left edge.</summary>
-        public readonly float U;
-
-        /// <summary>Vertical texture coordinate, 0 at the top edge.</summary>
-        public readonly float V;
-
-        /// <summary>Straight-alpha RGBA multiplier applied to the sampled texel.</summary>
-        public readonly Vector4 Color;
+        public readonly uint Count;
+        public readonly uint InstanceCount;
+        public readonly uint First;
+        public readonly uint BaseInstance;
     }
 
     /// <summary>
-    /// Vertex shader for instanced shapes: expands the unit quad to the instance
-    /// rectangle, forwards SDF inputs and projects through the affine transform
-    /// and viewport.
+    /// One contiguous run of instances sharing a blend mode and texture epoch.
     /// </summary>
     /// <remarks>
-    /// The local-space outputs are computed before the transform so the fragment
-    /// shader can evaluate the ellipse field in normalised coordinates. The Y
-    /// axis is flipped here, so screen positions increase downwards as they do in
-    /// CSS pixels, which is the space the fragment shader's clip test uses.
+    /// Segments are pooled across frames. A segment's slot table is captured when
+    /// it closes because later segments in the same epoch may append more slots.
     /// </remarks>
-    private const string ShapeVertexShader = """
+    private sealed class Segment
+    {
+        /// <summary>Creates a segment with an empty slot table.</summary>
+        public Segment()
+        {
+            Slots = new uint[MaxTextureSlots];
+        }
+
+        /// <summary>Gets the texture units captured for this segment.</summary>
+        public uint[] Slots { get; }
+
+        /// <summary>Gets the number of occupied slots.</summary>
+        public int SlotCount { get; private set; }
+
+        /// <summary>Gets the first instance index.</summary>
+        public int FirstInstance { get; private set; }
+
+        /// <summary>Gets or sets the number of instances in the segment.</summary>
+        public int InstanceCount { get; set; }
+
+        /// <summary>Gets the blend mode.</summary>
+        public MixBlendMode Blend { get; private set; }
+
+        /// <summary>Gets the texture epoch.</summary>
+        public int Epoch { get; private set; }
+
+        /// <summary>Resets the segment for a new range.</summary>
+        /// <param name="firstInstance">First instance index.</param>
+        /// <param name="blend">Blend mode for the run.</param>
+        /// <param name="epoch">Texture epoch for the run.</param>
+        public void Reset(int firstInstance, MixBlendMode blend, int epoch)
+        {
+            FirstInstance = firstInstance;
+            InstanceCount = 0;
+            Blend = blend;
+            Epoch = epoch;
+            SlotCount = 0;
+        }
+
+        /// <summary>Snapshots the texture units used by the segment.</summary>
+        /// <param name="textures">Current slot table.</param>
+        /// <param name="count">Number of occupied slots.</param>
+        public void Capture(uint[] textures, int count)
+        {
+            SlotCount = count;
+            Array.Copy(textures, Slots, count);
+        }
+    }
+
+    /// <summary>
+    /// Vertex shader: expands the unit quad to the instance rectangle, forwards
+    /// the per-instance clip and SDF inputs, and projects through the affine
+    /// transform and viewport.
+    /// </summary>
+    private const string InstanceVertexShader = """
         #version 330 core
         layout(location = 0) in vec2 aCorner;
         layout(location = 1) in vec4 iRect;
@@ -2240,10 +2100,13 @@ public sealed unsafe class GLRenderer : IDisposable
         layout(location = 3) in vec4 iRadii;
         layout(location = 4) in vec4 iParams;
         layout(location = 5) in vec4 iSdfRect;
+        layout(location = 6) in vec4 iClipRect;
+        layout(location = 7) in vec4 iClipRadii;
+        layout(location = 8) in vec4 iTransform0;
+        layout(location = 9) in vec4 iTransform1;
+        layout(location = 10) in vec4 iUv;
 
         uniform vec2 uViewport;
-        uniform vec3 uTransform0;
-        uniform vec3 uTransform1;
 
         out vec2 vScreen;
         out vec2 vLocal;
@@ -2253,6 +2116,9 @@ public sealed unsafe class GLRenderer : IDisposable
         out vec4 vRadii;
         out vec4 vParams;
         out vec4 vSdfRect;
+        out vec4 vClipRect;
+        out vec4 vClipRadii;
+        out vec2 vUv;
 
         void main()
         {
@@ -2263,18 +2129,15 @@ public sealed unsafe class GLRenderer : IDisposable
             vRadii = iRadii;
             vParams = iParams;
             vSdfRect = iSdfRect;
+            vClipRect = iClipRect;
+            vClipRadii = iClipRadii;
+            vUv = mix(iUv.xy, iUv.zw, aCorner);
 
-            // The SDF is evaluated in the quad's own (pre-transform) space so
-            // rotating or scaling a box rotates the shape instead of sampling a
-            // screen-space field that no longer matches the rasterised pixels.
             vSdfOffset = (iSdfRect.xy + iSdfRect.zw * 0.5) - (iRect.xy + iRect.zw * 0.5);
 
-            vec2 t = vec2(dot(uTransform0.xy, p) + uTransform0.z,
-                          dot(uTransform1.xy, p) + uTransform1.z);
+            vec2 t = vec2(dot(iTransform0.xy, p) + iTransform0.z,
+                          dot(iTransform1.xy, p) + iTransform1.z);
 
-            // Clip tests must use the transformed position; the interpolated
-            // pre-transform position is only valid while the transform is the
-            // identity.
             vScreen = t;
 
             gl_Position = vec4(t.x / uViewport.x * 2.0 - 1.0,
@@ -2284,25 +2147,11 @@ public sealed unsafe class GLRenderer : IDisposable
         """;
 
     /// <summary>
-    /// Fragment shader for shapes: discards clipped fragments, evaluates the
-    /// rounded-box distance field and selects coverage by SDF mode.
+    /// Fragment shader: clip test, window mask, SDF shape coverage or texture
+    /// sampling. Mode 6 selects a texture unit and treats the red channel as
+    /// coverage when the alpha flag is set.
     /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Mode 0 paints the box opaquely, 1 anti-aliases a rounded rectangle, 2
-    /// carves a border ring using <c>vParams.z</c> as thickness, 3 fades an outer
-    /// shadow over <c>vParams.y</c> and 4 does the same inside the shape, and 5
-    /// evaluates an ellipse from the normalised local quad.
-    /// </para>
-    /// <para>
-    /// Clipping happens twice: GL scissors remove fragments at the framebuffer
-    /// level for rectangular clips, and this shader additionally discards against
-    /// the untransformed rectangle and the optional rounded-box field. Coverage
-    /// below 0.001 is discarded so fully transparent fragments never reach the
-    /// blender. Output alpha is <c>vColor.a * coverage</c> with straight RGB.
-    /// </para>
-    /// </remarks>
-    private const string ShapeFragmentShader = """
+    private const string InstanceFragmentShader = """
         #version 330 core
         in vec2 vScreen;
         in vec2 vLocal;
@@ -2312,11 +2161,29 @@ public sealed unsafe class GLRenderer : IDisposable
         in vec4 vRadii;
         in vec4 vParams;
         in vec4 vSdfRect;
+        in vec4 vClipRect;
+        in vec4 vClipRadii;
+        in vec2 vUv;
 
-        uniform vec4 uClipRect;
-        uniform vec4 uClipRadii;
+        uniform sampler2D uTexture0;
+        uniform sampler2D uTexture1;
+        uniform sampler2D uTexture2;
+        uniform sampler2D uTexture3;
+        uniform sampler2D uTexture4;
+        uniform sampler2D uTexture5;
+        uniform sampler2D uTexture6;
+        uniform sampler2D uTexture7;
+        uniform sampler2D uTexture8;
+        uniform sampler2D uTexture9;
+        uniform sampler2D uTexture10;
+        uniform sampler2D uTexture11;
+        uniform sampler2D uTexture12;
+        uniform sampler2D uTexture13;
+        uniform sampler2D uTexture14;
+        uniform sampler2D uTexture15;
         uniform vec4 uWindowRect;
         uniform vec4 uWindowRadii;
+
         out vec4 fragColor;
 
         float sdRoundBox(vec2 p, vec2 b, vec4 r)
@@ -2329,16 +2196,16 @@ public sealed unsafe class GLRenderer : IDisposable
 
         bool clipped(vec2 p)
         {
-            if (p.x < uClipRect.x || p.y < uClipRect.y ||
-                p.x > uClipRect.x + uClipRect.z || p.y > uClipRect.y + uClipRect.w)
+            if (p.x < vClipRect.x || p.y < vClipRect.y ||
+                p.x > vClipRect.x + vClipRect.z || p.y > vClipRect.y + vClipRect.w)
             {
                 return true;
             }
 
-            if (uClipRadii.x + uClipRadii.y + uClipRadii.z + uClipRadii.w > 0.0)
+            if (vClipRadii.x + vClipRadii.y + vClipRadii.z + vClipRadii.w > 0.0)
             {
-                vec2 center = uClipRect.xy + uClipRect.zw * 0.5;
-                if (sdRoundBox(p - center, uClipRect.zw * 0.5, uClipRadii) > 0.0)
+                vec2 center = vClipRect.xy + vClipRect.zw * 0.5;
+                if (sdRoundBox(p - center, vClipRect.zw * 0.5, vClipRadii) > 0.0)
                 {
                     return true;
                 }
@@ -2359,6 +2226,26 @@ public sealed unsafe class GLRenderer : IDisposable
             return 1.0 - smoothstep(-1.0, 1.0, d);
         }
 
+        vec4 sampleSlot(int slot, vec2 uv)
+        {
+            if (slot == 0) return texture(uTexture0, uv);
+            if (slot == 1) return texture(uTexture1, uv);
+            if (slot == 2) return texture(uTexture2, uv);
+            if (slot == 3) return texture(uTexture3, uv);
+            if (slot == 4) return texture(uTexture4, uv);
+            if (slot == 5) return texture(uTexture5, uv);
+            if (slot == 6) return texture(uTexture6, uv);
+            if (slot == 7) return texture(uTexture7, uv);
+            if (slot == 8) return texture(uTexture8, uv);
+            if (slot == 9) return texture(uTexture9, uv);
+            if (slot == 10) return texture(uTexture10, uv);
+            if (slot == 11) return texture(uTexture11, uv);
+            if (slot == 12) return texture(uTexture12, uv);
+            if (slot == 13) return texture(uTexture13, uv);
+            if (slot == 14) return texture(uTexture14, uv);
+            return texture(uTexture15, uv);
+        }
+
         void main()
         {
             if (clipped(vScreen))
@@ -2374,6 +2261,27 @@ public sealed unsafe class GLRenderer : IDisposable
             }
 
             int mode = int(vParams.x + 0.5);
+
+            if (mode == 6)
+            {
+                vec4 texel = sampleSlot(int(vParams.y + 0.5), vUv);
+
+                if (vParams.z > 0.5)
+                {
+                    texel = vec4(1.0, 1.0, 1.0, texel.r);
+                }
+
+                vec4 color = vColor * texel;
+
+                if (color.a <= 0.001)
+                {
+                    discard;
+                }
+
+                fragColor = vec4(color.rgb, color.a * windowAlpha);
+                return;
+            }
+
             float d = sdRoundBox(vLocal - vSdfOffset, vSdfRect.zw * 0.5, vRadii);
             float alpha = 1.0;
 
@@ -2429,146 +2337,6 @@ public sealed unsafe class GLRenderer : IDisposable
             }
 
             fragColor = vec4(vColor.rgb, vColor.a * alpha * windowAlpha);
-        }
-        """;
-
-    /// <summary>
-    /// Vertex shader for textured quads: passes position, UV and colour through
-    /// after applying the affine transform.
-    /// </summary>
-    /// <remarks>
-    /// Positions are sent in CSS pixels and copied untransformed to
-    /// <c>vScreen</c> so the fragment shader can perform clip tests in the same
-    /// space as shapes.
-    /// </remarks>
-    private const string TextureVertexShader = """
-        #version 330 core
-        layout(location = 0) in vec2 aPosition;
-        layout(location = 1) in vec2 aUv;
-        layout(location = 2) in vec4 aColor;
-
-        uniform vec2 uViewport;
-        uniform vec3 uTransform0;
-        uniform vec3 uTransform1;
-
-        out vec2 vUv;
-        out vec4 vColor;
-        out vec2 vScreen;
-
-        void main()
-        {
-            vUv = aUv;
-            vColor = aColor;
-
-            vec2 t = vec2(dot(uTransform0.xy, aPosition) + uTransform0.z,
-                          dot(uTransform1.xy, aPosition) + uTransform1.z);
-
-            // Clip against the transformed position; the pre-transform point is
-            // only the same while the accumulated transform is the identity.
-            vScreen = t;
-
-            gl_Position = vec4(t.x / uViewport.x * 2.0 - 1.0,
-                               1.0 - t.y / uViewport.y * 2.0,
-                               0.0, 1.0);
-        }
-        """;
-
-    /// <summary>
-    /// Fragment shader for textured quads: samples the bound texture, optionally
-    /// treats the red channel as alpha coverage, multiplies by the vertex colour
-    /// and applies the SDF clip.
-    /// </summary>
-    /// <remarks>
-    /// The result is straight-alpha RGBA (RGB untouched by alpha), so the
-    /// source-over blend set in <see cref="BeginFrame"/> composites it
-    /// correctly. Like the shape shader it discards clipped fragments and any
-    /// fragment whose final alpha is at or below 0.001, so text and image edges
-    /// never write transparent pixels that would disturb later blending.
-    /// </remarks>
-    private const string TextureFragmentShader = """
-        #version 330 core
-        in vec2 vUv;
-        in vec4 vColor;
-        in vec2 vScreen;
-
-        uniform sampler2D uTexture;
-        uniform int uAlphaTexture;
-        uniform vec4 uClipRect;
-        uniform vec4 uClipRadii;
-        uniform vec4 uWindowRect;
-        uniform vec4 uWindowRadii;
-
-        out vec4 fragColor;
-
-        float sdRoundBox(vec2 p, vec2 b, vec4 r)
-        {
-            vec2 rr = (p.x > 0.0) ? r.xy : r.zw;
-            float rad = (p.y > 0.0) ? rr.x : rr.y;
-            vec2 q = abs(p) - b + rad;
-            return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - rad;
-        }
-
-        bool clipped(vec2 p)
-        {
-            if (p.x < uClipRect.x || p.y < uClipRect.y ||
-                p.x > uClipRect.x + uClipRect.z || p.y > uClipRect.y + uClipRect.w)
-            {
-                return true;
-            }
-
-            if (uClipRadii.x + uClipRadii.y + uClipRadii.z + uClipRadii.w > 0.0)
-            {
-                vec2 center = uClipRect.xy + uClipRect.zw * 0.5;
-                if (sdRoundBox(p - center, uClipRect.zw * 0.5, uClipRadii) > 0.0)
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        float windowCoverage(vec2 p)
-        {
-            if (uWindowRadii.x + uWindowRadii.y + uWindowRadii.z + uWindowRadii.w <= 0.0)
-            {
-                return 1.0;
-            }
-
-            vec2 center = uWindowRect.xy + uWindowRect.zw * 0.5;
-            float d = sdRoundBox(p - center, uWindowRect.zw * 0.5, uWindowRadii);
-            return 1.0 - smoothstep(-1.0, 1.0, d);
-        }
-
-        void main()
-        {
-            if (clipped(vScreen))
-            {
-                discard;
-            }
-
-            float windowAlpha = windowCoverage(vScreen);
-
-            if (windowAlpha <= 0.001)
-            {
-                discard;
-            }
-
-            vec4 texel = texture(uTexture, vUv);
-
-            if (uAlphaTexture == 1)
-            {
-                texel = vec4(1.0, 1.0, 1.0, texel.r);
-            }
-
-            vec4 color = vColor * texel;
-
-            if (color.a <= 0.001)
-            {
-                discard;
-            }
-
-            fragColor = vec4(color.rgb, color.a * windowAlpha);
         }
         """;
 }

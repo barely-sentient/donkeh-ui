@@ -127,7 +127,8 @@ renderer. `Donkeh.Inspector` provides the devtools panel.
     │   ├── Source/                  ← Donkeh.UILab
     │   └── Tests/                   ← builder and component tests
     ├── Windowing/
-    │   └── Source/                  ← Donkeh.Windowing
+    │   ├── Source/                  ← Donkeh.Windowing
+    │   └── Benchmarks/              ← direct vs indirect renderer harness
     └── Inspector/
         └── Source/                  ← Donkeh.Inspector
 ```
@@ -753,27 +754,60 @@ Frameless windows are resizable when `WindowSettings.Resizable` is `true`: the
 host adds an invisible six-pixel resize handle to each client edge and supports
 diagonal corner resizing, respecting the configured minimum and maximum size.
 
-**Rendering pipeline.** `GLRenderer` consumes the instruction opcodes:
+**Rendering pipeline.** `GLRenderer` consumes the instruction opcodes and
+translates every draw into a GPU-resident instance record:
 
-| Instruction | OpenGL path |
+| Instruction | GPU representation |
 | --- | --- |
-| `DrawRect`, `DrawLine` | Batched coloured primitives |
-| `DrawRoundedRect` | Instanced rounded-box SDF |
-| `DrawBorder`, `DrawOutline` | Uniform border SDF, per-side fallback |
-| `DrawShadow`, `DrawInsetShadow` | Blurred rounded-box SDF |
-| `DrawEllipse` | Ellipse SDF |
-| `DrawBackgroundImage` | Cached gradient/texture |
-| `DrawImage` | Cached decoded image with `object-fit` |
-| `DrawText` | TrueType glyph atlas, indexed quad batch |
-| `DrawScrollbar` | Track and thumb rounded rects |
-| `PushClipRect`, `PushClipRoundedRect` | Scissor and rounded SDF clip |
-| `PushOpacity` | Alpha folded into vertex colours |
-| `PushTransform` | 2D affine transform in the vertex shader |
-| `PushBlendMode` | GL blend factors |
+| `DrawRect`, `DrawLine` | SDF mode 0 quad |
+| `DrawRoundedRect` | instanced rounded-box SDF |
+| `DrawBorder`, `DrawOutline` | uniform border ring, rounded sectors, or per-side quads |
+| `DrawShadow`, `DrawInsetShadow` | blurred rounded-box SDF |
+| `DrawEllipse` | ellipse SDF |
+| `DrawBackgroundImage` | cached gradient/image texture sampled by instance |
+| `DrawImage` | cached decoded image with `object-fit` |
+| `DrawText` | TrueType glyph atlas, one instance per glyph |
+| `DrawScrollbar` | track and thumb rounded rects |
+| `PushClipRect`, `PushClipRoundedRect` | per-instance clip rect + SDF in the fragment shader |
+| `PushOpacity` | alpha folded into instance colours |
+| `PushTransform` | 2D affine transform stored per instance |
+| `PushBlendMode` | GL blend factors at batch boundaries |
 
-Text and images share one indexed textured batch; solid shapes use one
-instanced shape batch. Runs split only when texture, clip, transform or blend
-state changes, so a typical frame uses a handful of draw calls.
+Each 160-byte instance carries its rectangle, colour, SDF parameters, clip,
+affine transform, UVs and texture slot. Because clip and transform state live in
+the vertex stream, changing them no longer splits a batch. The renderer groups
+instances into contiguous blend/texture epochs, uploads them once, and writes one
+`glDrawArraysIndirect` command per epoch. When
+`GL_ARB_multi_draw_indirect` is available it submits the commands with
+`glMultiDrawArraysIndirect`; `GL_ARB_buffer_storage` enables a persistently
+mapped three-slot ring guarded by GPU fences, so the CPU prepares the next frame
+without overwriting data the GPU is still reading. A normal UI frame is therefore
+one indirect draw call regardless of element count, and clip-heavy scenes no
+longer cost one call per clipped element. The arrays form is used rather than
+`glMultiDrawElementsIndirect` because the unit quad is expanded per instance and
+needs no index buffer.
+
+`GLRenderer.Path` selects `RenderPath.Auto` (default), `Direct` or `Indirect`
+(also exposed as `DonkehWindow.RenderPath` for a live window).
+`Direct` keeps the same GPU geometry but issues one
+`glDrawArraysInstanced` per batch; it is the reference path for benchmarking and
+the fallback when the driver lacks the indirect extensions. The
+`Donkeh.Windowing.Benchmarks` project measures both paths and reports draw calls,
+commands, instances and CPU/GPU frame time.
+
+The renderer still requires only an OpenGL 3.3 core context. The indirect path is
+enabled when the driver exposes `GL_ARB_draw_indirect` and
+`GL_ARB_base_instance`; `GL_ARB_multi_draw_indirect` collapses several batches
+into one call and `GL_ARB_buffer_storage` adds the persistent three-slot ring.
+Missing extensions degrade to `glDrawArraysIndirect`, then to the direct path,
+without changing visual output.
+
+Canvas elements can join the same GPU batch with
+`Canvas(new CanvasProps { OnDraw = canvas => { ... } })`. The supplied
+`CanvasContext` records rectangles, rounded rectangles, ellipses, text, images,
+clips, transforms and opacity into the frame's instance buffer. The raw
+`OnContext` callback remains available for immediate-mode GL; it runs after the
+indirect batch and is not batched.
 
 **Remarks**
 
@@ -856,6 +890,7 @@ a good target for future coverage.
 | `Donkeh/Data/Benchmarks` | BenchmarkDotNet | Real Bootstrap 5.3.8 parse and selector matching across 592–286,752 element DOMs. |
 | `Donkeh/DataEngine/Benchmarks` | BenchmarkDotNet | Tokenize/build/query on generated 1M/4M/16M character corpora, plus repeated-selector interning. |
 | `Donkeh/LayoutLab/Benchmarks` | BenchmarkDotNet | Frames, style resolution, text, paint optimisation and CSS value parsing. |
+| `Donkeh/Windowing/Benchmarks` | console | Hidden-window renderer harness: CPU/GPU frame time, draw calls and scaling for the direct and indirect paths. |
 
 ---
 

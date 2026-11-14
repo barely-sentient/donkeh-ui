@@ -251,6 +251,12 @@ namespace Donkeh.UILab
         public Delegate? OnCanvasContext { get; init; }
 
         /// <summary>
+        /// Handler invoked by the host for a <c>canvas</c> element to record
+        /// primitives into the frame's indirect render batch.
+        /// </summary>
+        public Delegate? OnCanvasDraw { get; init; }
+
+        /// <summary>
         /// Gets or sets whether an <c>audio</c> element paints its built-in
         /// transport controls.
         /// </summary>

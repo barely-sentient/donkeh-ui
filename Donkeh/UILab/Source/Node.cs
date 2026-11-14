@@ -210,6 +210,13 @@ namespace Donkeh.UILab
         public Delegate? CanvasContextHandler { get; set; }
 
         /// <summary>
+        /// Handler invoked by the host to record a <c>canvas</c> element's
+        /// primitives into the frame's indirect batch. <see langword="null"/>
+        /// for elements that are not canvases or that only use raw GL.
+        /// </summary>
+        public Delegate? CanvasDrawHandler { get; set; }
+
+        /// <summary>
         /// Handler invoked when the host creates an audio player for an
         /// <c>audio</c> element. <see langword="null"/> for other elements.
         /// </summary>
@@ -417,6 +424,11 @@ namespace Donkeh.UILab
             if (props.OnCanvasContext is { } canvasContext)
             {
                 CanvasContextHandler = canvasContext;
+            }
+
+            if (props.OnCanvasDraw is { } canvasDraw)
+            {
+                CanvasDrawHandler = canvasDraw;
             }
 
             if (props.Controls is true)

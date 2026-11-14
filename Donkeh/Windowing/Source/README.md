@@ -82,25 +82,37 @@ cascade.
 
 `GLRenderer` consumes the instruction opcodes:
 
-| Instruction | OpenGL path |
+| Instruction | GPU representation |
 | --- | --- |
-| `DrawRect`, `DrawLine` | batched coloured primitives |
+| `DrawRect`, `DrawLine` | SDF mode 0 quad |
 | `DrawRoundedRect` | instanced rounded-box SDF |
-| `DrawBorder`, `DrawOutline` | uniform border SDF, per-side fallback |
+| `DrawBorder`, `DrawOutline` | uniform border ring, rounded sectors, or per-side quads |
 | `DrawShadow`, `DrawInsetShadow` | blurred rounded-box SDF |
 | `DrawEllipse` | ellipse SDF |
-| `DrawBackgroundImage` | cached gradient texture, or cached image texture |
+| `DrawBackgroundImage` | cached gradient/image texture |
 | `DrawImage` | cached decoded image with object-fit |
-| `DrawText` | TrueType glyph atlas, indexed quad batch |
+| `DrawText` | TrueType glyph atlas, one instance per glyph |
 | `DrawScrollbar` | track + thumb rounded rects |
-| `PushClipRect` / `PushClipRoundedRect` | scissor + rounded SDF clip |
-| `PushOpacity` | alpha folded into vertex colours |
-| `PushTransform` | 2D affine transform in the vertex shader |
-| `PushBlendMode` | GL blend factors |
+| `PushClipRect` / `PushClipRoundedRect` | per-instance clip rect + SDF |
+| `PushOpacity` | alpha folded into instance colours |
+| `PushTransform` | 2D affine transform stored per instance |
+| `PushBlendMode` | GL blend factors at batch boundaries |
 
-Text and images use a single indexed textured batch. Solid shapes use one
-instanced shape batch. Runs are split only when the texture, clip, transform or
-blend state changes, so a normal UI frame costs a handful of draw calls.
+Every draw becomes one 160-byte GPU instance carrying its rectangle, colour, SDF
+parameters, clip, affine transform, UVs and texture slot. Clip and transform
+changes therefore do not split batches. Instances are grouped into contiguous
+blend/texture epochs and submitted through an indirect command buffer with
+`glMultiDrawArraysIndirect` (or `glDrawArraysIndirect`). When
+`GL_ARB_buffer_storage` is present, the instance and command buffers are
+persistently mapped with a three-slot ring and GPU fences; otherwise they fall
+back to orphaned `glBufferData` uploads. A typical frame is one indirect draw
+call, while `RenderPath.Direct` remains available for benchmarking and for
+drivers without the indirect extensions.
+
+Canvas elements can opt into the same batch with `CanvasProps.OnDraw`, which
+receives a `CanvasContext` for rectangles, rounded rectangles, ellipses, text,
+images, clips, transforms and opacity. `CanvasProps.OnContext` still exposes raw
+immediate-mode GL and runs after the indirect batch.
 
 ### Fonts
 
@@ -200,6 +212,10 @@ maximized and full-screen windows.
 - A frame only relayouts when `UILab.Renderer.Version`, the viewport, DPR or a
   stylesheet changes.
 - Constant pools and instruction buffers are reused by the layout engine.
-- The renderer keeps one VAO/VBO per batch kind and reuses index storage.
+- The renderer keeps one VAO and stream buffers; per-instance state removes
+  clip/transform batch splits, and indirect submission removes per-object CPU
+  draw calls.
+- Persistent instance/command buffers use a three-slot ring with completion
+  fences, so steady-state rendering does not synchronise with the GPU.
 - The demo reports roughly **3.6 ms warm layout** and **0.7 ms GL render** for
   a full 1120×760 page on a typical desktop.

@@ -160,6 +160,17 @@ namespace Donkeh.Windowing
         /// </remarks>
         public int Samples;
 
+        /// <summary>Selects the renderer submission strategy.</summary>
+        /// <remarks>
+        /// <see cref="Donkeh.Windowing.RenderPath.Auto"/> uses indirect rendering
+        /// when the driver exposes the required extensions and falls back to
+        /// direct instanced draws otherwise. <see cref="Donkeh.Windowing.RenderPath.Direct"/>
+        /// is useful for benchmarking or for isolating driver issues. The value is
+        /// copied when the window is constructed; change
+        /// <see cref="DonkehWindow.RenderPath"/> to switch on a live window.
+        /// </remarks>
+        public RenderPath RenderPath;
+
         /// <summary>Whether the user can resize the window.</summary>
         /// <remarks>
         /// Decorated windows use the native border. Frameless windows use an

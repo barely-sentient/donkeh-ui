@@ -139,6 +139,9 @@ public sealed partial class DonkehWindow : IDisposable
     /// <summary>The display-list renderer; disposed with the GPU resources.</summary>
     private GLRenderer? _renderer;
 
+    /// <summary>Reused recorder for <see cref="CanvasProps.OnDraw"/> batches.</summary>
+    private readonly CanvasContext _canvasContext = new();
+
     /// <summary>
     /// Reusable layout engine for the app tree. Replaced by
     /// <see cref="RebuildStyles"/>.
@@ -580,6 +583,31 @@ public sealed partial class DonkehWindow : IDisposable
     /// </value>
     public IInputContext? Input => _input;
 
+    /// <summary>
+    /// Gets or sets the submission strategy used by the live renderer.
+    /// </summary>
+    /// <value>
+    /// <see cref="RenderPath.Auto"/> before the context exists, otherwise the
+    /// path requested by <see cref="WindowSettings.RenderPath"/> or the last
+    /// value assigned here.
+    /// </value>
+    /// <remarks>
+    /// A change takes effect on the next frame. Forcing
+    /// <see cref="RenderPath.Indirect"/> on a driver without indirect-draw
+    /// support degrades to <see cref="RenderPath.Direct"/> for that frame.
+    /// </remarks>
+    public RenderPath RenderPath
+    {
+        get => _renderer?.Path ?? _settings.RenderPath;
+        set
+        {
+            if (_renderer is not null)
+            {
+                _renderer.Path = value;
+            }
+        }
+    }
+
     /// <summary>Gets the UILab renderer that owns the application tree.</summary>
     /// <value>A renderer that is mounted at most once, by <see cref="Mount"/>.</value>
     /// <remarks>
@@ -1008,7 +1036,7 @@ public sealed partial class DonkehWindow : IDisposable
         _gl = GL.GetApi(_window);
         _fonts.Initialize(_gl);
         _images.Initialize(_gl);
-        _renderer = new GLRenderer(_gl, _fonts, _images);
+        _renderer = new GLRenderer(_gl, _fonts, _images) { Path = _settings.RenderPath };
         _input = _window!.CreateInput();
         ConfigureInput();
 
@@ -1361,10 +1389,66 @@ public sealed partial class DonkehWindow : IDisposable
     }
 
     /// <summary>
-    /// Walks the current layout tree and lets every <c>canvas</c> element render
-    /// into its own bounds using a fresh Silk.NET OpenGL context.
+    /// Walks the current layout tree and records every batched
+    /// <see cref="CanvasProps.OnDraw"/> callback into the pending indirect frame.
     /// </summary>
-    private void DrawCanvasElements()
+    /// <remarks>
+    /// This runs after the app, overlay and inspector streams have been
+    /// submitted but before <see cref="GLRenderer.Flush"/>, so canvas primitives
+    /// paint above the UI yet still travel through the same GPU instance buffer
+    /// and indirect batch.
+    /// </remarks>
+    private void RecordCanvasElements()
+    {
+        if (_layoutResult is null || _renderer is null)
+        {
+            return;
+        }
+
+        foreach (var box in EnumerateLayoutBoxes(_layoutResult.Root))
+        {
+            if (box.Node is not ElementNode element
+                || !string.Equals(element.Tag, "canvas", StringComparison.OrdinalIgnoreCase)
+                || element.CanvasDrawHandler is not Action<CanvasContext> handler)
+            {
+                continue;
+            }
+
+            var rect = box.BorderBox;
+
+            if (rect.IsEmpty)
+            {
+                continue;
+            }
+
+            _canvasContext.Begin(_renderer, rect);
+
+            try
+            {
+                handler(_canvasContext);
+            }
+            catch
+            {
+                // A faulty canvas must not tear down the frame; End still
+                // balances the clip/transform/opacity stacks.
+            }
+            finally
+            {
+                _canvasContext.End();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Walks the current layout tree and lets every raw
+    /// <see cref="CanvasProps.OnContext"/> callback draw into its own bounds.
+    /// </summary>
+    /// <remarks>
+    /// Raw GL runs after the indirect batch has been flushed, so it paints on
+    /// top of batched content and can use any GL feature. The cached window
+    /// context is reused instead of creating a new wrapper per canvas per frame.
+    /// </remarks>
+    private void DrawCanvasContexts()
     {
         if (_layoutResult is null || _gl is null || _window is null)
         {
@@ -1411,9 +1495,13 @@ public sealed partial class DonkehWindow : IDisposable
             _gl.Scissor(px, py, (uint)pw, (uint)ph);
             _gl.Enable(EnableCap.DepthTest);
 
-            var silk = GL.GetApi(_window);
-            try { handler(silk); }
-            catch { }
+            try
+            {
+                handler(_gl);
+            }
+            catch
+            {
+            }
 
             _gl.Disable(EnableCap.ScissorTest);
             _gl.Disable(EnableCap.DepthTest);
@@ -1732,37 +1820,55 @@ public sealed partial class DonkehWindow : IDisposable
 
             if (hasOverlay && _devToolsOverlay.Count > 0)
             {
-                _renderer.Render(
-                    _layoutResult,
-                    overlay.Span,
-                    overlayConstants,
-                    _devToolsLayout,
-                    _devToolsOverlay.Span,
-                    _devToolsOverlayConstants);
+                _renderer.Submit(_layoutResult);
+                _renderer.Submit(overlay.Span, overlayConstants);
+
+                if (_devToolsLayout is not null)
+                {
+                    _renderer.Submit(_devToolsLayout);
+                }
+
+                _renderer.Submit(_devToolsOverlay.Span, _devToolsOverlayConstants);
             }
             else if (hasOverlay)
             {
-                _renderer.Render(_layoutResult, overlay.Span, overlayConstants, _devToolsLayout);
+                _renderer.Submit(_layoutResult);
+                _renderer.Submit(overlay.Span, overlayConstants);
+
+                if (_devToolsLayout is not null)
+                {
+                    _renderer.Submit(_devToolsLayout);
+                }
             }
             else if (_devToolsOverlay.Count > 0)
             {
-                _renderer.Render(
-                    _layoutResult,
-                    ReadOnlySpan<Instruction>.Empty,
-                    _devToolsOverlayConstants,
-                    _devToolsLayout,
-                    _devToolsOverlay.Span,
-                    _devToolsOverlayConstants);
+                _renderer.Submit(_layoutResult);
+
+                if (_devToolsLayout is not null)
+                {
+                    _renderer.Submit(_devToolsLayout);
+                }
+
+                _renderer.Submit(_devToolsOverlay.Span, _devToolsOverlayConstants);
             }
             else
             {
-                _renderer.Render(_layoutResult, _devToolsLayout);
+                _renderer.Submit(_layoutResult);
+
+                if (_devToolsLayout is not null)
+                {
+                    _renderer.Submit(_devToolsLayout);
+                }
             }
         }
 
-        // Canvas callbacks own their element's pixels, so run them after the
-        // regular display list (including the canvas background) has painted.
-        DrawCanvasElements();
+        // Batched canvas paint lists join the same indirect batch as the UI.
+        RecordCanvasElements();
+        _renderer.Flush();
+
+        // Raw GL callbacks own their element's pixels, so they run after the
+        // batched pass has painted the canvas background and content.
+        DrawCanvasContexts();
 
         LastRenderMilliseconds = Stopwatch.GetElapsedTime(renderStart).TotalMilliseconds;
 
