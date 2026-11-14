@@ -113,6 +113,15 @@ return H("div", Text(theme));
 page without browser navigation. Import `Donkeh.UILab.Routing` for the short
 factories.
 
+Routes whose content is expensive to construct can pass a factory instead of
+children. The factory runs only on a frame where that route matches, so unmatched
+pages do not build their node trees at start-up:
+
+```csharp
+Route("/reports", () => H("section", new Props { ClassName = "card" },
+    C<ReportsPage>()));
+```
+
 ```csharp
 using Donkeh.UILab;
 using static Donkeh.UILab._;

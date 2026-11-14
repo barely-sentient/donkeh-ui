@@ -28,6 +28,41 @@ public sealed class RouterTests
     }
 
     [Fact]
+    public void LazyRouteContentRunsOnlyWhenMatched()
+    {
+        var homeBuilds = 0;
+        var aboutBuilds = 0;
+        var renderer = new Renderer();
+
+        renderer.Mount(
+            AppRouter("/",
+                H("div",
+                    Link("/about", Text("About")),
+                    AppRoutes(
+                        Route("/", () =>
+                        {
+                            homeBuilds++;
+                            return Text("Home");
+                        }),
+                        Route("/about", () =>
+                        {
+                            aboutBuilds++;
+                            return Text("About");
+                        })))));
+
+        Assert.Equal(1, homeBuilds);
+        Assert.Equal(0, aboutBuilds);
+
+        var link = FindAnchor(renderer.Root, "/about");
+        Assert.True(link.TryGetEventHandler("click", out var handler));
+        ((Action)handler!)();
+
+        Assert.Contains("About", CollectText(renderer.Root));
+        Assert.True(aboutBuilds >= 1);
+        Assert.Equal(1, homeBuilds);
+    }
+
+    [Fact]
     public void RouterCanSetPageFromContext()
     {
         var renderer = new Renderer();

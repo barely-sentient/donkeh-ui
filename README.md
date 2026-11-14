@@ -637,7 +637,8 @@ renderer.Mount(app);
 
 `Link("/about", Text("About"))` changes the page through `Router.SetPage`.
 Components can navigate directly with
-`var setPage = UseContext(Router.SetPage);`. See
+`var setPage = UseContext(Router.SetPage);`. `Route("/about", () => ...)` defers
+building that page's content until the route matches. See
 [Donkeh.UILab](Donkeh/UILab/Source/README.md#routing) for the full API.
 
 Images can be packed into the assembly the same way as stylesheets. Mark each

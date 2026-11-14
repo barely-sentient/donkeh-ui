@@ -270,6 +270,13 @@ namespace Donkeh.UILab
 
         /// <summary>Gets the content rendered when the route matches.</summary>
         public Node?[]? Children { get; init; }
+
+        /// <summary>
+        /// Gets a factory invoked only when the route matches. When set, it takes
+        /// precedence over <see cref="Children"/>, letting a route table avoid
+        /// building every page's node tree at start-up.
+        /// </summary>
+        public Func<Node?>? Content { get; init; }
     }
 
     /// <summary>Declares content for one path.</summary>
@@ -279,9 +286,18 @@ namespace Donkeh.UILab
         public override Node Render()
         {
             var current = UseContext(Router.Path);
-            return Router.MatchesNormalized(Props.Path, current)
-                ? F(Props.Children ?? [])
-                : F();
+
+            if (!Router.MatchesNormalized(Props.Path, current))
+            {
+                return F();
+            }
+
+            if (Props.Content is { } content)
+            {
+                return content() ?? F();
+            }
+
+            return F(Props.Children ?? []);
         }
     }
 
@@ -368,12 +384,25 @@ namespace Donkeh.UILab
         public static Node AppRoutes(params Node?[] routes) =>
             C<AppRoutes, AppRoutesProps>(new AppRoutesProps { Children = routes });
 
-        /// <summary>Creates a <see cref="Route"/> declaration.</summary>
+        /// <summary>Creates a <see cref="Donkeh.UILab.Route"/> declaration.</summary>
         /// <param name="path">The route path.</param>
         /// <param name="children">Content rendered when the route matches.</param>
         /// <returns>The configured route component.</returns>
         public static Node Route(string path, params Node?[] children) =>
             C<Route, RouteProps>(new RouteProps { Path = path, Children = children });
+
+        /// <summary>
+        /// Creates a <see cref="Donkeh.UILab.Route"/> whose content is built only when the path
+        /// matches.
+        /// </summary>
+        /// <param name="path">The route path.</param>
+        /// <param name="content">
+        /// Factory invoked on the frame that matches the route. Use it for pages
+        /// whose node trees are expensive to construct at start-up.
+        /// </param>
+        /// <returns>The configured route component.</returns>
+        public static Node Route(string path, Func<Node?> content) =>
+            C<Route, RouteProps>(new RouteProps { Path = path, Content = content });
 
         /// <summary>Creates a <see cref="Link"/>.</summary>
         /// <param name="to">The destination path.</param>
