@@ -116,6 +116,27 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
     /// </summary>
     private const int ElementStyleAddKey = -2;
 
+    /// <summary>Precomputed bar class names for frame, layout and render graphs.</summary>
+    private static readonly string[] FrameBarClasses = BuildBarClasses("dt-bar");
+    private static readonly string[] LayoutBarClasses = BuildBarClasses("dt-bar dt-bar-layout");
+    private static readonly string[] RenderBarClasses = BuildBarClasses("dt-bar dt-bar-render");
+
+    /// <summary>Builds the 0–120 height class names for one graph colour.</summary>
+    private static string[] BuildBarClasses(string prefix)
+    {
+        var classes = new string[121];
+
+        for (var height = 0; height < classes.Length; height++)
+        {
+            classes[height] = string.Concat(
+                prefix,
+                " dt-h",
+                height.ToString(CultureInfo.InvariantCulture));
+        }
+
+        return classes;
+    }
+
     /// <summary>Called by the host frame loop to pull fresh data into the panel.</summary>
     /// <remarks>
     /// No-op when the panel is not mounted or the state version is unchanged.
@@ -2353,11 +2374,11 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
                 BuildCard("Frames", stats.FrameCount.ToString(CultureInfo.InvariantCulture), $"avg {stats.AverageFrameMilliseconds:0.##} ms")),
             BuildLegend(),
             _.H("div", new Props { ClassName = "dt-section-title" }, _.Text("FRAME TIME (ms)")),
-            BuildGraph(stats.FrameHistory, "dt-bar", 33f),
+            BuildGraph(stats.FrameHistory, FrameBarClasses, 33f),
             _.H("div", new Props { ClassName = "dt-section-title" }, _.Text("LAYOUT TIME (ms)")),
-            BuildGraph(stats.LayoutHistory, "dt-bar dt-bar-layout", 16f),
+            BuildGraph(stats.LayoutHistory, LayoutBarClasses, 16f),
             _.H("div", new Props { ClassName = "dt-section-title" }, _.Text("RENDER TIME (ms)")),
-            BuildGraph(stats.RenderHistory, "dt-bar dt-bar-render", 16f)
+            BuildGraph(stats.RenderHistory, RenderBarClasses, 16f)
         };
 
         return _.H("div", new Props { ClassName = "dt-perf" }, _.F(output.ToArray()));
@@ -2408,8 +2429,8 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
 
     /// <summary>Builds a bar graph from a history span.</summary>
     /// <param name="values">Sample values in milliseconds.</param>
-    /// <param name="className">
-    /// Base class for the bars, which also sets their colour.
+    /// <param name="classes">
+    /// Precomputed class names for bar heights 0 to 120.
     /// </param>
     /// <param name="max">
     /// Value mapped to a 120 px bar; floored at 0.01 to avoid division by zero.
@@ -2421,14 +2442,14 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
     /// Bar heights are quantised to whole pixels and emitted as <c>dt-hN</c>
     /// utility classes, because the engine does not support inline styles.
     /// </remarks>
-    private static Node BuildGraph(ReadOnlySpan<float> values, string className, float max)
+    private static Node BuildGraph(ReadOnlySpan<float> values, string[] classes, float max)
     {
         var bars = new List<Node?>();
 
         for (var i = 0; i < values.Length; i++)
         {
             var height = Math.Clamp((int)MathF.Round(values[i] / MathF.Max(0.01f, max) * 120f), 0, 120);
-            bars.Add(_.H("div", new Props { ClassName = className + " dt-h" + height.ToString(CultureInfo.InvariantCulture) }));
+            bars.Add(_.H("div", new Props { ClassName = classes[height] }));
         }
 
         if (bars.Count == 0)

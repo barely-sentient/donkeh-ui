@@ -90,6 +90,22 @@ public sealed class ComponentTests
     }
 
     [Fact]
+    public void ClassChangesPatchTheLiveElement()
+    {
+        var renderer = new Renderer();
+        var root = (ElementNode)renderer.Mount(C<ToggleClass>());
+
+        Assert.True(root.HasClass("before"));
+        var button = (ElementNode)root.Children[0];
+        Assert.True(button.TryGetEventHandler("click", out var handler));
+
+        ((Action)handler!)();
+
+        Assert.True(root.HasClass("after"));
+        Assert.False(root.HasClass("before"));
+    }
+
+    [Fact]
     public void UnkeyedInsertUpdatesTheRenderedList()
     {
         var renderer = new Renderer();
@@ -218,5 +234,17 @@ public sealed class UnkeyedList : Component
         return H("div",
             Each(items, item => H("div", Text(item))),
             H("button", Text("insert")).OnClick(() => setInserted(true)));
+    }
+}
+
+public sealed class ToggleClass : Component
+{
+    public override Node Render()
+    {
+        var (on, setOn) = State(false);
+
+        return H("div",
+            new Props { ClassName = on ? "after" : "before" },
+            H("button", Text("toggle")).OnClick(() => setOn(!on)));
     }
 }

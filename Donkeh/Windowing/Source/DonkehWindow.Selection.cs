@@ -1443,7 +1443,10 @@ public sealed partial class DonkehWindow
         // place for one frame after a resize or reflow.
         if (box.Text is { Lines.Length: > 0 } currentText)
         {
-            var current = CreateTextRun(element, box, currentText, selection.IsDevTools);
+            var current = ReferenceEquals(run.Box, box)
+                && ReferenceEquals(run.Lines, currentText.Lines)
+                ? run
+                : CreateTextRun(element, box, currentText, selection.IsDevTools);
             PaintSelectionRects(instructions, box, current.Lines, current.LineStarts, from, to, clip: false);
         }
         else

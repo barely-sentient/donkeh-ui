@@ -57,6 +57,21 @@ namespace Donkeh.Parser
         private static readonly int[] AsciiIds = CreateAsciiIds();
 
         /// <summary>
+        /// Per-thread front cache for the span and string intern paths. Entries are
+        /// only ever added, so a hit needs no lock; the global table remains the
+        /// source of truth for ids.
+        /// </summary>
+        [ThreadStatic]
+        private static Dictionary<string, int>? ThreadStrings;
+
+        /// <summary>Span lookup over <see cref="ThreadStrings"/>.</summary>
+        [ThreadStatic]
+        private static Dictionary<string, int>.AlternateLookup<ReadOnlySpan<char>> ThreadLookup;
+
+        /// <summary>Clears the thread cache when it grows beyond this many entries.</summary>
+        private const int MaxThreadEntries = 4096;
+
+        /// <summary>
         /// Returns the dense id for <paramref name="s"/>, adding it to the table
         /// on first sighting.
         /// </summary>
@@ -71,9 +86,17 @@ namespace Donkeh.Parser
         {
             ArgumentNullException.ThrowIfNull(s);
 
+            if (ThreadStrings is not null
+                && ThreadStrings.TryGetValue(s, out var cached))
+            {
+                return cached;
+            }
+
             lock (Sync)
             {
-                return InternCore(s);
+                var id = InternCore(s);
+                CacheOnThread(s, id);
+                return id;
             }
         }
 
@@ -87,14 +110,24 @@ namespace Donkeh.Parser
         /// </returns>
         public static int Intern(ReadOnlySpan<char> s)
         {
+            if (ThreadStrings is not null
+                && ThreadLookup.TryGetValue(s, out var cached))
+            {
+                return cached;
+            }
+
             lock (Sync)
             {
                 if (AlternateLookup.TryGetValue(s, out var value))
                 {
+                    CacheOnThread(s.ToString(), value);
                     return value;
                 }
 
-                return InternCore(s.ToString());
+                var text = s.ToString();
+                var id = InternCore(text);
+                CacheOnThread(text, id);
+                return id;
             }
         }
 
@@ -215,10 +248,21 @@ namespace Donkeh.Parser
         /// </remarks>
         public static bool TryGetId(ReadOnlySpan<char> s, out int id)
         {
+            if (ThreadStrings is not null && ThreadLookup.TryGetValue(s, out id))
+            {
+                return true;
+            }
+
             lock (Sync)
             {
-                return AlternateLookup.TryGetValue(s, out id);
+                if (AlternateLookup.TryGetValue(s, out id))
+                {
+                    return true;
+                }
             }
+
+            id = 0;
+            return false;
         }
 
         /// <summary>
@@ -226,6 +270,24 @@ namespace Donkeh.Parser
         /// allocating path, which keeps the stack usage of the hot path bounded.
         /// </summary>
         private const int MaxStackPrefixedLength = 128;
+
+        /// <summary>Adds a resolved id to the calling thread's front cache.</summary>
+        /// <param name="s">The interned text.</param>
+        /// <param name="id">Its dense id.</param>
+        private static void CacheOnThread(string s, int id)
+        {
+            if (ThreadStrings is null)
+            {
+                ThreadStrings = new Dictionary<string, int>(StringComparer.Ordinal);
+                ThreadLookup = ThreadStrings.GetAlternateLookup<ReadOnlySpan<char>>();
+            }
+            else if (ThreadStrings.Count >= MaxThreadEntries)
+            {
+                ThreadStrings.Clear();
+            }
+
+            ThreadStrings[s] = id;
+        }
 
         /// <summary>
         /// Performs the actual insert or lookup. The caller must hold

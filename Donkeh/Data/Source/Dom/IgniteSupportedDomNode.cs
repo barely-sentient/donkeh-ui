@@ -55,18 +55,49 @@ namespace Donkeh.Data.Dom
         private int _elementChildCount;
         private int _suppressedChildCount;
         private bool _isSuppressed;
+        private bool _isTextNode;
+        private bool _isFragment;
+
+        /// <summary>Element-only sibling list, rebuilt after child or suppression changes.</summary>
+        private IgniteSupportedDomNode[]? _elementSiblings;
 
         /// <summary>
         /// True when this node is a framework text node. Text nodes do not match
         /// selectors and are laid out as inline content.
         /// </summary>
-        public bool IsTextNode { get; set; }
+        public bool IsTextNode
+        {
+            get => _isTextNode;
+            set
+            {
+                if (_isTextNode == value)
+                {
+                    return;
+                }
+
+                _isTextNode = value;
+                _parent?._elementSiblings = null;
+            }
+        }
 
         /// <summary>
         /// True when this node is a transparent fragment. Fragments do not match
         /// selectors and generate no box of their own.
         /// </summary>
-        public bool IsFragment { get; set; }
+        public bool IsFragment
+        {
+            get => _isFragment;
+            set
+            {
+                if (_isFragment == value)
+                {
+                    return;
+                }
+
+                _isFragment = value;
+                _parent?._elementSiblings = null;
+            }
+        }
 
         /// <summary>
         /// True when the node generated no box in the current frame because its
@@ -102,6 +133,7 @@ namespace Donkeh.Data.Dom
                 if (_parent is not null)
                 {
                     _parent._suppressedChildCount += value ? 1 : -1;
+                    _parent._elementSiblings = null;
                     _parent._revision++;
                 }
             }
@@ -242,6 +274,7 @@ namespace Donkeh.Data.Dom
             set
             {
                 _children = value ?? [];
+                _elementSiblings = null;
                 _revision++;
 
                 var elementIndex = 0;
@@ -276,6 +309,11 @@ namespace Donkeh.Data.Dom
                             || previousElementIndex != child._elementIndexInParent)
                         {
                             child._revision++;
+                        }
+
+                        if (!ReferenceEquals(previousParent, this) && previousParent is not null)
+                        {
+                            previousParent._elementSiblings = null;
                         }
                     }
                 }
@@ -705,41 +743,24 @@ namespace Donkeh.Data.Dom
                     return 0;
                 }
 
-                var siblings = _parent._children;
+                var siblings = _parent.GetElementSiblings();
 
-                if (_parent._suppressedChildCount == 0
-                    && (uint)_indexInParent < (uint)siblings.Length
-                    && ReferenceEquals(siblings[_indexInParent], this))
+                // The common no-suppression case hits the cached element index.
+                if ((uint)_elementIndexInParent < (uint)siblings.Length
+                    && ReferenceEquals(siblings[_elementIndexInParent], this))
                 {
-                    return _elementIndexInParent >= 0 ? _elementIndexInParent : 0;
+                    return _elementIndexInParent;
                 }
 
-                if (_parent._suppressedChildCount > 0)
+                for (var i = 0; i < siblings.Length; i++)
                 {
-                    var suppressedIndex = 0;
-
-                    for (var i = 0; i < siblings.Length; i++)
+                    if (ReferenceEquals(siblings[i], this))
                     {
-                        var sibling = siblings[i];
-
-                        if (sibling is null || sibling.IsTextNode || sibling.IsFragment)
-                        {
-                            continue;
-                        }
-
-                        if (ReferenceEquals(sibling, this))
-                        {
-                            return suppressedIndex;
-                        }
-
-                        if (!sibling.IsSuppressed)
-                        {
-                            suppressedIndex++;
-                        }
+                        return i;
                     }
                 }
 
-                return FindElementIndex(siblings, this);
+                return 0;
             }
         }
 
@@ -748,9 +769,7 @@ namespace Donkeh.Data.Dom
         /// and fragments are not elements and do not count, nor do suppressed
         /// elements that generated no box.
         /// </summary>
-        internal int SiblingCount => _parent is null
-            ? 1
-            : Math.Max(0, _parent._elementChildCount - _parent._suppressedChildCount);
+        internal int SiblingCount => _parent is null ? 1 : _parent.GetElementSiblings().Length;
 
         /// <summary>
         /// Returns the element at an element-relative sibling index, or this node
@@ -769,51 +788,55 @@ namespace Donkeh.Data.Dom
                 return this;
             }
 
-            var siblings = _parent._children;
-            var elementIndex = 0;
-
-            for (var i = 0; i < siblings.Length; i++)
-            {
-                var sibling = siblings[i];
-
-                if (sibling is null || sibling.IsTextNode || sibling.IsFragment || sibling.IsSuppressed)
-                {
-                    continue;
-                }
-
-                if (elementIndex == index)
-                {
-                    return sibling;
-                }
-
-                elementIndex++;
-            }
-
-            return this;
+            var siblings = _parent.GetElementSiblings();
+            return (uint)index < (uint)siblings.Length ? siblings[index] : this;
         }
 
-        private static int FindElementIndex(IgniteSupportedDomNode[] siblings, IgniteSupportedDomNode node)
+        /// <summary>
+        /// Returns this parent's element-only children, excluding suppressed nodes,
+        /// building the array once after any child or suppression change.
+        /// </summary>
+        /// <returns>The cached element sibling array.</returns>
+        private IgniteSupportedDomNode[] GetElementSiblings()
         {
-            var elementIndex = 0;
-
-            for (var i = 0; i < siblings.Length; i++)
+            if (_elementSiblings is { } cached)
             {
-                var sibling = siblings[i];
-
-                if (sibling is null || sibling.IsTextNode || sibling.IsFragment || sibling.IsSuppressed)
-                {
-                    continue;
-                }
-
-                if (ReferenceEquals(sibling, node))
-                {
-                    return elementIndex;
-                }
-
-                elementIndex++;
+                return cached;
             }
 
-            return 0;
+            var count = 0;
+
+            for (var i = 0; i < _children.Length; i++)
+            {
+                var child = _children[i];
+
+                if (child is not null
+                    && !child.IsTextNode
+                    && !child.IsFragment
+                    && !child.IsSuppressed)
+                {
+                    count++;
+                }
+            }
+
+            var siblings = new IgniteSupportedDomNode[count];
+            var index = 0;
+
+            for (var i = 0; i < _children.Length; i++)
+            {
+                var child = _children[i];
+
+                if (child is not null
+                    && !child.IsTextNode
+                    && !child.IsFragment
+                    && !child.IsSuppressed)
+                {
+                    siblings[index++] = child;
+                }
+            }
+
+            _elementSiblings = siblings;
+            return siblings;
         }
 
         /// <summary>

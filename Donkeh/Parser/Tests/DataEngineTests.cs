@@ -12,6 +12,13 @@ public class DataEngineTests
     }
 
     [Fact]
+    public void HasHoverRulesReportsPseudoClassSelectors()
+    {
+        Assert.True(Build("a:hover { color: red; }").HasHoverRules);
+        Assert.False(Build("a { color: red; }").HasHoverRules);
+    }
+
+    [Fact]
     public void HasPseudoElementReportsDeclaredGeneratedContent()
     {
         var table = Build("div::before { content: 'x'; }");

@@ -451,6 +451,27 @@ public sealed partial class DonkehWindow : IDisposable
     /// <summary>Caret offset into <see cref="_editText"/>, in UTF-16 code units.</summary>
     private int _caretIndex;
 
+    /// <summary>Cached caret target element.</summary>
+    private ElementNode? _caretCacheElement;
+
+    /// <summary>Edit text the cached caret was computed from.</summary>
+    private string? _caretCacheText;
+
+    /// <summary>Caret index the cached rectangle was computed for.</summary>
+    private int _caretCacheIndex;
+
+    /// <summary>Layout result the cached caret was computed from.</summary>
+    private LayoutResult? _caretCacheLayout;
+
+    /// <summary>Element revision the cached caret was computed at.</summary>
+    private int _caretCacheRevision;
+
+    /// <summary>Cached caret rectangle in window CSS pixels.</summary>
+    private Rect _caretCacheRect;
+
+    /// <summary>Whether the caret cache fields hold a usable rectangle.</summary>
+    private bool _caretCacheValid;
+
     /// <summary>Timestamp the caret blink cycle was last restarted.</summary>
     private long _caretBlinkStart;
 
@@ -3454,6 +3475,19 @@ public sealed partial class DonkehWindow : IDisposable
         }
 
         var text = _editText ?? string.Empty;
+        var index = Math.Clamp(_caretIndex, 0, text.Length);
+
+        if (_caretCacheValid
+            && ReferenceEquals(_caretCacheElement, _focused)
+            && ReferenceEquals(_caretCacheText, text)
+            && _caretCacheIndex == index
+            && ReferenceEquals(_caretCacheLayout, boxLayout)
+            && _caretCacheRevision == _focused.Revision)
+        {
+            caret = _caretCacheRect;
+            return true;
+        }
+
         var color = box.Style.Color == ComputedStyle.CurrentColor
             ? 0xFF212529u
             : box.Style.Color;
@@ -3462,7 +3496,6 @@ public sealed partial class DonkehWindow : IDisposable
         var contentWidth = MathF.Max(0, box.ContentBox.Width);
         var contentHeight = MathF.Max(0, box.ContentBox.Height);
         var lineHeight = box.Style.ResolveLineHeight(in _lengthContext);
-        var index = Math.Clamp(_caretIndex, 0, text.Length);
         float x;
         float y;
         float height;
@@ -3513,6 +3546,14 @@ public sealed partial class DonkehWindow : IDisposable
 
         var width = MathF.Max(1, textStyle.FontSize * 0.07f);
         caret = new Rect(x, y, width, height);
+
+        _caretCacheElement = _focused;
+        _caretCacheText = text;
+        _caretCacheIndex = index;
+        _caretCacheLayout = boxLayout;
+        _caretCacheRevision = _focused.Revision;
+        _caretCacheRect = caret;
+        _caretCacheValid = true;
         return true;
     }
 
@@ -6561,7 +6602,17 @@ public sealed partial class DonkehWindow : IDisposable
         }
 
         _interactionVersion++;
-        _needsLayout = true;
+
+        if (_table is not null && !_table.HasHoverRules)
+        {
+            // Without hover rules the cascade cannot change, so a repaint is
+            // enough. The inspector highlight still needs a fresh display list.
+            _needsPaint = true;
+        }
+        else
+        {
+            _needsLayout = true;
+        }
     }
 
     /// <summary>

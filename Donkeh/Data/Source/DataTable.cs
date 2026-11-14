@@ -50,6 +50,9 @@ namespace Donkeh.Data
     /// </example>
     public sealed partial class DataTable
     {
+        /// <summary>The interned text of the <c>:hover</c> pseudo-class.</summary>
+        private static readonly int HoverPseudoId = InternTable.Intern(":hover");
+
         private readonly List<SelectorRecord> _selectors;
 
     /// <summary>Whether any selector targets the <c>::before</c> pseudo-element.</summary>
@@ -57,6 +60,9 @@ namespace Donkeh.Data
 
     /// <summary>Whether any selector targets the <c>::after</c> pseudo-element.</summary>
     private bool _hasAfterPseudo;
+
+    /// <summary>Whether any selector contains a <c>:hover</c> pseudo-class.</summary>
+    private bool _hasHoverRules;
         private readonly List<Rule> _rules;
         private readonly List<Condition> _conditions;
         private readonly List<CssImport> _imports = new();
@@ -229,6 +235,14 @@ namespace Donkeh.Data
             PseudoElementKind.After => _hasAfterPseudo,
             _ => false
         };
+
+        /// <summary>Gets whether any selector contains a <c>:hover</c> pseudo-class.</summary>
+        /// <remarks>
+        /// A table without hover rules cannot change its computed styles when the
+        /// host hover chain changes, so the window can repaint instead of running
+        /// a full layout for every pointer boundary crossing.
+        /// </remarks>
+        public bool HasHoverRules => _hasHoverRules;
 
         /// <summary>
         /// Cached result of <see cref="ComputeHeightMediaQueries"/>. The nullable
@@ -482,6 +496,16 @@ namespace Donkeh.Data
 
             var discriminator = NormalizeDiscriminator(selector[discriminatorIndex]);
             var tokenOffset = AppendSelectorTokens(selector);
+
+            for (var i = 0; i < selector.Length; i++)
+            {
+                if (selector[i].Kind == TokenKind.PseudoClass
+                    && selector[i].InternedId == HoverPseudoId)
+                {
+                    _hasHoverRules = true;
+                    break;
+                }
+            }
 
             // One pass splits the selector into compounds, computes the specificity
             // and parses attribute filters and structural pseudo classes.
