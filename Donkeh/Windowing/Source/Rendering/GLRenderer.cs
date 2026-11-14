@@ -177,6 +177,12 @@ public sealed unsafe class GLRenderer : IDisposable
     /// <summary>Increments whenever the texture slot table is reset.</summary>
     private int _textureEpoch;
 
+    /// <summary>Last texture assigned to a slot, used as a one-entry front cache.</summary>
+    private uint _lastTexture;
+
+    /// <summary>Slot of <see cref="_lastTexture"/>, or -1 when unset.</summary>
+    private int _lastTextureSlot = -1;
+
     /// <summary>Instance buffer object; recreated when it must grow.</summary>
     private uint _instanceVbo;
 
@@ -358,6 +364,8 @@ public sealed unsafe class GLRenderer : IDisposable
         _current = null;
         _textureSlotCount = 0;
         _textureEpoch = 0;
+        _lastTexture = 0;
+        _lastTextureSlot = -1;
         _clips.Clear();
         _opacities.Clear();
         _transforms.Clear();
@@ -1244,10 +1252,20 @@ public sealed unsafe class GLRenderer : IDisposable
     /// </remarks>
     private int EnsureTextureSlot(uint texture)
     {
+        if (_lastTexture == texture
+            && _lastTextureSlot >= 0
+            && _lastTextureSlot < _textureSlotCount
+            && _textureSlots[_lastTextureSlot] == texture)
+        {
+            return _lastTextureSlot;
+        }
+
         for (var i = 0; i < _textureSlotCount; i++)
         {
             if (_textureSlots[i] == texture)
             {
+                _lastTexture = texture;
+                _lastTextureSlot = i;
                 return i;
             }
         }
@@ -1257,9 +1275,13 @@ public sealed unsafe class GLRenderer : IDisposable
             CloseSegment();
             _textureSlotCount = 0;
             _textureEpoch++;
+            _lastTexture = 0;
+            _lastTextureSlot = -1;
         }
 
         _textureSlots[_textureSlotCount] = texture;
+        _lastTexture = texture;
+        _lastTextureSlot = _textureSlotCount;
         return _textureSlotCount++;
     }
 

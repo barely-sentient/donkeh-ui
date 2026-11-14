@@ -63,6 +63,8 @@ public sealed class StyleValueCache
     internal readonly Dictionary<int, ClipPathSpec> ClipPaths = [];
     /// <summary>Parsed mask shorthands.</summary>
     internal readonly Dictionary<int, MaskSpec> Masks = [];
+    /// <summary>Parsed keyword enums keyed by value id and property.</summary>
+    internal readonly Dictionary<(int ValueId, CssProperty Property), int> Keywords = [];
     /// <summary>
     /// Parsed transforms, including a flag that distinguishes a cached
     /// <see langword="null"/> (for <c>none</c>) from a miss.

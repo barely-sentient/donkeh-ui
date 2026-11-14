@@ -704,11 +704,27 @@ public sealed partial class StyleResolver
         switch (property)
         {
             case CssProperty.Display:
-                style.Display = ParseDisplay(value);
+                if (TryGetKeywordCache(valueId, property, out var display))
+                {
+                    style.Display = (Display)display;
+                }
+                else
+                {
+                    style.Display = ParseDisplay(value);
+                    CacheKeyword(valueId, property, (int)style.Display);
+                }
                 break;
 
             case CssProperty.Position:
-                style.Position = ParsePosition(value);
+                if (TryGetKeywordCache(valueId, property, out var position))
+                {
+                    style.Position = (Position)position;
+                }
+                else
+                {
+                    style.Position = ParsePosition(value);
+                    CacheKeyword(valueId, property, (int)style.Position);
+                }
                 break;
 
             case CssProperty.Float:
@@ -1042,7 +1058,15 @@ public sealed partial class StyleResolver
                 break;
 
             case CssProperty.TextAlign:
-                style.TextAlign = ParseTextAlign(value);
+                if (TryGetKeywordCache(valueId, property, out var textAlign))
+                {
+                    style.TextAlign = (TextAlign)textAlign;
+                }
+                else
+                {
+                    style.TextAlign = ParseTextAlign(value);
+                    CacheKeyword(valueId, property, (int)style.TextAlign);
+                }
                 break;
 
             case CssProperty.TextIndent:
@@ -1069,7 +1093,15 @@ public sealed partial class StyleResolver
                 break;
 
             case CssProperty.WhiteSpace:
-                style.WhiteSpace = ParseWhiteSpace(value);
+                if (TryGetKeywordCache(valueId, property, out var whiteSpace))
+                {
+                    style.WhiteSpace = (WhiteSpace)whiteSpace;
+                }
+                else
+                {
+                    style.WhiteSpace = ParseWhiteSpace(value);
+                    CacheKeyword(valueId, property, (int)style.WhiteSpace);
+                }
                 break;
 
             case CssProperty.WordBreak:
@@ -1117,7 +1149,15 @@ public sealed partial class StyleResolver
                 break;
 
             case CssProperty.FlexDirection:
-                style.FlexDirection = ParseFlexDirection(value);
+                if (TryGetKeywordCache(valueId, property, out var flexDirection))
+                {
+                    style.FlexDirection = (FlexDirection)flexDirection;
+                }
+                else
+                {
+                    style.FlexDirection = ParseFlexDirection(value);
+                    CacheKeyword(valueId, property, (int)style.FlexDirection);
+                }
                 break;
 
             case CssProperty.FlexWrap:

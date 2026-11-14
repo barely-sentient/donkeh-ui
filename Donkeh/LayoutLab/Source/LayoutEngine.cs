@@ -52,6 +52,10 @@ public sealed partial class LayoutEngine
     /// </summary>
     private readonly Dictionary<IgniteSupportedDomNode, StyleCacheEntry> _styleCache = [];
 
+    /// <summary>Inherited-value hashes memoised for the current layout pass.</summary>
+    private readonly Dictionary<ComputedStyle, long> _inheritedHashes =
+        new(ReferenceEqualityComparer.Instance);
+
     /// <summary>Current-generation text layouts keyed by text, style and quantised width.</summary>
     private Dictionary<TextLayoutKey, TextLayout> _textCache = [];
 
@@ -325,6 +329,7 @@ public sealed partial class LayoutEngine
         _styleSignature = ComputeStyleSignature();
         _measurer = _options.TextMeasurer ?? SimpleTextMeasurer.Instance;
         _resolver = new StyleResolver(_table, _valueCache, _options);
+        _inheritedHashes.Clear();
 
         _instructions.Clear();
         _constants.Clear();
@@ -418,6 +423,7 @@ public sealed partial class LayoutEngine
         _styleSignature = ComputeStyleSignature();
         _measurer = _options.TextMeasurer ?? SimpleTextMeasurer.Instance;
         _resolver = new StyleResolver(_table, _valueCache, _options);
+        _inheritedHashes.Clear();
 
         _instructions.Clear();
         _constants.Clear();
@@ -499,6 +505,7 @@ public sealed partial class LayoutEngine
         _styleSignature = ComputeStyleSignature();
         _measurer = _options.TextMeasurer ?? SimpleTextMeasurer.Instance;
         _resolver = new StyleResolver(_table, _valueCache, _options);
+        _inheritedHashes.Clear();
 
         _instructions.Clear();
         _constants.Clear();
@@ -711,6 +718,21 @@ public sealed partial class LayoutEngine
         return hash.ToHashCode();
     }
 
+    /// <summary>Returns the cached inherited-value hash for a style.</summary>
+    /// <param name="style">The fully resolved parent style.</param>
+    /// <returns>The hash of the properties children inherit.</returns>
+    private long GetInheritedHash(ComputedStyle style)
+    {
+        if (_inheritedHashes.TryGetValue(style, out var hash))
+        {
+            return hash;
+        }
+
+        hash = InheritedHash(style);
+        _inheritedHashes[style] = hash;
+        return hash;
+    }
+
     /// <summary>
     /// Hash of the properties a child inherits. It lets the style cache notice
     /// when an animated parent's inherited values changed even though the
@@ -803,7 +825,7 @@ public sealed partial class LayoutEngine
         // Animation clones and other transient parent styles can be new objects
         // while their inherited values are unchanged; keying on identity made
         // every descendant re-resolve its whole style chain each frame.
-        var parentInheritedHash = parent is not null ? InheritedHash(parent) : 0;
+        var parentInheritedHash = parent is not null ? GetInheritedHash(parent) : 0;
         var useCache = _options.EnableCaching;
         StyleCacheEntry? entry = null;
 
@@ -1165,6 +1187,11 @@ public sealed partial class LayoutEngine
         int depth,
         PseudoElementKind kind)
     {
+        if (!_table.HasPseudoElement(kind))
+        {
+            return null;
+        }
+
         var count = _table.MatchRules(node, _rendererContext, _pseudoMatchBuffer, kind);
 
         if (count == 0)

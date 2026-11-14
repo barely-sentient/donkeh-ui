@@ -854,6 +854,9 @@ namespace Donkeh.UILab
         /// </remarks>
         private void AddClassesFromString(string value)
         {
+            var buffer = new int[ClassIds.Length + (value.Length + 1) / 2];
+            ClassIds.CopyTo(buffer, 0);
+            var count = ClassIds.Length;
             var start = 0;
 
             for (var i = 0; i <= value.Length; i++)
@@ -867,18 +870,23 @@ namespace Donkeh.UILab
                 {
                     var classId = InternTable.Intern(value.AsSpan(start, i - start));
 
-                    if (Array.IndexOf(ClassIds, classId) < 0)
+                    if (Array.IndexOf(buffer, classId, 0, count) < 0)
                     {
-                        Array.Resize(ref ClassIds, ClassIds.Length + 1);
-                        ClassIds[^1] = classId;
+                        buffer[count++] = classId;
                     }
                 }
 
                 start = i + 1;
             }
 
-            Array.Sort(ClassIds);
-            SetInternedClassName(ClassIds);
+            Array.Sort(buffer, 0, count);
+
+            if (count != buffer.Length)
+            {
+                Array.Resize(ref buffer, count);
+            }
+
+            SetInternedClassName(buffer);
         }
 
         /// <summary>

@@ -12,6 +12,15 @@ public class DataEngineTests
     }
 
     [Fact]
+    public void HasPseudoElementReportsDeclaredGeneratedContent()
+    {
+        var table = Build("div::before { content: 'x'; }");
+
+        Assert.True(table.HasPseudoElement(PseudoElementKind.Before));
+        Assert.False(table.HasPseudoElement(PseudoElementKind.After));
+    }
+
+    [Fact]
     public void KeepsDescendantAndCompoundSelectorsDistinct()
     {
         var table = Build(".a .b { color: red; } .a.b { color: blue; }");

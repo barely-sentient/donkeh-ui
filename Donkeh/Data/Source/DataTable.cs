@@ -51,6 +51,12 @@ namespace Donkeh.Data
     public sealed partial class DataTable
     {
         private readonly List<SelectorRecord> _selectors;
+
+    /// <summary>Whether any selector targets the <c>::before</c> pseudo-element.</summary>
+    private bool _hasBeforePseudo;
+
+    /// <summary>Whether any selector targets the <c>::after</c> pseudo-element.</summary>
+    private bool _hasAfterPseudo;
         private readonly List<Rule> _rules;
         private readonly List<Condition> _conditions;
         private readonly List<CssImport> _imports = new();
@@ -206,6 +212,23 @@ namespace Donkeh.Data
             _selectorTokens = new Token[tokenCapacity];
             _conditionTokens = new Token[tokenCapacity];
         }
+
+        /// <summary>Gets whether the table contains rules for a pseudo-element.</summary>
+        /// <param name="kind">The generated pseudo-element kind.</param>
+        /// <returns>
+        /// <see langword="true"/> when at least one selector targets
+        /// <paramref name="kind"/>.
+        /// </returns>
+        /// <remarks>
+        /// Layout uses this to skip the selector-matching pipeline for
+        /// <c>::before</c>/<c>::after</c> on stylesheets that never declare them.
+        /// </remarks>
+        public bool HasPseudoElement(PseudoElementKind kind) => kind switch
+        {
+            PseudoElementKind.Before => _hasBeforePseudo,
+            PseudoElementKind.After => _hasAfterPseudo,
+            _ => false
+        };
 
         /// <summary>
         /// Cached result of <see cref="ComputeHeightMediaQueries"/>. The nullable
@@ -514,6 +537,15 @@ namespace Donkeh.Data
                 IsMatchable = matchable,
                 PseudoElement = pseudoElement
             });
+
+            if (pseudoElement == PseudoElementKind.Before)
+            {
+                _hasBeforePseudo = true;
+            }
+            else if (pseudoElement == PseudoElementKind.After)
+            {
+                _hasAfterPseudo = true;
+            }
 
             // Both lists are parallel to _selectors.
             _ruleHead.Add(-1);

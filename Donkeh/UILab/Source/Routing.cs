@@ -86,10 +86,16 @@ namespace Donkeh.UILab
         /// <param name="routePath">The declared route path (may end in <c>/*</c> or be <c>*</c>).</param>
         /// <param name="currentPath">The current page path.</param>
         /// <returns><see langword="true"/> when the route is active.</returns>
-        public static bool Matches(string? routePath, string? currentPath)
+        public static bool Matches(string? routePath, string? currentPath) =>
+            MatchesNormalized(routePath, Normalize(currentPath));
+
+        /// <summary>Tests a route against an already normalised current path.</summary>
+        /// <param name="routePath">The declared route path.</param>
+        /// <param name="currentPath">A path returned by <see cref="Normalize"/>.</param>
+        /// <returns><see langword="true"/> when the route is active.</returns>
+        internal static bool MatchesNormalized(string? routePath, string currentPath)
         {
             var route = Normalize(routePath);
-            var current = Normalize(currentPath);
 
             if (route == "*")
             {
@@ -99,11 +105,11 @@ namespace Donkeh.UILab
             if (route.EndsWith("/*", StringComparison.Ordinal))
             {
                 var prefix = route[..^2];
-                return current.Equals(prefix, StringComparison.Ordinal)
-                    || current.StartsWith(prefix + "/", StringComparison.Ordinal);
+                return currentPath.Equals(prefix, StringComparison.Ordinal)
+                    || currentPath.StartsWith(prefix + "/", StringComparison.Ordinal);
             }
 
-            return route.Equals(current, StringComparison.Ordinal);
+            return route.Equals(currentPath, StringComparison.Ordinal);
         }
 
         /// <summary>
@@ -113,18 +119,24 @@ namespace Donkeh.UILab
         /// <param name="linkPath">The link target.</param>
         /// <param name="currentPath">The current page path.</param>
         /// <returns><see langword="true"/> when the link represents the current section.</returns>
-        public static bool IsActive(string? linkPath, string? currentPath)
+        public static bool IsActive(string? linkPath, string? currentPath) =>
+            IsActiveNormalized(linkPath, Normalize(currentPath));
+
+        /// <summary>Tests a link against an already normalised current path.</summary>
+        /// <param name="linkPath">The link target.</param>
+        /// <param name="currentPath">A path returned by <see cref="Normalize"/>.</param>
+        /// <returns><see langword="true"/> when the link represents the current section.</returns>
+        internal static bool IsActiveNormalized(string? linkPath, string currentPath)
         {
             var link = Normalize(linkPath);
-            var current = Normalize(currentPath);
 
             if (link == "/")
             {
-                return current == "/";
+                return currentPath == "/";
             }
 
-            return link == current
-                || current.StartsWith(link + "/", StringComparison.Ordinal);
+            return link == currentPath
+                || currentPath.StartsWith(link + "/", StringComparison.Ordinal);
         }
     }
 
@@ -230,7 +242,7 @@ namespace Donkeh.UILab
                         Props: RouteProps props
                     }
                     && type == typeof(Route)
-                    && Router.Matches(props.Path, current))
+                    && Router.MatchesNormalized(props.Path, current))
                 {
                     return child;
                 }
@@ -267,7 +279,7 @@ namespace Donkeh.UILab
         public override Node Render()
         {
             var current = UseContext(Router.Path);
-            return Router.Matches(Props.Path, current)
+            return Router.MatchesNormalized(Props.Path, current)
                 ? F(Props.Children ?? [])
                 : F();
         }
@@ -298,7 +310,7 @@ namespace Donkeh.UILab
         {
             var current = UseContext(Router.Path);
             var setPage = UseContext(Router.SetPage);
-            var active = Router.IsActive(Props.To, current);
+            var active = Router.IsActiveNormalized(Props.To, current);
 
             var className = string.IsNullOrWhiteSpace(Props.ClassName)
                 ? string.Empty

@@ -45,11 +45,11 @@ texture/clip/transform batching.
 
 | Workload | Instances | Before CPU | Before GPU | Before draws | After CPU | After GPU | After draws |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `rects` | 10,000 | 0.45 ms | 0.58 ms | 1 | 0.41 ms | 0.80 ms | 1 |
-| `clipped` | 10,000 | 19.58 ms | 20.85 ms | ~10,000 | 1.30 ms | 1.72 ms | 1 |
-| `transformed` | 10,000 | 16.83 ms | 19.96 ms | ~10,000 | 0.64 ms | 0.96 ms | 1 |
-| `text` | 64,000 | 20.61 ms | 24.15 ms | 1 | 17.80 ms | 19.32 ms | 1 |
-| `mixed` | 56,000 | 18.69 ms | 35.42 ms | ~12,000 | 12.86 ms | 14.27 ms | 1 |
+| `rects` | 10,000 | 0.45 ms | 0.58 ms | 1 | 0.41 ms | 0.77 ms | 1 |
+| `clipped` | 10,000 | 19.58 ms | 20.85 ms | ~10,000 | 1.29 ms | 0.74 ms | 1 |
+| `transformed` | 10,000 | 16.83 ms | 19.96 ms | ~10,000 | 0.39 ms | 0.79 ms | 1 |
+| `text` | 64,000 | 20.61 ms | 24.15 ms | 1 | 1.34 ms | 2.74 ms | 1 |
+| `mixed` | 56,000 | 18.69 ms | 35.42 ms | ~12,000 | 1.28 ms | 2.44 ms | 1 |
 
 GPU numbers vary by a few tenths of a millisecond between runs and include the
 frame clear; the unclipped rectangle workload is already draw-call-light, so its
@@ -60,6 +60,10 @@ Submission stays small as the scene grows: the clipped workload submits in about
 0.01 ms at 1,000 items, 0.04 ms at 10,000 and 0.20 ms at 40,000, while the
 remaining CPU time is linear instance construction. Use `--count` to reproduce
 those points.
+
+Text improved most after adding the shaped-run cache in `GLRenderer` and the
+per-face scale cache in `FontManager`: the same glyph run is no longer looked up,
+kerned and measured on every frame.
 
 The important change is scaling: clip and transform changes no longer create a
 draw call each, so the clipped and transformed workloads drop from thousands of

@@ -867,8 +867,21 @@ namespace Donkeh.Data.Dom
         /// </remarks>
         private void SetClassFromAttribute(ReadOnlySpan<char> value)
         {
-            _className = [];
+            if (value.IsEmpty)
+            {
+                if (_className.Length != 0)
+                {
+                    _className = [];
+                    _revision++;
+                }
 
+                return;
+            }
+
+            // A class list separated by whitespace has at most (length + 1) / 2
+            // names, so one exact-size allocation replaces a resize per token.
+            var buffer = new int[(value.Length + 1) / 2];
+            var count = 0;
             var start = 0;
 
             for (var i = 0; i <= value.Length; i++)
@@ -880,11 +893,37 @@ namespace Donkeh.Data.Dom
 
                 if (i > start)
                 {
-                    AddClass(InternTable.Intern(value[start..i]));
+                    var id = InternTable.Intern(value[start..i]);
+
+                    if (Array.IndexOf(buffer, id, 0, count) < 0)
+                    {
+                        buffer[count++] = id;
+                    }
                 }
 
                 start = i + 1;
             }
+
+            if (count == 0)
+            {
+                if (_className.Length != 0)
+                {
+                    _className = [];
+                    _revision++;
+                }
+
+                return;
+            }
+
+            Array.Sort(buffer, 0, count);
+
+            if (count != buffer.Length)
+            {
+                Array.Resize(ref buffer, count);
+            }
+
+            _className = buffer;
+            _revision++;
         }
 
         private static bool IsWhitespace(char c)

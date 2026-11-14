@@ -31,6 +31,12 @@ internal sealed class GradientCache : IDisposable
     /// are never removed individually; only <see cref="Dispose"/> clears them.
     /// </summary>
     private readonly Dictionary<long, uint> _textures = [];
+
+    /// <summary>Hashes already computed for an interned background spec.</summary>
+    private readonly Dictionary<BackgroundImageSpec, long> _keys = [];
+
+    /// <summary>Maximum number of gradient textures retained before the cache resets.</summary>
+    private const int MaxEntries = 64;
     /// <summary>The OpenGL entry point used for texture creation and deletion.</summary>
     private readonly GL _gl;
 
@@ -90,12 +96,25 @@ internal sealed class GradientCache : IDisposable
             return 0;
         }
 
-        var key = KeyOf(spec);
+        var key = _keys.TryGetValue(spec, out var cachedKey) ? cachedKey : KeyOf(spec);
 
         if (_textures.TryGetValue(key, out var existing))
         {
             return existing;
         }
+
+        if (_textures.Count >= MaxEntries)
+        {
+            foreach (var old in _textures.Values)
+            {
+                _gl.DeleteTexture(old);
+            }
+
+            _textures.Clear();
+            _keys.Clear();
+        }
+
+        _keys[spec] = key;
 
         var pixels = new byte[Size * Size * 4];
         Rasterise(spec, pixels);
@@ -347,5 +366,6 @@ internal sealed class GradientCache : IDisposable
         }
 
         _textures.Clear();
+        _keys.Clear();
     }
 }

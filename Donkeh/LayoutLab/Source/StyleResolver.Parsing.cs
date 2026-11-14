@@ -363,6 +363,38 @@ public sealed partial class StyleResolver
     }
 
     /// <summary>
+    /// Looks up a parsed keyword enum for a value id and property, when the value
+    /// has no variable references.
+    /// </summary>
+    /// <param name="valueId">The interned value id used as the cache key.</param>
+    /// <param name="property">The property whose keyword type is cached.</param>
+    /// <param name="cached">Receives the cached enum value on success.</param>
+    /// <returns><see langword="true"/> when a cached value was found.</returns>
+    private bool TryGetKeywordCache(int valueId, CssProperty property, out int cached)
+    {
+        if (!HasVariables(valueId)
+            && _cache.Keywords.TryGetValue((valueId, property), out cached))
+        {
+            return true;
+        }
+
+        cached = 0;
+        return false;
+    }
+
+    /// <summary>Stores a parsed keyword enum for an immutable value id.</summary>
+    /// <param name="valueId">The interned value id.</param>
+    /// <param name="property">The property whose keyword type was parsed.</param>
+    /// <param name="value">The parsed enum value.</param>
+    private void CacheKeyword(int valueId, CssProperty property, int value)
+    {
+        if (!HasVariables(valueId))
+        {
+            _cache.Keywords[(valueId, property)] = value;
+        }
+    }
+
+    /// <summary>
     /// Parses one CSS length, reusing the cached result for a variable-free value.
     /// </summary>
     /// <param name="valueId">The interned value id, used as the cache key.</param>
