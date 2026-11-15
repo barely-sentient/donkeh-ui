@@ -1,3 +1,4 @@
+using Donkeh.Hosting;
 using Donkeh.UILab;
 using static Donkeh.UILab._;
 
@@ -15,6 +16,7 @@ public sealed class BrowserSample : Component
         var (lastEvent, setLastEvent) = State("none");
         var (scrollY, setScrollY) = State(0f);
         var (pointer, setPointer) = State("none");
+        var (permission, setPermission) = State("not requested");
 
         var card = new Dictionary<string, string>
         {
@@ -128,6 +130,26 @@ public sealed class BrowserSample : Component
                 {
                     Attributes = new Dictionary<string, string> { ["style"] = "margin:10px 0 0;color:#57606a" }
                 }, Text($"Last event: {lastEvent}"))),
+
+            H("div", new Props { Attributes = card },
+                H("h2", new Props
+                {
+                    Attributes = new Dictionary<string, string> { ["style"] = "margin:0 0 12px;font-size:18px" }
+                }, Text("Host capabilities")),
+                H("p", new Props
+                {
+                    Attributes = new Dictionary<string, string> { ["style"] = "margin:0 0 10px;color:#57606a" }
+                }, Text($"Platform: {Host.PlatformName} · Web={Host.IsWeb} · Desktop={Host.IsDesktop} · Mobile={Host.IsMobile}")),
+                H("button", new Props
+                {
+                    Attributes = button,
+                    OnClick = async () =>
+                    {
+                        setPermission(await Host.Permissions.Notifications()
+                            ? "notifications granted"
+                            : "notifications denied");
+                    }
+                }, Text($"Permissions: {permission}"))),
 
             H("div", new Props { Attributes = card },
                 H("h2", new Props

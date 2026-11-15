@@ -1137,6 +1137,76 @@ Browser differences are intentional:
 - canvas is a browser-specific surface rather than the OpenGL instruction stream;
 - the built-in inspector is desktop-only; use the browser's own devtools.
 
+### Host capabilities and permissions
+
+`Donkeh.Hosting.Host` exposes platform flags and awaitable permission requests:
+
+```csharp
+using Donkeh.Hosting;
+
+if (Host.IsAndroid)
+{
+    // Android-only setup.
+}
+
+if (Host.IsDesktop || Host.IsWeb)
+{
+    // Shared responsive path.
+}
+
+if (await Host.Permissions.Camera())
+{
+    // Camera access granted.
+}
+```
+
+Platform flags:
+
+```text
+Host.IsAndroid   Host.IsIOS      Host.IsWindows   Host.IsMac
+Host.IsLinux     Host.IsWeb      Host.IsDesktop   Host.IsMobile
+Host.IsBrowser   Host.PlatformName
+```
+
+Permission methods:
+
+```text
+Camera        Microphone    Location      Notifications
+Photos        Storage       Contacts      Calendar
+Bluetooth     Motion        Clipboard
+```
+
+Each method returns `Task<bool>` and accepts an optional `CancellationToken`.
+Granted results are cached for the session; denied results can be retried. Calls
+for the same permission share one in-flight request.
+
+Providers are installed by the host:
+
+- **Desktop** — the default grants access and lets the device API itself fail if
+  the OS has blocked it.
+- **Android** — requests the corresponding runtime permission on the activity and
+  completes from `OnRequestPermissionsResult`.
+- **Browser** — uses `getUserMedia`, geolocation, Notification, Storage and
+  DeviceMotion APIs. Camera, microphone and notification requests should be made
+  from a user gesture.
+
+Unsupported capabilities return `false` rather than throwing. On Android the app
+can let the framework generate the manifest entries:
+
+```xml
+<PropertyGroup>
+  <DonkehAndroidPermissions>Camera;Microphone;Location;Notifications</DonkehAndroidPermissions>
+</PropertyGroup>
+```
+
+Supported tokens are `Camera`, `Microphone`, `Location`, `Notifications`,
+`Photos`, `Storage`, `Contacts`, `Calendar`, `Bluetooth` and `Motion`. The
+framework emits the matching `uses-permission` entries into the merged Android
+manifest. An app can still use a hand-written manifest if it prefers.
+
+If an app wants a custom provider, it can call `Host.UsePermissions(...)` during
+startup with an `IPermissionService` implementation.
+
 ---
 
 ## End-to-end example

@@ -90,6 +90,46 @@
         <_WebAssemblyTargetsFile>$(PkgMicrosoft_NET_Sdk_WebAssembly_Pack)\build\Microsoft.NET.Sdk.WebAssembly.Browser.targets</_WebAssemblyTargetsFile>
     </PropertyGroup>
 
+    <!--
+        Generates an Android manifest overlay from the opt-in permission list, so
+        an app does not have to hand-write uses-permission entries that the
+        Host.Permissions API already knows about.
+    -->
+    <Target Name="DonkehGenerateAndroidPermissions"
+            BeforeTargets="_ManifestMerger;ProcessAndroidManifest"
+            Condition="'$(TargetFramework)' == 'net10.0-android' and '$(DonkehAndroidPermissions)' != ''">
+        <PropertyGroup>
+            <_DonkehAndroidPermissionOverlay>$(IntermediateOutputPath)donkeh.android.permissions.xml</_DonkehAndroidPermissionOverlay>
+            <_DonkehPermissions>$(DonkehAndroidPermissions)</_DonkehPermissions>
+        </PropertyGroup>
+
+        <ItemGroup>
+            <_DonkehAndroidPermissionLine Include="&lt;?xml version=&quot;1.0&quot; encoding=&quot;utf-8&quot;?&gt;" />
+            <_DonkehAndroidPermissionLine Include="&lt;manifest xmlns:android=&quot;http://schemas.android.com/apk/res/android&quot;&gt;" />
+            <_DonkehAndroidPermissionLine Include="  &lt;uses-permission android:name=&quot;android.permission.CAMERA&quot; /&gt;" Condition="$([System.String]::Copy('$(_DonkehPermissions)').Contains('Camera'))" />
+            <_DonkehAndroidPermissionLine Include="  &lt;uses-permission android:name=&quot;android.permission.RECORD_AUDIO&quot; /&gt;" Condition="$([System.String]::Copy('$(_DonkehPermissions)').Contains('Microphone'))" />
+            <_DonkehAndroidPermissionLine Include="  &lt;uses-permission android:name=&quot;android.permission.ACCESS_FINE_LOCATION&quot; /&gt;" Condition="$([System.String]::Copy('$(_DonkehPermissions)').Contains('Location'))" />
+            <_DonkehAndroidPermissionLine Include="  &lt;uses-permission android:name=&quot;android.permission.ACCESS_COARSE_LOCATION&quot; /&gt;" Condition="$([System.String]::Copy('$(_DonkehPermissions)').Contains('Location'))" />
+            <_DonkehAndroidPermissionLine Include="  &lt;uses-permission android:name=&quot;android.permission.POST_NOTIFICATIONS&quot; /&gt;" Condition="$([System.String]::Copy('$(_DonkehPermissions)').Contains('Notifications'))" />
+            <_DonkehAndroidPermissionLine Include="  &lt;uses-permission android:name=&quot;android.permission.READ_MEDIA_IMAGES&quot; /&gt;" Condition="$([System.String]::Copy('$(_DonkehPermissions)').Contains('Photos')) Or $([System.String]::Copy('$(_DonkehPermissions)').Contains('Storage'))" />
+            <_DonkehAndroidPermissionLine Include="  &lt;uses-permission android:name=&quot;android.permission.READ_EXTERNAL_STORAGE&quot; /&gt;" Condition="$([System.String]::Copy('$(_DonkehPermissions)').Contains('Photos')) Or $([System.String]::Copy('$(_DonkehPermissions)').Contains('Storage'))" />
+            <_DonkehAndroidPermissionLine Include="  &lt;uses-permission android:name=&quot;android.permission.READ_CONTACTS&quot; /&gt;" Condition="$([System.String]::Copy('$(_DonkehPermissions)').Contains('Contacts'))" />
+            <_DonkehAndroidPermissionLine Include="  &lt;uses-permission android:name=&quot;android.permission.READ_CALENDAR&quot; /&gt;" Condition="$([System.String]::Copy('$(_DonkehPermissions)').Contains('Calendar'))" />
+            <_DonkehAndroidPermissionLine Include="  &lt;uses-permission android:name=&quot;android.permission.BLUETOOTH_CONNECT&quot; /&gt;" Condition="$([System.String]::Copy('$(_DonkehPermissions)').Contains('Bluetooth'))" />
+            <_DonkehAndroidPermissionLine Include="  &lt;uses-permission android:name=&quot;android.permission.ACTIVITY_RECOGNITION&quot; /&gt;" Condition="$([System.String]::Copy('$(_DonkehPermissions)').Contains('Motion'))" />
+            <_DonkehAndroidPermissionLine Include="&lt;/manifest&gt;" />
+        </ItemGroup>
+
+        <WriteLinesToFile File="$(_DonkehAndroidPermissionOverlay)"
+                          Lines="@(_DonkehAndroidPermissionLine)"
+                          Overwrite="true"
+                          Encoding="UTF-8" />
+
+        <ItemGroup>
+            <AndroidManifestOverlay Include="$(_DonkehAndroidPermissionOverlay)" />
+        </ItemGroup>
+    </Target>
+
     <Import Sdk="Microsoft.NET.Sdk.BlazorWebAssembly"
             Project="Sdk.targets"
             Condition="'$(TargetFramework)' == 'net10.0-browser'" />

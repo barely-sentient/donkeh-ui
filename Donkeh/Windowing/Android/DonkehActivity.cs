@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using Android.App;
 using Android.Content.PM;
+using Donkeh.Hosting;
 using Silk.NET.OpenGL;
 using Silk.NET.Windowing;
 using Silk.NET.Windowing.Sdl.Android;
@@ -43,6 +44,9 @@ namespace Donkeh.Windowing.Android;
         | ConfigChanges.SmallestScreenSize)]
 public class DonkehActivity : SilkActivity
 {
+    /// <summary>Android permission provider installed for this activity.</summary>
+    private AndroidPermissionService? _permissions;
+
     /// <inheritdoc/>
     public override void LoadLibraries() => base.LoadLibraries();
 
@@ -51,7 +55,11 @@ public class DonkehActivity : SilkActivity
         base.SetOrientationBis(w, h, resizable, hint);
 
     /// <inheritdoc/>
-    protected override void OnDestroy() => base.OnDestroy();
+    protected override void OnDestroy()
+    {
+        _permissions?.CancelAll();
+        base.OnDestroy();
+    }
 
     /// <summary>Returns the JNI delegate that dispatches <c>loadLibraries</c>.</summary>
     /// <returns>The binding base's cached delegate.</returns>
@@ -103,6 +111,10 @@ public class DonkehActivity : SilkActivity
         var app = DonkehAppLocator.Find();
         var density = Resources?.DisplayMetrics?.Density ?? 1f;
 
+        var permissions = new AndroidPermissionService(this);
+        _permissions = permissions;
+        Host.UsePermissions(permissions);
+
         var options = ViewOptions.Default with
         {
             API = new GraphicsAPI(
@@ -153,5 +165,15 @@ public class DonkehActivity : SilkActivity
         };
 
         window.Run(view, app.BuildRoot(), app.Styles());
+    }
+
+    /// <inheritdoc/>
+    public override void OnRequestPermissionsResult(
+        int requestCode,
+        string[] permissions,
+        Permission[] grantResults)
+    {
+        base.OnRequestPermissionsResult(requestCode, permissions, grantResults);
+        _permissions?.OnRequestPermissionsResult(requestCode, permissions, grantResults);
     }
 }

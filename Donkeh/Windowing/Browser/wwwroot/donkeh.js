@@ -531,3 +531,93 @@ function isTextControl(element) {
     const type = (element.getAttribute("type") || "text").toLowerCase();
     return ["text", "search", "email", "url", "tel", "password", "number"].includes(type);
 }
+
+export async function requestPermission(name) {
+    try {
+        switch (name) {
+            case "camera":
+                return await requestMedia({ video: true });
+
+            case "microphone":
+                return await requestMedia({ audio: true });
+
+            case "location":
+                return await requestLocation();
+
+            case "notifications":
+                return await requestNotifications();
+
+            case "storage":
+                if (navigator.storage && navigator.storage.persist) {
+                    return await navigator.storage.persist();
+                }
+                return false;
+
+            case "motion":
+                return await requestMotion();
+
+            case "clipboard":
+                if (navigator.clipboard && navigator.clipboard.readText) {
+                    await navigator.clipboard.readText();
+                    return true;
+                }
+                return false;
+
+            default:
+                return false;
+        }
+    } catch {
+        return false;
+    }
+}
+
+async function requestMedia(constraints) {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        return false;
+    }
+
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    stream.getTracks().forEach(track => track.stop());
+    return true;
+}
+
+async function requestLocation() {
+    if (!navigator.geolocation) {
+        return false;
+    }
+
+    return await new Promise(resolve => {
+        navigator.geolocation.getCurrentPosition(
+            () => resolve(true),
+            () => resolve(false),
+            { timeout: 15000, maximumAge: 60000 });
+    });
+}
+
+async function requestNotifications() {
+    if (typeof Notification === "undefined") {
+        return false;
+    }
+
+    if (Notification.permission === "granted") {
+        return true;
+    }
+
+    if (Notification.permission === "denied") {
+        return false;
+    }
+
+    return (await Notification.requestPermission()) === "granted";
+}
+
+async function requestMotion() {
+    if (typeof DeviceMotionEvent === "undefined") {
+        return false;
+    }
+
+    if (typeof DeviceMotionEvent.requestPermission === "function") {
+        return (await DeviceMotionEvent.requestPermission()) === "granted";
+    }
+
+    return true;
+}

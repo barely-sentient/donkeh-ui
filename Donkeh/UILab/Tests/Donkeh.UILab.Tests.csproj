@@ -26,6 +26,7 @@
     </ItemGroup>
 
     <ItemGroup>
+        <ProjectReference Include="..\..\Hosting\Source\Donkeh.Hosting.csproj" />
         <ProjectReference Include="..\Source\Donkeh.UILab.csproj" />
     </ItemGroup>
 

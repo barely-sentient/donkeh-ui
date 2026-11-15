@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using Donkeh.Data.Dom;
+using Donkeh.Hosting;
 using Donkeh.UILab;
 using Microsoft.JSInterop;
 
@@ -79,6 +80,7 @@ public sealed class DomHost
             BuildModuleDataUrl());
 
         await _module.InvokeVoidAsync("init", containerId, _self);
+        Host.UsePermissions(new BrowserPermissionService(_module));
 
         var styles = _app.Styles();
         await _module.InvokeVoidAsync("setStyle", styles ?? string.Empty);

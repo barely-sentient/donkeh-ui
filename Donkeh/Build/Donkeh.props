@@ -28,6 +28,10 @@
              keep the Android SDK's own ABI list. -->
         <RuntimeIdentifiers Condition="'$(DonkehWeb)' == 'true' and '$(TargetFramework)' == ''">browser-wasm;android-arm64;android-x64</RuntimeIdentifiers>
         <RuntimeIdentifiers Condition="'$(DonkehWeb)' == 'true' and '$(TargetFramework)' == 'net10.0-browser'">browser-wasm</RuntimeIdentifiers>
+
+        <!-- Semicolon-separated Android permission tokens, for example
+             Camera;Microphone;Location;Notifications. -->
+        <DonkehAndroidPermissions Condition="'$(DonkehAndroidPermissions)' == ''"></DonkehAndroidPermissions>
     </PropertyGroup>
 
     <!--
