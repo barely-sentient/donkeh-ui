@@ -3,16 +3,15 @@ name: Build CLI
 on:
   push:
     branches:
-      - main
-      - master
-    tags:
-      - 'v*'
-      - '[0-9]*'
+      - '**'
+  release:
+    types:
+      - published
   pull_request:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: cli-${{ github.ref }}
@@ -22,11 +21,27 @@ env:
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
-  CLI_PROJECT: Donkeh/CliTool/Source/Donkeh.CliTool.csproj
 
 jobs:
+  test:
+    name: CLI tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Test
+        run: dotnet test Donkeh/CliTool/Tests/Donkeh.CliTool.Tests.csproj -c Release
+
   build:
     name: CLI ${{ matrix.rid }}
+    needs: test
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -66,16 +81,30 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="0.1.0"
+          fi
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "Building CLI version ${version}"
+
       - name: Restore
-        run: dotnet restore "$CLI_PROJECT" -r ${{ matrix.rid }}
+        run: dotnet restore Donkeh/CliTool/Source/Donkeh.CliTool.csproj -r ${{ matrix.rid }}
 
       - name: Publish
         run: >
-          dotnet publish "$CLI_PROJECT"
+          dotnet publish Donkeh/CliTool/Source/Donkeh.CliTool.csproj
           -c Release
           -r ${{ matrix.rid }}
           --self-contained true
           --no-restore
+          -p:Version=${{ steps.version.outputs.version }}
           -p:PublishSingleFile=true
           -p:EnableCompressionInSingleFile=true
           -p:DebugType=None
@@ -101,21 +130,18 @@ jobs:
             chmod +x "$target"
           fi
 
-          sha256sum "$target" > "$target.sha256"
           ls -lh artifacts
 
       - name: Upload CLI binary
         uses: actions/upload-artifact@v4
         with:
           name: donkeh-${{ matrix.rid }}
-          path: |
-            artifacts/${{ matrix.asset }}
-            artifacts/${{ matrix.asset }}.sha256
+          path: artifacts/${{ matrix.asset }}
           if-no-files-found: error
 
   release:
     name: Attach CLI binaries to release
-    if: startsWith(github.ref, 'refs/tags/')
+    if: github.event_name == 'release'
     needs: build
     runs-on: ubuntu-latest
     permissions:

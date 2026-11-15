@@ -976,6 +976,10 @@ dotnet pack Donkeh\CliTool\Source\Donkeh.CliTool.csproj -c Release -o .\packages
 dotnet tool install --global Donkeh.CliTool --add-source .\packages
 ```
 
+GitHub Actions also publishes standalone single-file `donkeh` binaries for
+Windows, Linux x64/arm64 and macOS x64/arm64. They are attached to the GitHub
+release when a release is published.
+
 Create a minimal blank-window project in the current directory:
 
 ```powershell
