@@ -38,7 +38,7 @@ public sealed class DomHost
 
     private IJSObjectReference? _module;
     private DotNetObjectReference<DomHost>? _self;
-    private IDonkehApp? _app;
+    private AppRootDefinition? _app;
     private int[] _rootChildren = [];
     private int _nextId = 1;
     private bool _started;
@@ -52,8 +52,8 @@ public sealed class DomHost
         _js = js;
     }
 
-    /// <summary>Gets the mounted application, or null before <see cref="StartAsync"/>.</summary>
-    public IDonkehApp? App => _app;
+    /// <summary>Gets the mounted application root, or null before <see cref="StartAsync"/>.</summary>
+    public AppRootDefinition? App => _app;
 
     /// <summary>Gets the renderer that owns the application tree.</summary>
     public Renderer Renderer => _renderer;
@@ -70,7 +70,7 @@ public sealed class DomHost
             return;
         }
 
-        _app = DonkehAppLocator.Find();
+        _app = AppRootLocator.Find();
         _self = DotNetObjectReference.Create(this);
 
         // The bridge is an embedded resource, so consumers never have to know
@@ -82,7 +82,7 @@ public sealed class DomHost
         await _module.InvokeVoidAsync("init", containerId, _self);
         Host.UsePermissions(new BrowserPermissionService(_module));
 
-        var styles = _app.Styles();
+        var styles = _app.Styles;
         await _module.InvokeVoidAsync("setStyle", styles ?? string.Empty);
 
         var title = _app.Settings.Title;
@@ -92,7 +92,7 @@ public sealed class DomHost
         }
 
         _renderer.AfterUpdate += OnAfterUpdate;
-        _renderer.Mount(_app.BuildRoot());
+        _renderer.Mount(_app.CreateRoot());
         _started = true;
 
         await SyncAsync();

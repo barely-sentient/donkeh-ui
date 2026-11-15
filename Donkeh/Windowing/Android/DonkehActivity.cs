@@ -108,7 +108,7 @@ public class DonkehActivity : SilkActivity
     /// <inheritdoc/>
     protected override void OnRun()
     {
-        var app = DonkehAppLocator.Find();
+        var app = AppRootLocator.Find();
         var density = Resources?.DisplayMetrics?.Density ?? 1f;
 
         var permissions = new AndroidPermissionService(this);
@@ -164,7 +164,7 @@ public class DonkehActivity : SilkActivity
                 $"framebuffer={size?.FramebufferSize} gl={w.Gl?.GetStringS(StringName.Version)}");
         };
 
-        window.Run(view, app.BuildRoot(), app.Styles());
+        window.Run(view, app.CreateRoot(), app.Styles);
     }
 
     /// <inheritdoc/>

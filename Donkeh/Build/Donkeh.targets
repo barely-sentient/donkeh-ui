@@ -130,6 +130,50 @@
         </ItemGroup>
     </Target>
 
+    <!--
+        Framework-owned entry point. The app only declares [AppRoot]; desktop and
+        browser builds compile this generated Main and set it as the startup
+        object. Android uses DonkehActivity instead.
+    -->
+    <Target Name="DonkehGenerateEntryPoint"
+            BeforeTargets="CoreCompile"
+            Condition="('$(TargetFramework)' == 'net10.0' or '$(TargetFramework)' == 'net10.0-browser') and '$(OutputType)' == 'Exe' and '$(DonkehGenerateEntryPoint)' != 'false'">
+        <PropertyGroup>
+            <_DonkehGeneratedEntryPoint>$(IntermediateOutputPath)Donkeh.EntryPoint.g.cs</_DonkehGeneratedEntryPoint>
+        </PropertyGroup>
+
+        <ItemGroup>
+            <_DonkehEntryPointLine Include="// &lt;auto-generated /&gt;" />
+            <_DonkehEntryPointLine Include="namespace Donkeh.Generated" />
+            <_DonkehEntryPointLine Include="{" />
+            <_DonkehEntryPointLine Include="    internal static class DonkehEntryPoint" />
+            <_DonkehEntryPointLine Include="    {" />
+            <_DonkehEntryPointLine Include="#if BROWSER" />
+            <_DonkehEntryPointLine Include="        public static global::System.Threading.Tasks.Task Main(string[] args)" />
+            <_DonkehEntryPointLine Include="            =&gt; global::Donkeh.Windowing.Browser.DonkehBrowser.RunAsync(args)%3B" />
+            <_DonkehEntryPointLine Include="#else" />
+            <_DonkehEntryPointLine Include="        public static void Main(string[] args)" />
+            <_DonkehEntryPointLine Include="            =&gt; global::Donkeh.Windowing.AppRootHost.RunDesktop(args)%3B" />
+            <_DonkehEntryPointLine Include="#endif" />
+            <_DonkehEntryPointLine Include="    }" />
+            <_DonkehEntryPointLine Include="}" />
+        </ItemGroup>
+
+        <WriteLinesToFile File="$(_DonkehGeneratedEntryPoint)"
+                          Lines="@(_DonkehEntryPointLine)"
+                          Overwrite="true"
+                          Encoding="UTF-8" />
+
+        <ItemGroup>
+            <Compile Include="$(_DonkehGeneratedEntryPoint)" />
+            <FileWrites Include="$(_DonkehGeneratedEntryPoint)" />
+        </ItemGroup>
+
+        <PropertyGroup>
+            <StartupObject>Donkeh.Generated.DonkehEntryPoint</StartupObject>
+        </PropertyGroup>
+    </Target>
+
     <Import Sdk="Microsoft.NET.Sdk.BlazorWebAssembly"
             Project="Sdk.targets"
             Condition="'$(TargetFramework)' == 'net10.0-browser'" />

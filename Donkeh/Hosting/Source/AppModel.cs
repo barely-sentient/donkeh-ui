@@ -16,7 +16,8 @@ public interface IDonkehHostWindow
 }
 
 /// <summary>
-/// Describes an application that a Donkeh host can start on any platform.
+/// Legacy application contract. New applications should use
+/// <see cref="Donkeh.Hosting.AppRootAttribute"/> on their root component instead.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -26,8 +27,9 @@ public interface IDonkehHostWindow
 /// <see cref="DonkehAppAttribute"/> and calls it from its activity.
 /// </para>
 /// <para>
-/// One implementation is enough for both targets: the app never creates a window,
-/// view or graphics context itself.
+/// The attributed <see cref="Donkeh.Hosting.AppRootAttribute"/> path removes the
+/// need to implement this interface or write platform entry points. This contract
+/// remains available so existing applications keep compiling.
 /// </para>
 /// </remarks>
 public interface IDonkehApp

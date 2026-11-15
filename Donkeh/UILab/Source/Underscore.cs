@@ -235,6 +235,39 @@ namespace Donkeh.UILab
         }
 
         /// <summary>
+        /// Creates a component node from a runtime component type.
+        /// </summary>
+        /// <param name="componentType">
+        /// A concrete type derived from <see cref="Component"/> with a public
+        /// parameterless constructor.
+        /// </param>
+        /// <param name="props">The optional props object.</param>
+        /// <returns>A new <see cref="ComponentNode"/> with no key.</returns>
+        /// <exception cref="ArgumentNullException">
+        /// <paramref name="componentType"/> is <see langword="null"/>.
+        /// </exception>
+        /// <exception cref="ArgumentException">
+        /// <paramref name="componentType"/> is not a component type.
+        /// </exception>
+        /// <remarks>
+        /// This overload is intended for hosts that discover the root component
+        /// through an attribute and do not know its type at compile time.
+        /// </remarks>
+        public static ComponentNode C(Type componentType, object? props = null)
+        {
+            ArgumentNullException.ThrowIfNull(componentType);
+
+            if (!typeof(Component).IsAssignableFrom(componentType))
+            {
+                throw new ArgumentException(
+                    $"'{componentType.FullName}' must derive from {nameof(Component)}.",
+                    nameof(componentType));
+            }
+
+            return new ComponentNode(componentType, props, null);
+        }
+
+        /// <summary>
         /// Creates a typed component node.
         /// </summary>
         /// <typeparam name="TComponent">
