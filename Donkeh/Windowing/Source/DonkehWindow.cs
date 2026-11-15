@@ -6487,6 +6487,52 @@ public sealed partial class DonkehWindow : IDisposable
     }
 
     /// <summary>
+    /// Starts or ends the platform text-input session, which is what raises and
+    /// hides the on-screen keyboard on mobile hosts.
+    /// </summary>
+    /// <param name="active">
+    /// <see langword="true"/> while a text control owns focus, otherwise
+    /// <see langword="false"/>.
+    /// </param>
+    /// <remarks>
+    /// Every connected keyboard is updated because mobile platforms may report a
+    /// single virtual keyboard while desktop hosts expose several devices.
+    /// <see cref="IKeyboard.BeginInput"/> and <see cref="IKeyboard.EndInput"/> are
+    /// no-ops in Silk.NET's desktop backends and forward to
+    /// <c>SDL_StartTextInput</c>/<c>SDL_StopTextInput</c> in the SDL backend, which
+    /// drives the Android soft keyboard. A backend that cannot change its text
+    /// input state must not prevent focus from moving, so failures are logged and
+    /// ignored.
+    /// </remarks>
+    private void SetTextInputActive(bool active)
+    {
+        if (_input is null)
+        {
+            return;
+        }
+
+        foreach (var keyboard in _input.Keyboards)
+        {
+            try
+            {
+                if (active)
+                {
+                    keyboard.BeginInput();
+                }
+                else
+                {
+                    keyboard.EndInput();
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(
+                    $"[Donkeh] Text input {(active ? "begin" : "end")} failed: {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>
     /// Moves keyboard focus to an element, or clears focus when passed
     /// <see langword="null"/>.
     /// </summary>
@@ -6531,6 +6577,8 @@ public sealed partial class DonkehWindow : IDisposable
         var visible = focusVisible
             || element is not null && element.Tag is "input" or "textarea";
 
+        var wasTextControl = _focused is not null && IsTextControl(_focused);
+
         if (ReferenceEquals(_focused, element))
         {
             if (element is not null && element.IsFocusVisible != visible)
@@ -6539,6 +6587,14 @@ public sealed partial class DonkehWindow : IDisposable
                 _interactionVersion++;
                 _needsLayout = true;
                 _lastDevToolsVersion = -1;
+            }
+
+            // A tap on the control that already owns focus must still ask the
+            // platform for text input: a mobile user can dismiss the on-screen
+            // keyboard without moving focus and then tap the field again.
+            if (element is not null && IsTextControl(element))
+            {
+                SetTextInputActive(true);
             }
 
             return;
@@ -6564,6 +6620,17 @@ public sealed partial class DonkehWindow : IDisposable
         }
 
         _focused = element;
+
+        if (element is not null && IsTextControl(element))
+        {
+            // Opening the platform text-input session is what raises the
+            // on-screen keyboard on mobile hosts.
+            SetTextInputActive(true);
+        }
+        else if (wasTextControl)
+        {
+            SetTextInputActive(false);
+        }
 
         if (element is not null)
         {
@@ -7615,6 +7682,9 @@ public sealed partial class DonkehWindow : IDisposable
         // The GLFW window and OpenGL context are still alive here, which is the
         // only safe time to release input devices, textures and buffers. The
         // native window itself is disposed by Run() after the loop has finished.
+        // End the text-input session first so a mobile soft keyboard does not
+        // stay on screen after the host is gone.
+        SetTextInputActive(false);
         _input?.Dispose();
         _input = null;
         try { _devTools.Builds.Dispose(); }

@@ -995,6 +995,9 @@ The framework owns the mobile plumbing in `Donkeh.Windowing.Android`:
   implementation.
 - `DonkehAppLocator` finds the application through the assembly attribute, so the
   app never creates a window, view or graphics context.
+- Text controls open Silk.NET's text-input session when they gain focus and close
+  it on blur, so the Android soft keyboard appears while typing and is dismissed
+  when focus leaves the field.
 - `GLRenderer` detects the ES context, compiles GLSL ES 3.00 and uses the direct
   instanced path (the ARB indirect-draw path is desktop-only).
 - `FontManager` discovers Android system fonts in `/system/fonts`.
