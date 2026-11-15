@@ -36,6 +36,9 @@ public enum DeployTargetKind
     /// <summary>An Android build whose signed APK is copied to the output folder.</summary>
     AndroidApk,
 
+    /// <summary>A browser build whose static site is copied to the output folder.</summary>
+    WebAssembly,
+
     /// <summary>A custom build supplied by the application.</summary>
     Custom
 }
@@ -578,7 +581,7 @@ public sealed class DeployState : IDisposable
             return;
         }
 
-        var (desktop, android) = ReadFrameworks(ProjectFile);
+        var (desktop, android, web) = ReadFrameworks(ProjectFile);
 
         if (desktop is not null)
         {
@@ -602,16 +605,32 @@ public sealed class DeployState : IDisposable
                 DeployTargetKind.AndroidApk));
         }
 
+        if (web is not null)
+        {
+            _targets.Add(new DeployTarget(
+                "wasm",
+                "WebAssembly",
+                $"{web} · {Configuration} · WASM",
+                web,
+                Path.Combine(BuildsRoot, "wasm"),
+                DeployTargetKind.WebAssembly));
+        }
+
         Notify(force: true);
     }
 
-    /// <summary>Reads the desktop and Android target frameworks from a project.</summary>
+    /// <summary>Reads the desktop, Android and WebAssembly target frameworks from a project.</summary>
     /// <param name="projectFile">Project file to inspect.</param>
     /// <returns>
-    /// The first non-mobile framework and the first Android framework, either of
-    /// which may be <see langword="null"/>.
+    /// The first desktop, Android and browser framework, any of which may be
+    /// <see langword="null"/>.
     /// </returns>
-    private static (string? Desktop, string? Android) ReadFrameworks(string projectFile)
+    /// <remarks>
+    /// Explicit <c>TargetFramework(s)</c> elements are honoured, and the Donkeh
+    /// opt-in properties add the matching framework when it is not listed
+    /// directly.
+    /// </remarks>
+    private static (string? Desktop, string? Android, string? Web) ReadFrameworks(string projectFile)
     {
         try
         {
@@ -632,25 +651,55 @@ public sealed class DeployState : IDisposable
                 }
             }
 
+            AddOptInFramework(text, "DonkehDesktop", "net10.0", frameworks);
+            AddOptInFramework(text, "DonkehAndroid", "net10.0-android", frameworks);
+            AddOptInFramework(text, "DonkehWeb", "net10.0-browser", frameworks);
+
             if (frameworks.Count == 0)
             {
-                return ("net10.0", null);
+                return ("net10.0", null, null);
             }
 
             var android = frameworks.FirstOrDefault(f =>
                 f.Contains("-android", StringComparison.OrdinalIgnoreCase));
 
+            var web = frameworks.FirstOrDefault(f =>
+                f.Contains("-browser", StringComparison.OrdinalIgnoreCase));
+
             var desktop = frameworks.FirstOrDefault(f =>
                 !f.Contains("-android", StringComparison.OrdinalIgnoreCase)
                 && !f.Contains("-ios", StringComparison.OrdinalIgnoreCase)
                 && !f.Contains("-maccatalyst", StringComparison.OrdinalIgnoreCase)
-                && !f.Contains("-tvos", StringComparison.OrdinalIgnoreCase));
+                && !f.Contains("-tvos", StringComparison.OrdinalIgnoreCase)
+                && !f.Contains("-browser", StringComparison.OrdinalIgnoreCase));
 
-            return (desktop, android);
+            return (desktop, android, web);
         }
         catch (Exception)
         {
-            return (null, null);
+            return (null, null, null);
+        }
+    }
+
+    /// <summary>Adds a framework when a Donkeh opt-in property is enabled.</summary>
+    /// <param name="projectText">Project file text.</param>
+    /// <param name="propertyName">Opt-in property, such as <c>DonkehWeb</c>.</param>
+    /// <param name="framework">Framework the property enables.</param>
+    /// <param name="frameworks">Collected target frameworks.</param>
+    private static void AddOptInFramework(
+        string projectText,
+        string propertyName,
+        string framework,
+        List<string> frameworks)
+    {
+        var enabled = Regex.IsMatch(
+            projectText,
+            $@"<{propertyName}>\s*true\s*</{propertyName}>",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+        if (enabled && !frameworks.Contains(framework, StringComparer.OrdinalIgnoreCase))
+        {
+            frameworks.Add(framework);
         }
     }
 
@@ -673,6 +722,7 @@ public sealed class DeployState : IDisposable
             {
                 DeployTargetKind.Desktop => await RunDesktopAsync(target).ConfigureAwait(false),
                 DeployTargetKind.AndroidApk => await RunAndroidAsync(target).ConfigureAwait(false),
+                DeployTargetKind.WebAssembly => await RunWebAssemblyAsync(target).ConfigureAwait(false),
                 _ => await RunCustomAsync(target).ConfigureAwait(false)
             };
 
@@ -753,6 +803,37 @@ public sealed class DeployState : IDisposable
         var destination = Path.Combine(target.OutputDirectory, Path.GetFileName(apk));
         File.Copy(apk, destination, overwrite: true);
         return new DeployResult(true, destination);
+    }
+
+    /// <summary>Publishes the WebAssembly target into the project's deploy folder.</summary>
+    /// <param name="target">The target being built.</param>
+    /// <returns>The build result, whose artifact is the static site root.</returns>
+    private async Task<DeployResult> RunWebAssemblyAsync(DeployTarget target)
+    {
+        var exitCode = await RunDotnetAsync(
+            target,
+            [
+                "publish",
+                ProjectFile!,
+                "-c",
+                Configuration,
+                "-f",
+                target.Framework,
+                "-o",
+                target.OutputDirectory,
+                "--nologo"
+            ]).ConfigureAwait(false);
+
+        if (exitCode != 0)
+        {
+            return new DeployResult(false, null, $"dotnet publish exited with code {exitCode}.");
+        }
+
+        var index = Path.Combine(target.OutputDirectory, "index.html");
+
+        return File.Exists(index)
+            ? new DeployResult(true, target.OutputDirectory)
+            : new DeployResult(false, null, $"The WebAssembly host page was not produced: {index}");
     }
 
     /// <summary>Runs a custom target's delegate.</summary>

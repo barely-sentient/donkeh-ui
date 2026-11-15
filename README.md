@@ -1087,9 +1087,18 @@ Build and publish:
 dotnet publish Demo\Demo.csproj -c Release -f net10.0-browser
 ```
 
-Publish output is under `Demo\bin\Release\net10.0-browser\publish\wwwroot` and can
-be served by any static file server with the usual MIME types (`text/javascript`,
-`application/wasm`, `application/json`).
+Publish output is written to the app project's deploy folder:
+
+```text
+Demo\builds\wasm\
+  index.html
+  _framework\
+  dotnet.js
+```
+
+The folder is directly servable by any static file server with the usual MIME
+types (`text/javascript`, `application/wasm`, `application/json`). The inspector's
+Deploy tab also builds a **WebAssembly** target into the same folder.
 
 #### How the bridge works
 
