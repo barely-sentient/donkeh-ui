@@ -19,12 +19,19 @@ internal static class ProjectGenerator
         string targetDirectory,
         string? name,
         string? frameworkRoot,
-        bool force)
+        bool force,
+        ProjectKind kind = ProjectKind.Application)
     {
         targetDirectory = Path.GetFullPath(targetDirectory);
         Directory.CreateDirectory(targetDirectory);
 
         var projectName = ResolveProjectName(targetDirectory, name);
+
+        if (kind == ProjectKind.Framework)
+        {
+            return GenerateFramework(targetDirectory, projectName, frameworkRoot, force);
+        }
+
         var rootNamespace = Identifiers.Namespace(projectName);
         var projectFile = Path.Combine(targetDirectory, projectName + ".csproj");
         var programFile = Path.Combine(targetDirectory, "Program.cs");
@@ -74,6 +81,408 @@ internal static class ProjectGenerator
             """);
 
         return files;
+    }
+
+    /// <summary>
+    /// Writes a component library plus a console test container that renders every
+    /// component in that library.
+    /// </summary>
+    private static IReadOnlyList<string> GenerateFramework(
+        string targetDirectory,
+        string projectName,
+        string? frameworkRoot,
+        bool force)
+    {
+        var rootNamespace = Identifiers.Namespace(projectName);
+        var sourceDirectory = Path.Combine(targetDirectory, "src");
+        var testDirectory = Path.Combine(targetDirectory, "test-container");
+        var libraryProject = Path.Combine(sourceDirectory, projectName + ".csproj");
+        var componentDirectory = Path.Combine(sourceDirectory, "Components", "HelloCard");
+        var componentFile = Path.Combine(componentDirectory, "HelloCard.cs");
+        var componentCss = Path.Combine(componentDirectory, "HelloCard.css");
+        var testProject = Path.Combine(testDirectory, "TestContainer.csproj");
+        var testProgram = Path.Combine(testDirectory, "Program.cs");
+        var testTargets = Path.Combine(testDirectory, "Directory.Build.targets");
+        var testStyles = Path.Combine(testDirectory, "Styles", "gallery.css");
+        var gitignore = Path.Combine(targetDirectory, ".gitignore");
+        var solution = Path.Combine(targetDirectory, projectName + ".sln");
+        var readme = Path.Combine(targetDirectory, "README.md");
+        var useCheckout = !string.IsNullOrWhiteSpace(frameworkRoot);
+
+        var files = new List<string>
+        {
+            libraryProject,
+            componentFile,
+            componentCss,
+            testProject,
+            testProgram,
+            testStyles,
+            gitignore,
+            solution,
+            readme
+        };
+
+        if (useCheckout)
+        {
+            files.Add(testTargets);
+        }
+
+        if (!force)
+        {
+            var existing = files.Where(File.Exists).ToArray();
+
+            if (existing.Length > 0)
+            {
+                throw new CliException(
+                    "The target already contains generated files: " +
+                    string.Join(", ", existing.Select(Path.GetFileName)) +
+                    ". Pass --force to overwrite them.");
+            }
+        }
+
+        var title = JsonSerializer.Serialize(projectName + " gallery");
+        var packageId = rootNamespace;
+
+        if (useCheckout)
+        {
+            var uiLabReference = Path.GetRelativePath(
+                sourceDirectory,
+                Path.Combine(frameworkRoot!, "UILab", "Source", "Donkeh.UILab.csproj"))
+                .Replace('\\', '/');
+            var propsPath = Path.GetRelativePath(
+                testDirectory,
+                Path.Combine(frameworkRoot!, "Build", "Donkeh.props"))
+                .Replace('\\', '/');
+            var targetsPath = Path.GetRelativePath(
+                testDirectory,
+                Path.Combine(frameworkRoot!, "Build", "Donkeh.targets"))
+                .Replace('\\', '/');
+
+            TextFiles.Write(libraryProject, $$"""
+                <Project Sdk="Microsoft.NET.Sdk">
+
+                  <PropertyGroup>
+                    <TargetFramework>net10.0</TargetFramework>
+                    <RootNamespace>{{rootNamespace}}</RootNamespace>
+                    <ImplicitUsings>enable</ImplicitUsings>
+                    <Nullable>enable</Nullable>
+                    <IsPackable>true</IsPackable>
+                    <PackageId>{{packageId}}</PackageId>
+                    <Description>{{packageId}} components for Donkeh.</Description>
+                  </PropertyGroup>
+
+                  <ItemGroup>
+                    <ProjectReference Include="{{uiLabReference}}" />
+                  </ItemGroup>
+
+                </Project>
+                """);
+
+            TextFiles.Write(testProject, $$"""
+                <Project Sdk="Microsoft.NET.Sdk">
+
+                  <PropertyGroup>
+                    <DonkehDesktop>true</DonkehDesktop>
+                    <!-- <DonkehAndroid>true</DonkehAndroid> -->
+                    <!-- <DonkehWeb>true</DonkehWeb> -->
+                  </PropertyGroup>
+
+                  <Import Project="{{propsPath}}" />
+
+                  <PropertyGroup>
+                    <OutputType>Exe</OutputType>
+                    <TargetFrameworks>$(DonkehTargetFrameworks)</TargetFrameworks>
+                    <RootNamespace>{{rootNamespace}}.TestContainer</RootNamespace>
+                    <ImplicitUsings>enable</ImplicitUsings>
+                    <Nullable>enable</Nullable>
+                    <DefaultItemExcludes>$(DefaultItemExcludes);builds/**</DefaultItemExcludes>
+                  </PropertyGroup>
+
+                  <ItemGroup>
+                    <ProjectReference Include="../src/{{projectName}}.csproj" />
+                    <EmbeddedResource Include="Styles/gallery.css" />
+                  </ItemGroup>
+
+                </Project>
+                """);
+
+            TextFiles.Write(testTargets, $$"""
+                <Project>
+                  <!-- Framework-owned host wiring. -->
+                  <Import Project="{{targetsPath}}" />
+                </Project>
+                """);
+        }
+        else
+        {
+            var version = ToolVersion();
+
+            TextFiles.Write(libraryProject, $$"""
+                <Project Sdk="Microsoft.NET.Sdk">
+
+                  <PropertyGroup>
+                    <TargetFramework>net10.0</TargetFramework>
+                    <RootNamespace>{{rootNamespace}}</RootNamespace>
+                    <ImplicitUsings>enable</ImplicitUsings>
+                    <Nullable>enable</Nullable>
+                    <IsPackable>true</IsPackable>
+                    <PackageId>{{packageId}}</PackageId>
+                    <Description>{{packageId}} components for Donkeh.</Description>
+                    <DonkehVersion Condition="'$(DonkehVersion)' == ''">{{version}}</DonkehVersion>
+                  </PropertyGroup>
+
+                  <ItemGroup>
+                    <PackageReference Include="Donkeh.UILab" Version="$(DonkehVersion)" />
+                  </ItemGroup>
+
+                </Project>
+                """);
+
+            TextFiles.Write(testProject, $$"""
+                <Project Sdk="Microsoft.NET.Sdk">
+
+                  <PropertyGroup>
+                    <OutputType>Exe</OutputType>
+                    <TargetFramework>net10.0</TargetFramework>
+                    <RootNamespace>{{rootNamespace}}.TestContainer</RootNamespace>
+                    <ImplicitUsings>enable</ImplicitUsings>
+                    <Nullable>enable</Nullable>
+                    <DefaultItemExcludes>$(DefaultItemExcludes);builds/**</DefaultItemExcludes>
+                    <DonkehVersion Condition="'$(DonkehVersion)' == ''">{{version}}</DonkehVersion>
+                  </PropertyGroup>
+
+                  <ItemGroup>
+                    <PackageReference Include="Donkeh.Windowing" Version="$(DonkehVersion)" />
+                    <ProjectReference Include="../src/{{projectName}}.csproj" />
+                    <EmbeddedResource Include="Styles/gallery.css" />
+                  </ItemGroup>
+
+                </Project>
+                """);
+        }
+
+        TextFiles.Write(componentFile, $$"""
+            using Donkeh.UILab;
+            using static Donkeh.UILab.HtmlHelper;
+            using static Donkeh.UILab._;
+
+            [assembly: Donkeh.UILab.Stylesheet("Components/HelloCard/HelloCard.css")]
+
+            namespace {{rootNamespace}}.Components;
+
+            /// <summary>A starter component for the component library.</summary>
+            public sealed class HelloCard : Component
+            {
+                /// <inheritdoc/>
+                public override Node Render() =>
+                    Div(new() { ClassName = "hello-card" },
+                        H2(new() { ClassName = "hello-card-title" }, Text("Hello from {{packageId}}")),
+                        P(new() { ClassName = "hello-card-copy" },
+                            Text("Edit this component and the test container will show the change.")));
+            }
+            """);
+
+        TextFiles.Write(componentCss, """
+            .hello-card {
+                padding: 20px;
+                border: 1px solid #dce2ec;
+                border-radius: 14px;
+                background: #ffffff;
+            }
+
+            .hello-card-title {
+                margin: 0 0 8px;
+                font-size: 18px;
+            }
+
+            .hello-card-copy {
+                margin: 0;
+                color: #5d697c;
+            }
+            """);
+
+        TextFiles.Write(testProgram, $$"""
+            using Donkeh.Hosting;
+            using Donkeh.UILab;
+            using static Donkeh.UILab.HtmlHelper;
+            using static Donkeh.UILab._;
+            using {{rootNamespace}}.Components;
+
+            [assembly: Donkeh.UILab.Stylesheet("Styles/gallery.css")]
+
+            namespace {{rootNamespace}}.TestContainer;
+
+            [AppRoot(Width = 1200, Height = 800, Title = {{title}})]
+            public sealed class App : Component
+            {
+                /// <inheritdoc/>
+                public override Node Render() =>
+                    Div(new() { ClassName = "gallery" },
+                        Div(new() { ClassName = "gallery-header" },
+                            H1(new() { ClassName = "gallery-title" }, Text({{title}})),
+                            P(new() { ClassName = "gallery-subtitle" },
+                                Text("Live preview for every component in the library."))),
+                        Div(new() { ClassName = "gallery-grid" },
+                            Each(ComponentTypes(), type =>
+                                Div(new() { ClassName = "gallery-item" },
+                                    H2(new() { ClassName = "gallery-name" }, Text(type.Name)),
+                                    Div(new() { ClassName = "gallery-preview" }, C(type))))));
+
+                /// <summary>Finds every public, constructible component in the library.</summary>
+                private static Type[] ComponentTypes() =>
+                    typeof(HelloCard).Assembly
+                        .GetTypes()
+                        .Where(type => typeof(Component).IsAssignableFrom(type)
+                            && !type.IsAbstract
+                            && type.GetConstructor(Type.EmptyTypes) is not null)
+                        .OrderBy(type => type.Name, StringComparer.Ordinal)
+                        .ToArray();
+            }
+            """);
+
+        TextFiles.Write(testStyles, """
+            .gallery {
+                display: flex;
+                flex-direction: column;
+                gap: 28px;
+                min-height: 100vh;
+                padding: 36px;
+                background: #f6f7fb;
+            }
+
+            .gallery-header {
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+            }
+
+            .gallery-title {
+                margin: 0;
+                font-size: 32px;
+            }
+
+            .gallery-subtitle {
+                margin: 0;
+                color: #5d697c;
+            }
+
+            .gallery-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+                gap: 20px;
+            }
+
+            .gallery-item {
+                padding: 18px;
+                border: 1px solid #dce2ec;
+                border-radius: 18px;
+                background: #ffffff;
+            }
+
+            .gallery-name {
+                margin: 0 0 12px;
+                font-size: 14px;
+                color: #5d697c;
+                text-transform: uppercase;
+                letter-spacing: .06em;
+            }
+
+            .gallery-preview {
+                display: block;
+            }
+            """);
+
+        TextFiles.Write(gitignore, """
+            bin/
+            obj/
+            builds/
+            """);
+
+        TextFiles.Write(readme, $$"""
+            # {{projectName}}
+
+            A Donkeh component library with a live test container.
+
+            ## Preview
+
+            ```powershell
+            dotnet watch --project test-container run
+            ```
+
+            The container discovers every public component in `src/` and renders it
+            in a gallery. Editing a component or its stylesheet updates the preview.
+
+            ## Publish
+
+            ```powershell
+            dotnet pack src/{{projectName}}.csproj -c Release
+            ```
+
+            The library is marked packable and carries the component stylesheets as
+            embedded resources.
+            """);
+
+        TextFiles.Write(
+            solution,
+            BuildSolution(
+                projectName,
+                libraryProject,
+                testProject,
+                targetDirectory,
+                Guid.NewGuid(),
+                Guid.NewGuid()));
+
+        return files;
+    }
+
+    /// <summary>Builds a minimal solution containing the library and test container.</summary>
+    private static string BuildSolution(
+        string name,
+        string libraryProject,
+        string testProject,
+        string rootDirectory,
+        Guid libraryGuid,
+        Guid testGuid)
+    {
+        var libraryPath = Path.GetRelativePath(rootDirectory, libraryProject).Replace('/', '\\');
+        var testPath = Path.GetRelativePath(rootDirectory, testProject).Replace('/', '\\');
+
+        var template = """
+            Microsoft Visual Studio Solution File, Format Version 12.00
+            # Visual Studio Version 17
+            VisualStudioVersion = 17.0.31903.59
+            MinimumVisualStudioVersion = 10.0.40219.1
+            Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "__LIB_NAME__", "__LIB_PATH__", "__LIB_GUID__"
+            EndProject
+            Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TestContainer", "__TEST_PATH__", "__TEST_GUID__"
+            EndProject
+            Global
+            	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+            		Debug|Any CPU = Debug|Any CPU
+            		Release|Any CPU = Release|Any CPU
+            	EndGlobalSection
+            	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+            		__LIB_GUID__.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+            		__LIB_GUID__.Debug|Any CPU.Build.0 = Debug|Any CPU
+            		__LIB_GUID__.Release|Any CPU.ActiveCfg = Release|Any CPU
+            		__LIB_GUID__.Release|Any CPU.Build.0 = Release|Any CPU
+            		__TEST_GUID__.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+            		__TEST_GUID__.Debug|Any CPU.Build.0 = Debug|Any CPU
+            		__TEST_GUID__.Release|Any CPU.ActiveCfg = Release|Any CPU
+            		__TEST_GUID__.Release|Any CPU.Build.0 = Release|Any CPU
+            	EndGlobalSection
+            	GlobalSection(SolutionProperties) = preSolution
+            		HideSolutionNode = FALSE
+            	EndGlobalSection
+            EndGlobal
+            """;
+
+        return template
+            .Replace("__LIB_NAME__", name)
+            .Replace("__LIB_PATH__", libraryPath)
+            .Replace("__TEST_PATH__", testPath)
+            .Replace("__LIB_GUID__", libraryGuid.ToString("B").ToUpperInvariant())
+            .Replace("__TEST_GUID__", testGuid.ToString("B").ToUpperInvariant());
     }
 
     /// <summary>Writes a project that references the framework source tree.</summary>

@@ -97,6 +97,46 @@ public sealed class GeneratorTests
     }
 
     [Fact]
+    public void NewFrameworkProjectCreatesLibraryAndTestContainer()
+    {
+        using var directory = new TemporaryDirectory();
+
+        var files = ProjectGenerator.Generate(
+            directory.Path,
+            "Acme.Components",
+            frameworkRoot: null,
+            force: false,
+            kind: ProjectKind.Framework);
+
+        Assert.Equal(9, files.Count);
+        Assert.True(File.Exists(Path.Combine(directory.Path, "src", "Acme.Components.csproj")));
+        Assert.True(File.Exists(Path.Combine(directory.Path, "src", "Components", "HelloCard", "HelloCard.cs")));
+        Assert.True(File.Exists(Path.Combine(directory.Path, "test-container", "TestContainer.csproj")));
+        Assert.True(File.Exists(Path.Combine(directory.Path, "test-container", "Program.cs")));
+        Assert.True(File.Exists(Path.Combine(directory.Path, "Acme.Components.sln")));
+        Assert.True(File.Exists(Path.Combine(directory.Path, "README.md")));
+
+        var library = File.ReadAllText(Path.Combine(directory.Path, "src", "Acme.Components.csproj"));
+        var component = File.ReadAllText(Path.Combine(
+            directory.Path,
+            "src",
+            "Components",
+            "HelloCard",
+            "HelloCard.cs"));
+        var container = File.ReadAllText(Path.Combine(directory.Path, "test-container", "TestContainer.csproj"));
+        var program = File.ReadAllText(Path.Combine(directory.Path, "test-container", "Program.cs"));
+
+        Assert.Contains("<IsPackable>true</IsPackable>", library, StringComparison.Ordinal);
+        Assert.Contains("<PackageId>Acme.Components</PackageId>", library, StringComparison.Ordinal);
+        Assert.Contains("Donkeh.UILab", library, StringComparison.Ordinal);
+        Assert.Contains("class HelloCard : Component", component, StringComparison.Ordinal);
+        Assert.Contains("ProjectReference Include=\"../src/Acme.Components.csproj\"", container, StringComparison.Ordinal);
+        Assert.Contains("[AppRoot", program, StringComparison.Ordinal);
+        Assert.Contains("Each(ComponentTypes()", program, StringComparison.Ordinal);
+        Assert.Contains("C(type)", program, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void NewComponentCreatesFilesAndUpdatesProject()
     {
         using var directory = new TemporaryDirectory();

@@ -155,6 +155,42 @@ donkeh new project MyApp</code></pre>
             to write and no platform-specific entry-point code.
         </p>
 
+        <p>
+            For a reusable component library, generate a framework-shaped project
+            instead. It creates a packable library under <code>src/</code> and a console
+            test container that renders every public component in a live gallery.
+        </p>
+
+        <div class="code" data-label="Terminal">
+<pre><code>donkeh new project Acme.Components --type framework
+cd Acme.Components
+dotnet watch --project test-container run</code></pre>
+        </div>
+
+        <p>
+            The test container references the library directly, so edits to a component
+            or its CSS appear when the watcher rebuilds. When the library is ready:
+        </p>
+
+        <div class="code" data-label="Terminal">
+<pre><code>dotnet pack src/Acme.Components.csproj -c Release</code></pre>
+        </div>
+
+        <div class="tree">Acme.Components/
+├── Acme.Components.sln
+├── src/
+│   ├── Acme.Components.csproj
+│   └── Components/
+│       └── HelloCard/
+│           ├── HelloCard.cs
+│           └── HelloCard.css
+├── test-container/
+│   ├── TestContainer.csproj
+│   ├── Program.cs
+│   └── Styles/
+│       └── gallery.css
+└── README.md</div>
+
         <div class="callout note">
             <strong>Working on the framework itself?</strong>
             Pass <code>--framework &lt;path&gt;</code> to point at a local checkout. The

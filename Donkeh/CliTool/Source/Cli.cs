@@ -76,7 +76,7 @@ public static class Cli
 
     private static int RunNewProject(string[] args)
     {
-        var arguments = ParsedArguments.Parse(args, ["name", "framework"]);
+        var arguments = ParsedArguments.Parse(args, ["name", "framework", "type"]);
 
         if (arguments.Help)
         {
@@ -89,6 +89,7 @@ public static class Cli
             throw new CliException("Expected at most one project directory name.");
         }
 
+        var kind = ParseProjectKind(arguments.Value("type"));
         var target = Environment.CurrentDirectory;
         string? name = arguments.Value("name");
         string? directoryName = null;
@@ -105,9 +106,14 @@ public static class Cli
         }
 
         var framework = FrameworkLocator.Find(arguments.Value("framework"));
-        var files = ProjectGenerator.Generate(target, name, framework, arguments.Force);
+        var files = ProjectGenerator.Generate(target, name, framework, arguments.Force, kind);
 
         Console.WriteLine($"Created Donkeh project in {Path.GetFullPath(target)}");
+
+        if (kind == ProjectKind.Framework)
+        {
+            Console.WriteLine("  Component library plus test container.");
+        }
 
         if (framework is null)
         {
@@ -127,8 +133,21 @@ public static class Cli
             Console.WriteLine($"  cd {directoryName}");
         }
 
-        Console.WriteLine("  dotnet run");
+        Console.WriteLine(kind == ProjectKind.Framework
+            ? "  dotnet watch --project test-container run"
+            : "  dotnet run");
         return 0;
+    }
+
+    private static ProjectKind ParseProjectKind(string? value)
+    {
+        return value?.Trim().ToLowerInvariant() switch
+        {
+            null or "" or "application" or "app" => ProjectKind.Application,
+            "framework" or "library" or "lib" => ProjectKind.Framework,
+            _ => throw new CliException(
+                $"Unknown project type '{value}'. Expected 'application' or 'framework'.")
+        };
     }
 
     private static int RunEnableTarget(string[] args)
@@ -205,12 +224,13 @@ public static class Cli
             donkeh {Version}
 
             Usage:
-              donkeh new project [<directory>] [--name <name>] [--framework <path>] [--force]
+              donkeh new project [<directory>] [--name <name>] [--type application|framework] [--framework <path>] [--force]
               donkeh new component <name> [--project <path>] [--force]
               donkeh enable-target <desktop|android|web> [--project <path>]
 
             Commands:
-              new project       Create a minimal app that opens a blank window.
+              new project       Create a minimal app, or a component library with a
+                                live test container when --type framework is used.
               new component     Create src/Components/<Name>/<Name>.cs and .css, embed
                                 the stylesheet, and register [assembly: Stylesheet(...)].
               enable-target     Add desktop, Android or browser support to a project.
@@ -226,15 +246,19 @@ public static class Cli
     {
         Console.WriteLine("""
             Usage:
-              donkeh new project [<directory>] [--name <name>] [--framework <path>] [--force]
+              donkeh new project [<directory>] [--name <name>] [--type application|framework] [--framework <path>] [--force]
 
             Creates a minimal Donkeh project in the current directory, or in
             <directory> when supplied. The generated app declares [AppRoot] and
             opens a blank window. Outside a framework checkout, the project uses
             the published NuGet packages automatically.
 
+            With --type framework, creates a packable component library in src/
+            and a test-container console app that renders every component.
+
             Options:
               --name <name>        Project name; defaults to the directory name.
+              --type <kind>        'application' (default) or 'framework'.
               --framework <path>   Use a local framework checkout instead of NuGet.
               --force              Overwrite existing generated files.
             """);

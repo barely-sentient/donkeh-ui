@@ -46,6 +46,15 @@ donkeh enable-target android
 donkeh enable-target web
 ```
 
+Building a reusable component library? Generate a packable library plus a live
+gallery:
+
+```powershell
+donkeh new project Acme.Components --type framework
+cd Acme.Components
+dotnet watch --project test-container run
+```
+
 ## Learn
 
 - [Getting started](https://barely-sentient.github.io/donkeh-ui/getting-started.html)

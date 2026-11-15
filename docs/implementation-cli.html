@@ -111,7 +111,7 @@
 
         <h2 id="shape">Command surface</h2>
         <div class="code" data-label="Terminal">
-<pre><code>donkeh new project [&lt;directory&gt;] [--name &lt;name&gt;] [--framework &lt;path&gt;] [--force]
+<pre><code>donkeh new project [&lt;directory&gt;] [--name &lt;name&gt;] [--type application|framework] [--framework &lt;path&gt;] [--force]
 donkeh new component &lt;name&gt; [--project &lt;path&gt;] [--force]
 donkeh enable-target &lt;desktop|android|web&gt; [--project &lt;path&gt;]
 donkeh --help
@@ -219,6 +219,56 @@ public sealed class App : Component
                 </tbody>
             </table>
         </div>
+
+        <h2 id="framework-project">Framework projects</h2>
+        <p>
+            <code>--type framework</code> generates a component library and a console
+            test container instead of a standalone app. The library is packable, the
+            container references it directly, and the container discovers every public
+            component in the library assembly and renders it in a gallery.
+        </p>
+
+        <div class="tree">Acme.Components/
+├── Acme.Components.sln
+├── src/
+│   ├── Acme.Components.csproj     // packable library
+│   └── Components/
+│       └── HelloCard/
+│           ├── HelloCard.cs
+│           └── HelloCard.css
+├── test-container/
+│   ├── TestContainer.csproj       // executable, references ../src
+│   ├── Program.cs                 // AppRoot + reflection gallery
+│   └── Styles/
+│       └── gallery.css
+├── .gitignore
+└── README.md</div>
+
+        <p>
+            The library references <code>Donkeh.UILab</code>; the container references
+            <code>Donkeh.Windowing</code> and the library. In checkout mode the library
+            references the checkout's UILab project directly, while the container imports
+            the normal framework props and targets. The container walks the library
+            assembly for non-abstract components with a public parameterless constructor
+            and uses <code>C(type)</code> to mount each one.
+        </p>
+
+        <div class="code" data-label="Terminal">
+<pre><code>donkeh new project Acme.Components --type framework
+cd Acme.Components
+dotnet watch --project test-container run
+
+# publish when ready
+dotnet pack src/Acme.Components.csproj -c Release</code></pre>
+        </div>
+
+        <p>
+            The generated README records the same preview and publish commands. Adding a
+            component with <code>donkeh new component</code> from the project root does
+            not currently target the library automatically; pass
+            <code>--project src/Acme.Components.csproj</code>, or run the command from
+            <code>src/</code>.
+        </p>
 
         <h2 id="component">Component generation</h2>
         <p>
