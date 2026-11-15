@@ -72,6 +72,60 @@ public sealed unsafe class FontManager : IDisposable
         _gl = gl;
     }
 
+    /// <summary>
+    /// Registers a font file under a CSS family name.
+    /// </summary>
+    /// <param name="family">The CSS family name, for example <c>Inter</c>.</param>
+    /// <param name="path">Absolute or relative path to a TTF, OTF, WOFF or WOFF2 file.</param>
+    /// <param name="weight">Font weight the registration represents, normally 400 or 700.</param>
+    /// <param name="italic">Whether the registration represents the italic face.</param>
+    /// <remarks>
+    /// <para>
+    /// Registered files take precedence over system-font discovery for the same
+    /// family. A regular registration also serves bold or italic requests when no
+    /// matching style was registered, so a single variable or regular file is
+    /// enough to get a family working.
+    /// </para>
+    /// <para>
+    /// WOFF and WOFF2 containers are expanded before StbTrueType parses them.
+    /// The file is read lazily on first use, not in this method.
+    /// </para>
+    /// </remarks>
+    public void RegisterFont(string family, string path, int weight = 400, bool italic = false)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(family);
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+
+        var fullPath = Path.GetFullPath(path);
+
+        if (!File.Exists(fullPath))
+        {
+            throw new FileNotFoundException($"Font file '{fullPath}' was not found.", fullPath);
+        }
+
+        var normalized = NormalizeFamily(family);
+        _registeredFonts[new FontKey(normalized, Math.Clamp(weight, 1, 1000), italic)] = fullPath;
+        _cachedPaths.Clear();
+
+        List<FontKey>? stale = null;
+
+        foreach (var key in _faces.Keys)
+        {
+            if (string.Equals(key.Family, normalized, StringComparison.Ordinal))
+            {
+                (stale ??= []).Add(key);
+            }
+        }
+
+        if (stale is not null)
+        {
+            foreach (var key in stale)
+            {
+                _faces.Remove(key);
+            }
+        }
+    }
+
     /// <summary>Measures a run in CSS pixels.</summary>
     /// <param name="text">The characters to measure; may be empty.</param>
     /// <param name="style">
@@ -359,7 +413,8 @@ public sealed unsafe class FontManager : IDisposable
 
         try
         {
-            var face = new FontFace(path, File.ReadAllBytes(path));
+            var data = WoffFontDecoder.Expand(File.ReadAllBytes(path));
+            var face = new FontFace(path, data);
             _allFaces.Add(face);
             return face;
         }
@@ -481,6 +536,15 @@ public sealed unsafe class FontManager : IDisposable
             return cached;
         }
 
+        var registered = FindRegisteredFont(key);
+
+        if (registered is not null)
+        {
+            var registeredResult = (registered, registered, registered, registered);
+            _cachedPaths[key] = registeredResult;
+            return registeredResult;
+        }
+
         var candidates = new List<(string regular, string bold, string italic, string boldItalic)>();
 
         switch (family)
@@ -544,6 +608,33 @@ public sealed unsafe class FontManager : IDisposable
     }
 
     /// <summary>
+    /// Finds an explicitly registered font for a key, preferring the exact style
+    /// and then the regular face of the same family.
+    /// </summary>
+    private string? FindRegisteredFont(FontKey key)
+    {
+        if (_registeredFonts.TryGetValue(key, out var exact))
+        {
+            return exact;
+        }
+
+        if (_registeredFonts.TryGetValue(new FontKey(key.Family, 400, false), out var regular))
+        {
+            return regular;
+        }
+
+        foreach (var pair in _registeredFonts)
+        {
+            if (string.Equals(pair.Key.Family, key.Family, StringComparison.Ordinal))
+            {
+                return pair.Value;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Per-instance cache of discovered file paths for each font key.
     /// </summary>
     /// <remarks>
@@ -552,6 +643,12 @@ public sealed unsafe class FontManager : IDisposable
     /// diagnostics and future face switching. Cleared by <see cref="Dispose"/>.
     /// </remarks>
     private readonly Dictionary<FontKey, (string? Primary, string? Bold, string? Italic, string? BoldItalic)> _cachedPaths = [];
+
+    /// <summary>
+    /// Explicit family/style registrations, keyed by normalised family, weight and
+    /// italic flag. They win over system-font discovery.
+    /// </summary>
+    private readonly Dictionary<FontKey, string> _registeredFonts = [];
 
     /// <summary>Appends one family's four style file-name stems as a discovery candidate.</summary>
     /// <param name="list">The candidate list being built.</param>
@@ -603,6 +700,8 @@ public sealed unsafe class FontManager : IDisposable
         var fileName = name.EndsWith(".ttf", StringComparison.OrdinalIgnoreCase)
             || name.EndsWith(".otf", StringComparison.OrdinalIgnoreCase)
             || name.EndsWith(".ttc", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(".woff", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(".woff2", StringComparison.OrdinalIgnoreCase)
                 ? name
                 : name + ".ttf";
 

@@ -229,6 +229,27 @@ Div(new() { ClassName = "card" },
             above.
         </div>
 
+        <h2 id="fonts">Fonts and WOFF</h2>
+        <p>
+            The native host discovers installed system fonts by family and falls back by
+            codepoint. A custom host can add a font without installing it system-wide:
+        </p>
+
+        <div class="code" data-label="Custom font">
+<pre><code>var window = new DonkehWindow(settings);
+
+window.Fonts.RegisterFont("Inter", "Assets/Inter.woff2");
+
+window.Run(root, styles);</code></pre>
+        </div>
+
+        <p>
+            TTF, OTF, WOFF and WOFF2 files are accepted. WOFF containers are expanded to
+            sfnt before the normal metrics, glyph atlas and fallback pipeline runs.
+            <code>RegisterFont</code> wins over system discovery for that family; the
+            browser host delegates font loading to the browser instead.
+        </p>
+
         <div class="page-nav">
             <a class="prev" href="routing.html"><span>Previous</span>Routing and setPage</a>
             <a class="next" href="css-support.html"><span>Next</span>CSS support</a>

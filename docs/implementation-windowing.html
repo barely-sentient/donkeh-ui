@@ -211,6 +211,31 @@
             they live until the GL context is disposed.
         </p>
 
+        <p>
+            The native host accepts WOFF 1.0 and WOFF 2.0 files in addition to TTF and
+            OTF. Containers are expanded to sfnt bytes with the fully managed
+            <code>Meziantou.Framework.Fonts</code> decoder, so the same path works on
+            desktop and Android without a native FreeType build. The expanded bytes then
+            go through the existing StbTrueType face, metrics and atlas pipeline.
+        </p>
+
+        <div class="code" data-label="Custom font">
+<pre><code>var window = new DonkehWindow(settings);
+
+// CSS: font-family: Inter;
+window.Fonts.RegisterFont("Inter", "Assets/Inter.woff2");
+
+window.Run(root, styles);</code></pre>
+        </div>
+
+        <p>
+            <code>RegisterFont</code> takes an optional weight and italic flag and wins
+            over system-font discovery for the same family. A single regular registration
+            also serves bold and italic requests when no matching style was registered.
+            Advanced hosts can expose the window's <code>Fonts</code> manager directly;
+            the browser host uses the browser's own font loading instead.
+        </p>
+
         <h2 id="media">Images, audio, video and canvas</h2>
         <p>
             These primitives all live at the host boundary because they need platform

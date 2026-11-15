@@ -651,6 +651,17 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     public GL? Gl => _gl;
 
     /// <summary>
+    /// Gets the font pipeline used by layout and painting.
+    /// </summary>
+    /// <remarks>
+    /// Call <see cref="Donkeh.Windowing.FontManager.RegisterFont"/> before
+    /// <see cref="Run(Node, string)"/> to add a TTF, OTF, WOFF or WOFF2 family
+    /// without installing it system-wide. The manager is created with the window
+    /// and is disposed with it.
+    /// </remarks>
+    public FontManager Fonts => _fonts;
+
+    /// <summary>
     /// Gets or sets the device-to-CSS-pixel ratio used by layout and pointer input.
     /// </summary>
     /// <value>
