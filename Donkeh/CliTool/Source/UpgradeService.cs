@@ -71,8 +71,29 @@ internal static class UpgradeService
         {
             // A global tool can be locked while its own process is running. Schedule
             // the same update for after this process exits and tell the user.
-            ScheduleToolUpdate(version);
-            Console.WriteLine("  CLI update scheduled for after this command exits");
+            if (IsToolInstalled())
+            {
+                ScheduleToolUpdate(version);
+                Console.WriteLine("  CLI update scheduled for after this command exits");
+            }
+            else
+            {
+                var install = RunDotnet(
+                    ["tool", "install", "--global", "Donkeh.CliTool", "--version", version],
+                    workingDirectory: null,
+                    throwOnError: false);
+
+                if (install.ExitCode != 0)
+                {
+                    throw new CliException(
+                        "The project was updated, but the donkeh CLI could not be installed." +
+                        (install.Output.Length > 0
+                            ? Environment.NewLine + install.Output.Trim()
+                            : string.Empty));
+                }
+
+                Console.WriteLine("  installed the donkeh CLI");
+            }
         }
 
         Console.WriteLine();
@@ -198,6 +219,18 @@ internal static class UpgradeService
         {
             output.AppendLine(line);
         }
+    }
+
+    /// <summary>Returns whether the global donkeh tool is installed.</summary>
+    private static bool IsToolInstalled()
+    {
+        var (exitCode, output) = RunDotnet(
+            ["tool", "list", "--global"],
+            workingDirectory: null,
+            throwOnError: false);
+
+        return exitCode == 0
+            && output.Contains("donkeh.clitool", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Starts a detached helper that updates the global tool after exit.</summary>

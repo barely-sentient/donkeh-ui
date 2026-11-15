@@ -162,6 +162,51 @@ public sealed class GeneratorTests
     }
 
     [Fact]
+    public void UpgradeRejectsProjectsWithoutDonkehReferences()
+    {
+        using var directory = new TemporaryDirectory();
+
+        var projectFile = Path.Combine(directory.Path, "Other.csproj");
+        File.WriteAllText(
+            projectFile,
+            """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+              </PropertyGroup>
+            </Project>
+            """);
+
+        var exception = Assert.Throws<CliException>(() =>
+            UpgradeService.Upgrade(projectFile, "2.0.0"));
+
+        Assert.Contains("does not reference Donkeh", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UpgradeRejectsLocalFrameworkCheckoutProjects()
+    {
+        using var directory = new TemporaryDirectory();
+
+        var projectFile = Path.Combine(directory.Path, "Sample.csproj");
+        File.WriteAllText(
+            projectFile,
+            """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <Import Project="..\Donkeh.props" />
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+              </PropertyGroup>
+            </Project>
+            """);
+
+        var exception = Assert.Throws<CliException>(() =>
+            UpgradeService.Upgrade(projectFile, "2.0.0"));
+
+        Assert.Contains("local framework checkout", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void NewComponentCreatesFilesAndUpdatesProject()
     {
         using var directory = new TemporaryDirectory();
