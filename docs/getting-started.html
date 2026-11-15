@@ -135,6 +135,17 @@
 dotnet run --project Donkeh/CliTool/Source/Donkeh.CliTool.csproj -- --help</code></pre>
         </div>
 
+        <p>
+            To move an existing project and the global tool to a newer release:
+        </p>
+
+        <div class="code" data-label="Terminal">
+<pre><code>donkeh upgrade project --version=1.0.25
+
+# or resolve the latest stable release
+donkeh upgrade project</code></pre>
+        </div>
+
         <h2 id="create-project">Create a project</h2>
         <p>
             Run one of these from any directory. The CLI uses the published NuGet

@@ -2609,7 +2609,8 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         for (var i = 0; i < _stylesheets.Count; i++)
         {
             start = table.RuleCount;
-            engine.Build(Tokenizer.Parse(_stylesheets[i]), table);
+            var css = ExternalStyleLoader.Load(_stylesheets[i], _fonts);
+            engine.Build(Tokenizer.Parse(css), table);
             ranges.Add(new StyleSheetRange($"author #{i + 1}", start, table.RuleCount));
         }
 

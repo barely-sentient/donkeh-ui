@@ -129,11 +129,36 @@ public sealed class GeneratorTests
         Assert.Contains("<IsPackable>true</IsPackable>", library, StringComparison.Ordinal);
         Assert.Contains("<PackageId>Acme.Components</PackageId>", library, StringComparison.Ordinal);
         Assert.Contains("Donkeh.UILab", library, StringComparison.Ordinal);
+        Assert.Contains("<EmbeddedResource Include=\"Components/HelloCard/HelloCard.css\" />", library, StringComparison.Ordinal);
         Assert.Contains("class HelloCard : Component", component, StringComparison.Ordinal);
         Assert.Contains("ProjectReference Include=\"../src/Acme.Components.csproj\"", container, StringComparison.Ordinal);
         Assert.Contains("[AppRoot", program, StringComparison.Ordinal);
         Assert.Contains("Each(ComponentTypes()", program, StringComparison.Ordinal);
         Assert.Contains("C(type)", program, StringComparison.Ordinal);
+        Assert.Contains("[ModuleInitializer]", program, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UpgradeUpdatesDonkehVersionAndLiteralPackageVersions()
+    {
+        var project = """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+              </PropertyGroup>
+              <ItemGroup>
+                <PackageReference Include="Donkeh.Windowing" Version="1.0.1" />
+                <PackageReference Include="Donkeh.UILab" Version="$(DonkehVersion)" />
+              </ItemGroup>
+            </Project>
+            """;
+
+        var updated = CsprojEditor.SetDonkehVersion(project, "\n", "2.3.4");
+        updated = CsprojEditor.SetDonkehPackageVersions(updated, "2.3.4");
+
+        Assert.Contains("<DonkehVersion>2.3.4</DonkehVersion>", updated, StringComparison.Ordinal);
+        Assert.Contains("Include=\"Donkeh.Windowing\" Version=\"2.3.4\"", updated, StringComparison.Ordinal);
+        Assert.Contains("Include=\"Donkeh.UILab\" Version=\"$(DonkehVersion)\"", updated, StringComparison.Ordinal);
     }
 
     [Fact]

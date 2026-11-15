@@ -232,8 +232,46 @@ public sealed partial class StyleResolver
 
             if (c == '\\' && i + 1 < value.Length)
             {
-                var escaped = value[++i];
-                builder.Append(escaped is 'n' ? '\n' : escaped);
+                var escaped = value[i + 1];
+
+                // CSS strings use hexadecimal escapes with up to six digits and
+                // an optional trailing whitespace. Icon fonts rely on this.
+                if (IsHexDigit(escaped))
+                {
+                    var digits = 0;
+                    var codepoint = 0;
+                    i++;
+
+                    while (i < value.Length && digits < 6 && IsHexDigit(value[i]))
+                    {
+                        codepoint = (codepoint << 4) | HexValue(value[i]);
+                        digits++;
+                        i++;
+                    }
+
+                    if (i < value.Length && char.IsWhiteSpace(value[i]))
+                    {
+                        i++;
+                    }
+
+                    i--;
+
+                    if (codepoint > 0 && codepoint <= 0x10FFFF)
+                    {
+                        builder.Append(char.ConvertFromUtf32(codepoint));
+                    }
+
+                    continue;
+                }
+
+                i++;
+
+                if (escaped is '\r' or '\n' or '\f')
+                {
+                    continue;
+                }
+
+                builder.Append(escaped);
                 continue;
             }
 
@@ -242,6 +280,16 @@ public sealed partial class StyleResolver
 
         return builder.ToString();
     }
+
+    /// <summary>Returns whether a character is an ASCII hexadecimal digit.</summary>
+    private static bool IsHexDigit(char c) =>
+        (uint)(c - '0') < 10
+        || (uint)(c - 'a') < 6
+        || (uint)(c - 'A') < 6;
+
+    /// <summary>Converts one ASCII hexadecimal digit to its value.</summary>
+    private static int HexValue(char c) =>
+        c <= '9' ? c - '0' : (c <= 'F' ? c - 'A' + 10 : c - 'a' + 10);
 
     /// <summary>
     /// Resolves the style of a generated <c>::before</c> or <c>::after</c>

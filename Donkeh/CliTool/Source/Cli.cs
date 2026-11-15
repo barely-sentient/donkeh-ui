@@ -47,6 +47,11 @@ public static class Cli
             return 0;
         }
 
+        if (string.Equals(args[0], "upgrade", StringComparison.OrdinalIgnoreCase))
+        {
+            return RunUpgrade(args[1..]);
+        }
+
         if (string.Equals(args[0], "enable-target", StringComparison.OrdinalIgnoreCase))
         {
             return RunEnableTarget(args[1..]);
@@ -177,6 +182,30 @@ public static class Cli
         return 0;
     }
 
+    private static int RunUpgrade(string[] args)
+    {
+        var arguments = ParsedArguments.Parse(args, ["version", "project"]);
+
+        if (arguments.Help)
+        {
+            PrintUpgradeHelp();
+            return 0;
+        }
+
+        if (arguments.Positionals.Count != 1
+            || !string.Equals(arguments.Positionals[0], "project", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new CliException(
+                "Expected 'project'. Example: donkeh upgrade project --version=1.0.25");
+        }
+
+        var version = arguments.Value("version");
+        var project = arguments.Value("project");
+
+        UpgradeService.Upgrade(project, version);
+        return 0;
+    }
+
     private static int RunNewComponent(string[] args)
     {
         var arguments = ParsedArguments.Parse(args, ["project"]);
@@ -227,6 +256,7 @@ public static class Cli
               donkeh new project [<directory>] [--name <name>] [--type application|framework] [--framework <path>] [--force]
               donkeh new component <name> [--project <path>] [--force]
               donkeh enable-target <desktop|android|web> [--project <path>]
+              donkeh upgrade project [--version <version>] [--project <path>]
 
             Commands:
               new project       Create a minimal app, or a component library with a
@@ -234,6 +264,8 @@ public static class Cli
               new component     Create src/Components/<Name>/<Name>.cs and .css, embed
                                 the stylesheet, and register [assembly: Stylesheet(...)].
               enable-target     Add desktop, Android or browser support to a project.
+              upgrade project   Clear NuGet caches, update package versions, restore
+                                and update the global donkeh tool.
 
             Options:
               -h, --help        Show this help.
@@ -299,6 +331,21 @@ public static class Cli
               web                  Browser host (net10.0-browser).
 
             Options:
+              --project <path>     Project file or project directory.
+            """);
+    }
+
+    private static void PrintUpgradeHelp()
+    {
+        Console.WriteLine("""
+            Usage:
+              donkeh upgrade project [--version <version>] [--project <path>]
+
+            Clears the NuGet caches, updates the Donkeh package version in the
+            project, restores from NuGet and updates the global donkeh CLI tool.
+
+            Options:
+              --version <version>  Version to install; defaults to the latest stable.
               --project <path>     Project file or project directory.
             """);
     }

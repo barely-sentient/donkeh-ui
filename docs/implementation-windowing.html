@@ -236,6 +236,23 @@ window.Run(root, styles);</code></pre>
             the browser host uses the browser's own font loading instead.
         </p>
 
+        <p>
+            Author stylesheets are not limited to embedded files. Before compiling the
+            cascade, the native host expands <code>@import</code> URLs (HTTP, file and
+            data), fetches each <code>@font-face</code> source, caches it under the temp
+            directory and registers the family automatically. Imports are cycle-guarded
+            and relative URLs resolve against the declaring sheet. This is what lets a
+            CDN icon font load without a manual <code>RegisterFont</code> call.
+        </p>
+
+        <p>
+            Two CSS details matter for icon fonts. Simple <code>:is(a, b)</code> selector
+            lists in author CSS are expanded into comma-separated selectors because the
+            matcher deliberately rejects logical pseudo-classes. <code>::before</code>
+            and <code>::after</code> content strings decode CSS hexadecimal escapes such
+            as <code>\f0c9</code>, so icon codepoints resolve to real glyphs.
+        </p>
+
         <h2 id="media">Images, audio, video and canvas</h2>
         <p>
             These primitives all live at the host boundary because they need platform

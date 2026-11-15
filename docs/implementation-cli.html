@@ -114,6 +114,7 @@
 <pre><code>donkeh new project [&lt;directory&gt;] [--name &lt;name&gt;] [--type application|framework] [--framework &lt;path&gt;] [--force]
 donkeh new component &lt;name&gt; [--project &lt;path&gt;] [--force]
 donkeh enable-target &lt;desktop|android|web&gt; [--project &lt;path&gt;]
+donkeh upgrade project [--version &lt;version&gt;] [--project &lt;path&gt;]
 donkeh --help
 donkeh --version</code></pre>
         </div>
@@ -371,6 +372,33 @@ public sealed class FileList : Component
             <code>Component</code> suffix, names starting with a digit get an underscore,
             and namespaces PascalCase each dotted segment. Kebab case inserts hyphens at
             case boundaries, including acronym-to-word transitions.
+        </p>
+
+        <h2 id="upgrade">Upgrading a project</h2>
+        <p>
+            <code>donkeh upgrade project</code> moves a NuGet-based project to a newer
+            Donkeh package set and updates the installed CLI:
+        </p>
+
+        <div class="code" data-label="Terminal">
+<pre><code>donkeh upgrade project --version=1.0.25
+
+# or resolve the latest stable version
+donkeh upgrade project</code></pre>
+        </div>
+
+        <ol>
+            <li>Clears all NuGet caches with <code>dotnet nuget locals all --clear</code>.</li>
+            <li>Updates <code>DonkehVersion</code> and any literal <code>Donkeh.*</code> package versions in the project.</li>
+            <li>Runs <code>dotnet restore --force --no-cache</code> so the packages are downloaded fresh.</li>
+            <li>Runs <code>dotnet tool update --global Donkeh.CliTool --version ...</code>.</li>
+        </ol>
+
+        <p>
+            A project generated against a local framework checkout is rejected; upgrade
+            the checkout with git instead. If the global tool is locked because it is the
+            process running the command, the update is scheduled for after the command
+            exits.
         </p>
 
         <h2 id="tests">Tests</h2>

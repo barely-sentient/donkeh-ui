@@ -250,6 +250,23 @@ window.Run(root, styles);</code></pre>
             browser host delegates font loading to the browser instead.
         </p>
 
+        <p>
+            The native host also resolves external author stylesheets. Absolute or
+            relative <code>@import</code> URLs are fetched and inlined, and each
+            <code>@font-face</code> block downloads its first supported font source and
+            registers the family automatically. Relative URLs resolve against the
+            stylesheet that declared them. Failures leave the original rule in place and
+            keep the fallback font chain.
+        </p>
+
+        <div class="code" data-label="External icon font">
+<pre><code>@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.3.1/css/all.css');
+
+.fa-bars {
+    font-size: 48px;
+}</code></pre>
+        </div>
+
         <div class="page-nav">
             <a class="prev" href="routing.html"><span>Previous</span>Routing and setPage</a>
             <a class="next" href="css-support.html"><span>Next</span>CSS support</a>

@@ -128,11 +128,11 @@
                 <thead><tr><th>Feature</th><th>Status</th></tr></thead>
                 <tbody>
                     <tr><td>Interaction and state pseudo-classes</td><td><code>:hover</code>, <code>:focus</code>, <code>:active</code>, <code>:focus-visible</code>, <code>:checked</code>, <code>:disabled</code>, <code>:enabled</code>, <code>:required</code>, <code>:read-only</code> and structural selectors.</td></tr>
-                    <tr><td>Logical pseudo-classes</td><td><code>:not()</code>, <code>:is()</code>, <code>:where()</code> and <code>:has()</code> are recognised but currently flagged as unsupported instead of being matched incorrectly.</td></tr>
-                    <tr><td>Pseudo-elements</td><td><code>::before</code> and <code>::after</code> have resolver plumbing, but are not part of the supported selector surface yet. Other pseudo-elements are ignored.</td></tr>
+                    <tr><td>Logical pseudo-classes</td><td><code>:not()</code>, <code>:is()</code>, <code>:where()</code> and <code>:has()</code> are recognised but flagged as unsupported by the matcher. The native host expands simple <code>:is(a, b)</code> selector lists before parsing, which keeps icon-font stylesheets working.</td></tr>
+                    <tr><td>Pseudo-elements</td><td><code>::before</code> and <code>::after</code> generate a box when their resolved <code>content</code> is a string. CSS hexadecimal string escapes such as <code>\f0c9</code> are decoded. Other pseudo-elements are ignored.</td></tr>
                     <tr><td>Conditional at-rules</td><td><code>@media</code>, <code>@supports</code> and <code>@container</code> gate matching. <code>@layer</code> participates in the cascade.</td></tr>
                     <tr><td>Animations</td><td><code>@keyframes</code> and <code>@-webkit-keyframes</code> are parsed; transitions and animations run through the style resolver.</td></tr>
-                    <tr><td>Imports</td><td><code>@import</code> is recorded but never fetched. Add each stylesheet explicitly through <code>[Stylesheet]</code> or <code>Stylesheet.Load()</code>.</td></tr>
+                    <tr><td>Imports</td><td>The data engine only records <code>@import</code>. The native host fetches HTTP, file and data URLs, inlines them and resolves relative URLs against the declaring stylesheet. The browser host lets the browser load them.</td></tr>
                 </tbody>
             </table>
         </div>

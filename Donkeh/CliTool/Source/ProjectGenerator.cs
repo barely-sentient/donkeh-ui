@@ -173,6 +173,7 @@ internal static class ProjectGenerator
 
                   <ItemGroup>
                     <ProjectReference Include="{{uiLabReference}}" />
+                    <EmbeddedResource Include="Components/HelloCard/HelloCard.css" />
                   </ItemGroup>
 
                 </Project>
@@ -233,6 +234,7 @@ internal static class ProjectGenerator
 
                   <ItemGroup>
                     <PackageReference Include="Donkeh.UILab" Version="$(DonkehVersion)" />
+                    <EmbeddedResource Include="Components/HelloCard/HelloCard.css" />
                   </ItemGroup>
 
                 </Project>
@@ -306,11 +308,18 @@ internal static class ProjectGenerator
             using Donkeh.UILab;
             using static Donkeh.UILab.HtmlHelper;
             using static Donkeh.UILab._;
+            using System.Runtime.CompilerServices;
             using {{rootNamespace}}.Components;
 
             [assembly: Donkeh.UILab.Stylesheet("Styles/gallery.css")]
 
             namespace {{rootNamespace}}.TestContainer;
+
+            internal static class LibraryLoader
+            {
+                [ModuleInitializer]
+                internal static void Initialize() => GC.KeepAlive(typeof(HelloCard));
+            }
 
             [AppRoot(Width = 1200, Height = 800, Title = {{title}})]
             public sealed class App : Component

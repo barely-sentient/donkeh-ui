@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 using Donkeh.LayoutLab;
+using Donkeh.UILab;
 using Silk.NET.OpenGL;
 using StbTrueTypeSharp;
 
@@ -104,7 +105,8 @@ public sealed unsafe class FontManager : IDisposable
         }
 
         var normalized = NormalizeFamily(family);
-        _registeredFonts[new FontKey(normalized, Math.Clamp(weight, 1, 1000), italic)] = fullPath;
+        var normalizedWeight = weight >= 600 ? 700 : 400;
+        _registeredFonts[new FontKey(normalized, normalizedWeight, italic)] = fullPath;
         _cachedPaths.Clear();
 
         List<FontKey>? stale = null;
