@@ -304,6 +304,22 @@ samp {
     line-height: 1.35;
 }
 
+.nav a.nav-sub {
+    padding-left: 24px;
+    color: var(--faint);
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.nav a.nav-sub:hover {
+    color: var(--text);
+}
+
+.nav a.nav-sub.is-active {
+    color: var(--accent);
+    font-weight: 700;
+}
+
 .nav a:hover {
     background: var(--surface-2);
     color: var(--text);

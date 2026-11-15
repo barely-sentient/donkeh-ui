@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Parser | Donkeh</title>
+    <meta name="description" content="Implementation notes for Donkeh.Parser: design decisions, data structures, trade-offs and hot paths.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/donkeh-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+                <a href="routing.html">Routing and setPage</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Reference</span>
+                <a href="html-elements.html">HTML elements</a>
+                <a href="css-support.html">CSS support</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Primitives</span>
+                <a href="image.html">Image</a>
+                <a href="video.html">Video</a>
+                <a href="canvas.html">Canvas</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+                        <div class="nav-group">
+                <span class="nav-label">Implementation for Nerds</span>
+                <a href="implementation.html">Overview</a>
+                <a class="nav-sub" href="implementation-parser.html">Parser</a>
+                <a class="nav-sub" href="implementation-data.html">Data</a>
+                <a class="nav-sub" href="implementation-dataengine.html">DataEngine</a>
+                <a class="nav-sub" href="implementation-layoutlab.html">LayoutLab</a>
+                <a class="nav-sub" href="implementation-uilab.html">UILab</a>
+                <a class="nav-sub" href="implementation-hosting.html">Hosting</a>
+                <a class="nav-sub" href="implementation-windowing.html">Windowing</a>
+                <a class="nav-sub" href="implementation-android.html">Android</a>
+                <a class="nav-sub" href="implementation-browser.html">Browser</a>
+                <a class="nav-sub" href="implementation-inspector.html">Inspector</a>
+                <a class="nav-sub" href="implementation-cli.html">CLI tool</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/donkeh-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Implementation for Nerds <span>/</span> Parser</div>
+        <h1>Parser</h1>
+        <p class="lead">
+            The CSS parser is a single-pass lexer wrapped around a declaratively
+            registered exact-match engine. The outer scan stays hand-written and
+            allocation-conscious; the keyword, property, function and pseudo-selector
+            tables are compiled into specialised IL once, on first use.
+        </p>
+
+        <h2 id="goal">The design goal</h2>
+        <p>
+            The target was an unusual combination: the authoring ergonomics of a
+            rule-based tokenizer with the execution profile of hand-written code. Rule
+            engines usually pay for their flexibility with intermediate representations,
+            dictionary probes, virtual dispatch or an interpreter in the hot loop. None
+            of those are acceptable when a stylesheet is re-tokenized often enough to
+            show up in frame time.
+        </p>
+        <p>
+            The split that made it work is simple. The <em>declaration</em> of lexical
+            knowledge is separate from its <em>execution</em>. Rules are registered
+            through small helpers, then a runtime IL compiler turns that registration
+            table into a dense first-character dispatch table and one specialised
+            matcher per first character. After type initialisation there is no rule
+            interpreter, no name lookup and no general-purpose matching engine between
+            the input span and the generated code.
+        </p>
+
+        <div class="callout note">
+            <strong>It is a runtime compiler, not a build-time source generator</strong>
+            The generated code is emitted with <code>System.Reflection.Emit</code> from
+            the tokenizer's static constructor. The rule definitions themselves are
+            ordinary C# registration calls in <code>Rules/*.cs</code>,
+            <code>Tokenizer/PseudoClasses.cs</code>, <code>PseudoElements.cs</code> and
+            <code>Functions/*.cs</code>. A future build-time generator could bake the
+            same matcher into the assembly, but the current implementation trades a
+            small first-touch cost for a tiny, declarative source surface.
+        </div>
+
+        <h2 id="architecture">Two layers, one pass</h2>
+        <p>
+            <code>Tokenizer.Parse</code> runs a hand-written switch over the current
+            character. That outer loop owns everything structural: whitespace, comments,
+            strings, numbers, dimensions, hashes, at-keywords, punctuation, escapes,
+            CDO/CDC and the declaration-colon disambiguation. It emits at most one token
+            per iteration.
+        </p>
+        <p>
+            Names are the only place where the lexer needs a large table of lexical
+            knowledge. Once <code>ScanName</code> has consumed a maximal identifier, the
+            exact matcher decides whether it is a property name, a function name, a
+            pseudo-class, a pseudo-element or just an identifier. That boundary is
+            deliberate: the hot structural scan stays obvious and debuggable, while the
+            large, repetitive keyword table is generated.
+        </p>
+
+        <div class="tree">Tokenizer.Parse(ReadOnlySpan&lt;char&gt;)
+└── hand-written scan
+    ├── whitespace / comments / CDO / CDC
+    ├── strings, escapes, numbers, dimensions, percentages
+    ├── punctuation and combinators
+    └── ScanName(...)
+        └── ClassifyName(...)
+            ├── '(' lookahead  → Function
+            ├── MinLengthByFirstChar early-out
+            └── ExactMatch(ReadOnlySpan&lt;char&gt;)   // generated IL
+                └── first-character group → length switch → trie
+</div>
+
+        <h2 id="rules">The declarative rule set</h2>
+        <p>
+            <code>RuleBuilder</code> exposes the authoring API:
+            <code>Exact</code>, <code>CssPropertyName</code>,
+            <code>CssPropertyGroup</code>, <code>CssPseudoClass</code>,
+            <code>CssPseudoElement</code> and <code>Function</code>. The per-letter
+            <code>PropertiesA()</code> through <code>PropertiesZ()</code> methods are
+            just registration calls, grouped so the source stays auditable and diff
+            friendly.
+        </p>
+
+        <div class="code" data-label="RuleBuilder">
+<pre><code>CssPropertyName("aspect-ratio");
+
+CssPropertyGroup("border",
+    "width", "style", "color",
+    "top", "right", "bottom", "left",
+    "radius");
+
+CssPseudoClass("focus-visible");
+CssPseudoElement("placeholder");
+Function("linear-gradient");</code></pre>
+        </div>
+
+        <p>
+            The current table contains <strong>795 exact rules</strong>:
+        </p>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Rule kind</th><th>Count</th><th>Example</th></tr></thead>
+                <tbody>
+                    <tr><td>CSS property names</td><td>577</td><td><code>grid-template-columns</code></td></tr>
+                    <tr><td>Functions</td><td>100</td><td><code>clamp</code>, <code>linear-gradient</code></td></tr>
+                    <tr><td>Pseudo-classes</td><td>78</td><td><code>:focus-visible</code></td></tr>
+                    <tr><td>Pseudo-elements</td><td>30</td><td><code>::placeholder</code></td></tr>
+                    <tr><td>Punctuation rules</td><td>10</td><td><code>:;(){}[]&gt;</code></td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            The 577 property names demonstrate why the table is generated rather than
+            hand-coded. The layout engine only implements a subset (168 registered
+            properties today), but the tokenizer still recognises the wider CSS
+            vocabulary so later stages can make the policy decision. A name being
+            tokenized as a property does not mean its value grammar is fully supported.
+        </p>
+
+        <div class="callout tip">
+            <strong>Duplicate kinds are resolved deliberately</strong>
+            A name can be both a property and a function, such as <code>color</code>,
+            <code>rotate</code> or <code>scale</code>. <code>RuleBuilder.Exact</code>
+            lets the property registration win, and <code>ClassifyName</code> upgrades
+            the token to <code>TokenKind.Function</code> when the next character is
+            <code>(</code>. The lexer never has to guess from the name alone.
+        </div>
+
+        <h2 id="compile">Compiling the matcher</h2>
+        <p>
+            The static constructor in <code>Rules/Rules.cs</code> registers every rule,
+            computes a 65,536-entry <code>MinLengthByFirstChar</code> table, and calls
+            <code>Compiler.CompileExactRules</code>. Compilation groups the rules by
+            first character and emits one <code>DynamicMethod</code> per group.
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Compiled shape</th><th>Value</th></tr></thead>
+                <tbody>
+                    <tr><td>Distinct first-character groups</td><td>34</td></tr>
+                    <tr><td>Single-rule groups (skip the length switch)</td><td>11</td></tr>
+                    <tr><td>Multi-rule groups</td><td>23</td></tr>
+                    <tr><td>Largest group</td><td>110 rules, starting with <code>:</code></td></tr>
+                    <tr><td>Shortest / longest rule text</td><td>1 / 39 characters</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            The public entry point is a dense array of delegates plus the lowest first
+            character covered by the table. An empty span or an out-of-range first
+            character returns <code>-1</code> without calling generated code:
+        </p>
+
+        <div class="code" data-label="CompiledExactMatcher.Match">
+<pre><code>if (span.Length == 0)
+    return -1;
+
+var index = span[0] - _minChar;
+if ((uint)index &gt;= (uint)_groups.Length)
+    return -1;
+
+return _groups[index](span);</code></pre>
+        </div>
+
+        <p>
+            Inside a group, generated IL switches on <em>exact length</em> first. This
+            is the key to longest-match behaviour and to killing prefix ambiguity:
+            <code>border</code> and <code>border-radius</code> are different rules with
+            different lengths, so a six-character candidate can never fall through to a
+            shorter rule. The lexer already scanned the maximal identifier, so the
+            matcher receives the complete candidate rather than a prefix.
+        </p>
+
+        <div class="code" data-label="Generated matcher shape">
+<pre><code>// Conceptually, per first-character group:
+switch (span.Length - minLength)
+{
+    case 0:  return MatchLength(minLength);
+    case 6:  return MatchLength(minLength + 6);
+    case 13: return MatchLength(minLength + 13);
+    default: return -1;
+}
+
+// Within one length bucket, longer prefixes are emitted first.
+// A node with more than six candidates switches on the next character;
+// a smaller node becomes a short SequenceEqual chain.</code></pre>
+        </div>
+
+        <p>
+            The trie only splits when a node still has more than six candidates. Below
+            that threshold, a linear chain of
+            <code>MemoryExtensions.SequenceEqual&lt;char&gt;</code> calls is smaller and
+            often faster than another switch. Single-rule groups skip the length switch
+            entirely, which keeps punctuation buckets tiny. The compiler also emits
+            longer buckets before shorter ones so the generated method layout favours
+            the more specific rules.
+        </p>
+
+        <div class="callout note">
+            <strong>Why one method per first character?</strong>
+            The compiler comments call out a measurable JIT cliff: a single matcher of
+            roughly 20 KB was slower than a table of small methods. Splitting by first
+            character keeps each generated method below the large-method optimisation
+            threshold, gives the JIT a simple constant range for its switch tables, and
+            makes the hot path a predictable array index plus a short delegate call.
+        </div>
+
+        <h2 id="hot-path">What the hot path actually does</h2>
+        <p>
+            For a property-heavy stylesheet, most name classification follows this
+            sequence:
+        </p>
+        <ol>
+            <li><code>ScanName</code> walks the maximal identifier, handling escapes and non-ASCII characters without allocating.</li>
+            <li><code>ClassifyName</code> checks whether the next character is <code>(</code>. If so, the token is a function and the exact table is skipped entirely.</li>
+            <li><code>MinLengthByFirstChar[first]</code> rejects candidates shorter than any rule with that first character. Single-letter identifiers never enter the generated matcher.</li>
+            <li><code>ExactMatch</code> indexes the first-character group, switches on length and walks a small character trie or comparison chain.</li>
+            <li>The result is written into <code>Token</code> as a packed <code>(start, length)</code> location plus an interned text id.</li>
+        </ol>
+
+        <p>
+            The submitted character stream is never sliced into temporary strings. A
+            token stores only the interned id and a 32-bit location: 24 bits of start
+            offset and 8 bits of length. A <code>Token</code> is 12 bytes, so a
+            megabyte-scale stylesheet with roughly 380,000 tokens uses about 4.6 MB for
+            the token buffer before list overhead.
+        </p>
+
+        <div class="callout warning">
+            <strong>The 255-character and 16.7-million-character limits are real</strong>
+            The packed location cannot address a source longer than 16,777,215
+            characters. Tokens longer than 255 characters, such as a large
+            <code>data:</code> URI or string, are split into consecutive chunks that
+            share a kind; downstream consumers concatenate chunk text to recover the
+            original value.
+        </div>
+
+        <h2 id="allocation">Allocation behaviour</h2>
+        <p>
+            The tokenizer consumes <code>ReadOnlySpan&lt;char&gt;</code> and advances by
+            index; it does not materialise an intermediate token-text array. The token
+            destination is a <code>List&lt;Token&gt;</code> written through
+            <code>CollectionsMarshal.AsSpan</code>, so the loop avoids
+            <code>List&lt;Token&gt;.Add</code> and its bounds/count bookkeeping.
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Mechanism</th><th>What it buys</th></tr></thead>
+                <tbody>
+                    <tr><td><code>ReadOnlySpan&lt;char&gt;</code> + indices</td><td>No substring allocation for scanning, matching or token boundaries.</td></tr>
+                    <tr><td>Packed <code>Token.Location</code></td><td>12-byte tokens instead of separate start/end integers.</td></tr>
+                    <tr><td>Pre-sized token buffer</td><td>Initial capacity is <code>max(16, sourceLength / 2 + 16)</code>; the benchmark corpus needs no growth.</td></tr>
+                    <tr><td><code>CollectionsMarshal.SetCount</code></td><td>Writes directly into the backing array and trims to the exact count once at the end.</td></tr>
+                    <tr><td>Interned text</td><td>Repeated names and punctuation become stable integer ids used by later stages.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            The honest caveat is that “zero allocation” describes the steady state, not
+            the first time a document introduces a new token text. <code>InternTable</code>
+            allocates the string on first sighting, then stores it in a dense global
+            table. Subsequent lookups use a thread-static front cache and
+            <code>AlternateLookup&lt;ReadOnlySpan&lt;char&gt;&gt;</code>, so the common
+            case does not need a lock or a new string. Single ASCII punctuation
+            characters use a pre-computed 128-entry id table, which removes the global
+            lock from the most frequent tokens in CSS.
+        </p>
+
+        <p>
+            The table never evicts. Its size follows the number of distinct token texts,
+            not the number of tokens, which is the right trade-off for finite
+            stylesheets but something to keep in mind for long-running apps that
+            generate unbounded CSS text. Reusing a cleared token list avoids the one
+            large backing-array allocation per document.
+        </p>
+
+        <h2 id="performance">Performance</h2>
+        <p>
+            The parser benchmark has two measurements: the exact matcher over a hot
+            token stream, and a full <code>Tokenizer.Parse</code> over a synthetic
+            stylesheet built from every registered rule. The quick runner uses warmup
+            plus repeated runs, and reports the best run.
+        </p>
+
+        <div class="code" data-label="Benchmark">
+<pre><code>dotnet run --project Donkeh/Parser/Benchmark/Benchmark.csproj \
+  -c Release -- --quick</code></pre>
+        </div>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Measurement</th><th>Result</th></tr></thead>
+                <tbody>
+                    <tr><td>Corpus</td><td>1,013,028 bytes, 381,640 tokens</td></tr>
+                    <tr><td>Full parse time</td><td>4.97 ms per document</td></tr>
+                    <tr><td>Document throughput</td><td>203.8 MB/s</td></tr>
+                    <tr><td>Token throughput</td><td>76.8 M tokens/s</td></tr>
+                    <tr><td>Steady-state allocation</td><td>0 B per parse</td></tr>
+                    <tr><td>Exact matcher</td><td>4.81 ns/token, 207.9 M tokens/s</td></tr>
+                    <tr><td>Matcher text throughput</td><td>1,926.4 MB/s</td></tr>
+                    <tr><td>Matcher allocation</td><td>0 B per pass</td></tr>
+                    <tr><td>IL compilation</td><td>0.98 ms, 484,952 B, 0 GC collections</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            These numbers were measured on .NET 10.0.10, Windows 10, a 12-logical-core
+            workstation with workstation GC in interactive latency mode. They are a
+            shape, not a promise: token distribution, CPU, GC mode and whether the
+            intern table is warm all move the result. The important part is the ratio
+            between full-document throughput and raw matcher throughput: the structural
+            scan and token writing dominate, while keyword classification is already in
+            the low-single-digit-nanoseconds-per-token range.
+        </p>
+
+        <div class="callout tip">
+            <strong>Why the compiler cost is acceptable</strong>
+            Compilation is a one-time type-initialisation cost, not a per-document cost.
+            The quick benchmark measures roughly a millisecond and half a megabyte for
+            the IL pass after the rules are registered. In a desktop app this happens
+            once before the first stylesheet is parsed; the alternative is interpreting
+            a 795-rule table on every token.
+        </div>
+
+        <h2 id="trade-offs">Trade-offs and sharp edges</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Decision</th><th>Cost or limitation</th></tr></thead>
+                <tbody>
+                    <tr><td>Runtime IL instead of a build-time artifact</td><td>Adds a small first-touch cost and depends on <code>DynamicMethod</code>. A build-time generator would remove both and be friendlier to ahead-of-time publishing.</td></tr>
+                    <tr><td>One generated method per first character</td><td>More methods and delegates to manage, but each method stays below the JIT large-method threshold.</td></tr>
+                    <tr><td>Exact matching, not prefix matching</td><td>Requires the scanner to consume the maximal identifier first. That is exactly what makes longest-match correct and keeps the generated trie small.</td></tr>
+                    <tr><td>Linear comparison below six candidates</td><td>Deliberately trades a few comparisons for smaller code and better instruction-cache behaviour.</td></tr>
+                    <tr><td>Global interning</td><td>Ids are stable for the process but the table grows forever; it is not a cache with eviction.</td></tr>
+                    <tr><td>Packed token location</td><td>Excellent density, but a 16.7M-character source limit and 255-character token chunks are visible constraints.</td></tr>
+                    <tr><td>Hand-written structural lexer</td><td>Some CSS context is resolved with look-behind, for example distinguishing a declaration colon from a pseudo-class colon after a property name.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            One deliberately non-obvious case is <code>background-position:right</code>
+            with no whitespace after the colon. A context-free lexer would see
+            <code>:right</code> as a pseudo-class. <code>IsDeclarationColon</code> checks
+            whether the previous token is a property name preceded by <code>{</code> or
+            <code>;</code>, and emits a plain colon instead. Selectors keep their
+            pseudo-class token because their preceding tokens do not match that shape.
+        </p>
+
+        <h2 id="code-tour">Code tour</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>File</th><th>Start here for…</th></tr></thead>
+                <tbody>
+                    <tr><td><code>Parser/Source/Tokenizer.cs</code></td><td>The outer scan, token emission, capacity growth, strings, numbers and escapes.</td></tr>
+                    <tr><td><code>Parser/Source/Rules/Rules.cs</code></td><td>The static constructor, registration order and <code>MinLengthByFirstChar</code> setup.</td></tr>
+                    <tr><td><code>Parser/Source/Rules/*.cs</code></td><td>Per-letter property registrations. Diff-friendly, no runtime logic.</td></tr>
+                    <tr><td><code>Parser/Source/Tokenizer/PseudoClasses.cs</code></td><td>The 78 pseudo-class names, registered as complete <code>:name</code> rules.</td></tr>
+                    <tr><td><code>Parser/Source/Tokenizer/PseudoElements.cs</code></td><td>The 30 pseudo-element names, registered as complete <code>::name</code> rules.</td></tr>
+                    <tr><td><code>Parser/Source/Functions/*.cs</code></td><td>The function-name table, including property/function overlaps.</td></tr>
+                    <tr><td><code>Parser/Source/Builder/RuleBuilder.cs</code></td><td>The declarative authoring API and duplicate-kind policy.</td></tr>
+                    <tr><td><code>Parser/Source/Compilation/Compiler.cs</code></td><td>Grouping, length switches, trie emission and the first-character jump table.</td></tr>
+                    <tr><td><code>Parser/Source/Compilation/ILGeneratorWrapper.cs</code></td><td>Readable IL emission and the optional <code>IGNITE_SHOW_IL=1</code> dump.</td></tr>
+                    <tr><td><code>Parser/Source/Objects/Token.cs</code></td><td>The 12-byte token and its packed 24/8-bit location layout.</td></tr>
+                    <tr><td><code>Parser/Source/InternTable.cs</code></td><td>Dense ids, thread-local caching, ASCII fast path and span lookups.</td></tr>
+                    <tr><td><code>Parser/Benchmark/Program.cs</code></td><td>The quick benchmark, corpus builder and allocation columns.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            The useful mental model is: the scanner decides <em>where</em> a token ends,
+            and the generated matcher decides <em>what</em> a maximal name means. Keeping
+            those responsibilities separate is what allows the declarative rule table to
+            be large without putting an interpreter in the per-character path.
+        </p>
+
+        <div class="page-nav">
+            <a class="prev" href="implementation.html"><span>Previous</span>Implementation for Nerds</a>
+            <a class="next" href="implementation-data.html"><span>Next</span>Data</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh | CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/donkeh-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>

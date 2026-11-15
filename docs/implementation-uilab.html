@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>UILab | Donkeh</title>
+    <meta name="description" content="Implementation notes for Donkeh.UILab: design decisions, data structures, trade-offs and hot paths.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/donkeh-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+                <a href="routing.html">Routing and setPage</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Reference</span>
+                <a href="html-elements.html">HTML elements</a>
+                <a href="css-support.html">CSS support</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Primitives</span>
+                <a href="image.html">Image</a>
+                <a href="video.html">Video</a>
+                <a href="canvas.html">Canvas</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+                        <div class="nav-group">
+                <span class="nav-label">Implementation for Nerds</span>
+                <a href="implementation.html">Overview</a>
+                <a class="nav-sub" href="implementation-parser.html">Parser</a>
+                <a class="nav-sub" href="implementation-data.html">Data</a>
+                <a class="nav-sub" href="implementation-dataengine.html">DataEngine</a>
+                <a class="nav-sub" href="implementation-layoutlab.html">LayoutLab</a>
+                <a class="nav-sub" href="implementation-uilab.html">UILab</a>
+                <a class="nav-sub" href="implementation-hosting.html">Hosting</a>
+                <a class="nav-sub" href="implementation-windowing.html">Windowing</a>
+                <a class="nav-sub" href="implementation-android.html">Android</a>
+                <a class="nav-sub" href="implementation-browser.html">Browser</a>
+                <a class="nav-sub" href="implementation-inspector.html">Inspector</a>
+                <a class="nav-sub" href="implementation-cli.html">CLI tool</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/donkeh-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Implementation for Nerds <span>/</span> UILab</div>
+        <h1>UILab</h1>
+        <p class="lead">
+            <code>UILab</code> is the component layer: a small React-shaped runtime
+            for C#. It owns the virtual tree, component instances, hooks, context,
+            routing and the reconciliation that turns a new render into in-place
+            mutations of the live tree. That live tree is also the DOM the CSS matcher
+            and layout engine consume, so there is no second translation step between
+            the component model and the engine.
+        </p>
+
+        <h2 id="shape">One tree, two roles</h2>
+        <p>
+            Every node implements <code>IgniteSupportedDomNode</code>. The same tree
+            that describes elements and text is the tree the selector matcher walks and
+            the layout engine boxes. UILab does not render pixels; it produces a live
+            DOM-shaped tree and a version number that tells the host when to repaint.
+        </p>
+
+        <div class="tree">Component.Render()
+└── Node description
+    ├── ElementNode      real element, attributes, events, children
+    ├── TextNode         text run
+    ├── FragmentNode     transparent grouping
+    ├── ComponentNode    logical: instance + last output
+    └── ProviderNode     logical: context value + child scope
+            │
+            └── Renderer mount / diff
+                └── live tree (elements, text, fragments)
+                    ├── Donkeh.Data selector matching
+                    └── Donkeh.LayoutLab boxes and paint
+</div>
+
+        <p>
+            Component and provider nodes never appear in the live tree. They stay in
+            the virtual tree so their instances and published context values survive
+            across renders. The host only ever sees the materialised output.
+        </p>
+
+        <h2 id="builders">Building a tree</h2>
+        <p>
+            <code>_</code> is the terse builder: <code>H</code> for elements,
+            <code>Text</code> for text, <code>C&lt;T&gt;</code> for components,
+            <code>F</code> for fragments and helpers such as <code>Show</code> and
+            <code>Each</code>. <code>HtmlHelper</code> adds 138 typed element factories
+            that produce exactly the same nodes, so <code>Div(...)</code> and
+            <code>H("div", ...)</code> are interchangeable.
+        </p>
+
+        <div class="code" data-label="Builders">
+<pre><code>using static Donkeh.UILab._;
+using static Donkeh.UILab.HtmlHelper;
+
+var card = Div(new() { ClassName = "card" },
+    H2(new(), Text("Files")),
+    Show(isReady, P(new(), Text("Ready"))),
+    Each(files, file =&gt; Li(new() { Key = file.Id }, Text(file.Name))));</code></pre>
+        </div>
+
+        <p>
+            Element attributes and class names are interned immediately. A
+            <code>Props</code> value is converted into an id-based representation once,
+            so the diff compares integers rather than strings. Dedicated properties
+            such as <code>Id</code>, <code>ClassName</code>, <code>Href</code> and
+            <code>Disabled</code> are applied before the arbitrary
+            <code>Attributes</code> dictionary; a <code>class</code> entry appends
+            tokens, while an <code>id</code> entry replaces the dedicated id.
+        </p>
+
+        <p>
+            Text children are first-class. A pure-text child list is folded into the
+            element’s <code>TextContent</code> instead of allocating one
+            <code>TextNode</code> per run, which is a significant win for labels,
+            buttons and table cells. Numeric and boolean values obtain implicit text
+            conversions using invariant culture so rendered numbers stay stable across
+            machines.
+        </p>
+
+        <h2 id="components">Components and lifecycle</h2>
+        <p>
+            A component is a class with a public parameterless constructor and a
+            <code>Render</code> method. The renderer creates exactly one instance per
+            mounted <code>ComponentNode</code>, assigns props and context scope, and
+            reuses the instance for every later render. Unmounting discards it, which is
+            exactly why hook state lives as long as the component stays in the tree.
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Member</th><th>When it runs</th></tr></thead>
+                <tbody>
+                    <tr><td><code>Render()</code></td><td>During mount and every update. Hooks are only legal inside this window.</td></tr>
+                    <tr><td><code>OnMount()</code></td><td>After the first subtree commit and ref attachment, before the root mount returns.</td></tr>
+                    <tr><td><code>OnUpdate()</code></td><td>After a committed re-render. Not called when <code>ShouldRender</code> vetoes a parent-driven render.</td></tr>
+                    <tr><td><code>OnUnmount()</code></td><td>Before hook cleanups and before the mounted flag is cleared.</td></tr>
+                    <tr><td><code>ShouldRender()</code></td><td>Lets a component skip a parent-driven render while still receiving new props and context.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            <code>Component&lt;TProps&gt;</code> adds a typed <code>Props</code>
+            payload. Props are assigned before <code>ShouldRender</code>, so an override
+            can compare old and new values. A <code>null</code> render result is a bug,
+            not an empty view; return an empty fragment instead.
+        </p>
+
+        <h2 id="reconciliation">Reconciliation</h2>
+        <p>
+            The renderer mounts an initial tree and then diffs every later render in
+            place. It never rebuilds the whole tree. Nodes keep their identity, and
+            mutations bump revisions only when something actually changed, which is what
+            preserves layout cache entries for untouched subtrees.
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Step</th><th>Behaviour</th></tr></thead>
+                <tbody>
+                    <tr><td>Kind check</td><td>Components match by exact type, providers by <code>Context&lt;T&gt;</code> identity, elements by interned tag name, fragments and text by kind.</td></tr>
+                    <tr><td>Mismatch</td><td>Unmount the old subtree and mount the new one, discarding component state below it.</td></tr>
+                    <tr><td>Element match</td><td><code>PatchFrom</code> rewrites attributes, classes, events and refs in place; children are diffed recursively.</td></tr>
+                    <tr><td>Text match</td><td>The existing <code>TextNode</code> is reused; assigning identical text suppresses the revision bump.</td></tr>
+                    <tr><td>Keyed children</td><td>Matched by key regardless of position, so reorders move nodes instead of remounting them.</td></tr>
+                    <tr><td>Unkeyed children</td><td>Try the same index first, then the first unused positional slot of the same kind.</td></tr>
+                    <tr><td>Unused old children</td><td>Unmounted after the new list is built, releasing refs, handlers and component state.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            A component whose output is another component or provider has no live node
+            of its own. The renderer pushes the parent output slot down the logical chain
+            until it reaches the first live node, which lets a nested component replace
+            itself in place when its output kind changes.
+        </p>
+
+        <h2 id="hooks">Hooks</h2>
+        <p>
+            Hook identity is positional. Each component owns an append-only list of hook
+            slots, and <code>BeginRender</code> resets a cursor to zero. The nth hook
+            call always maps to the nth slot; adding, removing or moving a hook changes
+            the sequence and throws instead of silently corrupting state.
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Hook</th><th>Storage and behaviour</th></tr></thead>
+                <tbody>
+                    <tr><td><code>State</code> / <code>StateWithUpdate</code></td><td>Value plus a stable setter; equality suppresses unchanged writes. Functional updates read the current value at call time.</td></tr>
+                    <tr><td><code>Reducer</code></td><td>State plus a stable dispatcher. The latest reducer is captured each render; unchanged results do not queue work.</td></tr>
+                    <tr><td><code>Effect</code> / <code>LayoutEffect</code></td><td>Dependency arrays compared element by element. Cleanup runs before the next body and on unmount; layout effects run before passive effects.</td></tr>
+                    <tr><td><code>Memo</code> / <code>Callback</code></td><td>Caches a value or delegate by dependency array; without dependencies the factory runs every render.</td></tr>
+                    <tr><td><code>UseRef</code></td><td>Stable mutable box. Writes never schedule a render; element refs are attached on mount and cleared on unmount.</td></tr>
+                    <tr><td><code>UseContext</code></td><td>Reads the nearest provider from the scope captured at render time, falling back to the context’s default.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            State setters throw during render. That is intentional: a render must be a
+            pure function of the captured state. Updates belong in event handlers or
+            effects, where they are queued and applied by the flush loop.
+        </p>
+
+        <h2 id="scheduler">The flush loop</h2>
+        <p>
+            State updates mark a component dirty and enqueue it once. With
+            <code>AutoFlush</code> on, the queue flushes synchronously; with it off, the
+            host calls <code>Flush</code> from its frame loop. The loop processes every
+            dirty component, commits effects, and repeats if an effect queued more work.
+            A hard limit of 64 passes catches an effect that updates state
+            unconditionally.
+        </p>
+
+        <div class="code" data-label="Flush loop">
+<pre><code>while (dirty.Count &gt; 0)
+{
+    foreach (component in dirty)
+        UpdateComponent(component);
+
+    CommitEffects();     // layout effects, then passive effects
+    Version++;          // host wake-up signal
+}
+
+AfterUpdate?.Invoke(); // one signal after a settled pass</code></pre>
+        </div>
+
+        <p>
+            Effects run only after the whole dirty queue has been applied, so they
+            observe a fully patched tree rather than a half-updated one. Components are
+            visited in render order and hooks in declaration order. <code>Version</code>
+            is a wake-up counter, not a content hash: a flush that processes a component
+            bumps it even if the resulting tree is identical.
+        </p>
+
+        <h2 id="context">Context</h2>
+        <p>
+            <code>Context&lt;T&gt;</code> is identified by instance identity, not by type.
+            A provider publishes a value into an immutable scope chain; consumers read
+            the nearest matching scope. Values are captured per render, so a later
+            state-driven render sees the same context it saw when it was rendered.
+        </p>
+        <p>
+            A provider republishing a different value does not by itself force existing
+            consumers to re-render; they update the next time they render for some other
+            reason. Providers render as transparent fragments, so context does not add a
+            box to the layout tree. Routing is built on the same mechanism:
+            <code>AppRouter</code> publishes <code>Router.Path</code> and
+            <code>Router.SetPage</code>.
+        </p>
+
+        <h2 id="events-refs">Events and refs</h2>
+        <p>
+            Events are ordinary delegates stored in an element’s event map keyed by a
+            normalised lowercase name. <code>Props</code> exposes common handlers such as
+            <code>OnClick</code>, <code>OnPointerDown</code>, <code>OnInput</code> and
+            <code>OnKeyDown</code>; arbitrary events can go through
+            <code>Attr(name, handler)</code>. Hosts mirror handler presence into their
+            own event system, but the delegate stays owned by the element.
+        </p>
+        <p>
+            <code>Ref&lt;ElementNode&gt;</code> points at a mounted element and is cleared
+            on unmount. Refs are an escape hatch for host integration and measurements,
+            not a way to drive rendering: writing to a ref never schedules work.
+        </p>
+
+        <h2 id="stylesheets">Stylesheets and assets</h2>
+        <p>
+            <code>[assembly: Stylesheet("path.css")]</code> declares an embedded CSS
+            resource. <code>Stylesheet.Load()</code> scans assemblies and type/module
+            attributes, reads the matching embedded resources and concatenates them. It
+            is reflection-heavy and uncached, so load once at startup and keep the
+            string. Packed images use the parallel <code>[Image]</code> / <code>Image</code>
+            API.
+        </p>
+
+        <h2 id="performance">Why it stays cheap</h2>
+        <ul>
+            <li><strong>Interned identity.</strong> Tag names, attribute names, class names and attribute values are integer ids, so patches compare ints.</li>
+            <li><strong>In-place mutation.</strong> The live tree is reused; only changed fields bump revisions, preserving layout caches for untouched subtrees.</li>
+            <li><strong>Text folding.</strong> All-text children collapse into one <code>TextContent</code> string instead of allocating one node per run.</li>
+            <li><strong>One queue entry per component.</strong> Repeated state updates in one pass collapse through the <code>Queued</code> flag.</li>
+            <li><strong>Static component factories.</strong> Reflection for the public parameterless constructor happens once per component type, then a cached delegate is reused.</li>
+            <li><strong>Stable keyed matching.</strong> Reorders move existing nodes and preserve component state instead of remounting a list.</li>
+            <li><strong>No second tree translation.</strong> The live tree is already the DOM consumed by matching and layout.</li>
+        </ul>
+
+        <h2 id="trade-offs">Trade-offs and sharp edges</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Decision</th><th>Cost</th></tr></thead>
+                <tbody>
+                    <tr><td>Positional hooks</td><td>Fast and allocation-light, but hooks must be unconditional and in stable order.</td></tr>
+                    <tr><td>Mutable live nodes</td><td>No tree rebuild, but the tree is not thread-safe and must only be touched by its renderer.</td></tr>
+                    <tr><td>Public parameterless constructors</td><td>Simple, cacheable construction, but components cannot receive constructor dependencies.</td></tr>
+                    <tr><td>Per-render context snapshots</td><td>Predictable reads, but publishing a new value does not automatically notify every consumer.</td></tr>
+                    <tr><td>No error boundaries</td><td>A throwing render or effect bubbles to the host; there is no component-level recovery boundary.</td></tr>
+                    <tr><td>Keyed matching by linear scan</td><td>Fine for typical lists; very large lists pay for the scan rather than maintaining an index.</td></tr>
+                    <tr><td>Silent no-op after unmount</td><td>A late state setter is harmless, which also means a missed cleanup may go unnoticed.</td></tr>
+                    <tr><td>One renderer per tree</td><td>Mounted once, single-threaded, no concurrent rendering or SSR path.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="code-tour">Code tour</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>File</th><th>Read it for…</th></tr></thead>
+                <tbody>
+                    <tr><td><code>UILab/Source/Renderer.cs</code></td><td>Mount, diff, keyed children, component updates, effects and the flush loop.</td></tr>
+                    <tr><td><code>UILab/Source/Component.cs</code></td><td>Lifecycle, typed props, render window and dirty marking.</td></tr>
+                    <tr><td><code>UILab/Source/Hooks.cs</code></td><td>State, reducer, effects, memo, ref, context and positional slot enforcement.</td></tr>
+                    <tr><td><code>UILab/Source/Node.cs</code></td><td>Live node kinds, element storage, attributes, refs, events and text handling.</td></tr>
+                    <tr><td><code>UILab/Source/Underscore.cs</code></td><td>The terse builders, child normalisation, fragments and conditional helpers.</td></tr>
+                    <tr><td><code>UILab/Source/Props.cs</code></td><td>Dedicated attributes, arbitrary attribute dictionary and event surface.</td></tr>
+                    <tr><td><code>UILab/Source/Routing.cs</code></td><td><code>AppRouter</code>, routes, links and the path/setPage contexts.</td></tr>
+                    <tr><td><code>UILab/Source/HtmlHelper.cs</code></td><td>138 typed element factories.</td></tr>
+                    <tr><td><code>UILab/Source/Stylesheet.cs</code> / <code>Image.cs</code></td><td>Embedded CSS and packed image discovery.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            The useful mental model: UILab is a reconciliation engine over an
+            already-DOM-shaped tree. Components describe output; the renderer patches
+            nodes in place; Data and LayoutLab consume the patched tree without knowing
+            that a component model produced it.
+        </p>
+
+        <div class="page-nav">
+            <a class="prev" href="implementation-layoutlab.html"><span>Previous</span>LayoutLab</a>
+            <a class="next" href="implementation-hosting.html"><span>Next</span>Hosting</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh | CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/donkeh-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Inspector | Donkeh</title>
+    <meta name="description" content="Implementation notes for Donkeh.Inspector: design decisions, data structures, trade-offs and hot paths.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/donkeh-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+                <a href="routing.html">Routing and setPage</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Reference</span>
+                <a href="html-elements.html">HTML elements</a>
+                <a href="css-support.html">CSS support</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Primitives</span>
+                <a href="image.html">Image</a>
+                <a href="video.html">Video</a>
+                <a href="canvas.html">Canvas</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+                        <div class="nav-group">
+                <span class="nav-label">Implementation for Nerds</span>
+                <a href="implementation.html">Overview</a>
+                <a class="nav-sub" href="implementation-parser.html">Parser</a>
+                <a class="nav-sub" href="implementation-data.html">Data</a>
+                <a class="nav-sub" href="implementation-dataengine.html">DataEngine</a>
+                <a class="nav-sub" href="implementation-layoutlab.html">LayoutLab</a>
+                <a class="nav-sub" href="implementation-uilab.html">UILab</a>
+                <a class="nav-sub" href="implementation-hosting.html">Hosting</a>
+                <a class="nav-sub" href="implementation-windowing.html">Windowing</a>
+                <a class="nav-sub" href="implementation-android.html">Android</a>
+                <a class="nav-sub" href="implementation-browser.html">Browser</a>
+                <a class="nav-sub" href="implementation-inspector.html">Inspector</a>
+                <a class="nav-sub" href="implementation-cli.html">CLI tool</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/donkeh-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Implementation for Nerds <span>/</span> Inspector</div>
+        <h1>Inspector</h1>
+        <p class="lead">
+            <code>Donkeh.Inspector</code> is the in-app devtools panel. It is not a
+            separate viewer and it does not clone the application tree: it renders a
+            normal UILab component over the live mounted nodes, uses the same compiled
+            stylesheet and the same layout result, and queues every edit back to the
+            frame thread that owns the app.
+        </p>
+
+        <h2 id="shape">Three pieces</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Piece</th><th>Role</th></tr></thead>
+                <tbody>
+                    <tr><td><code>DevToolsState</code></td><td>Shared mutable state: visibility, dock, tabs, selection, hover, expanded nodes, stylesheet table, layout result, performance samples and the deploy service.</td></tr>
+                    <tr><td><code>InspectorPanel</code></td><td>A normal <code>Component</code> that renders the toolbar, tree, styles, animations, performance and deploy tabs from that state.</td></tr>
+                    <tr><td><code>DeployState</code> / <code>DownloadServer</code></td><td>Project discovery, build targets, process execution, logs and the local HTTP download endpoint.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            The window owns one <code>DevToolsState</code> and gives the panel its own
+            <code>Renderer</code>, <code>LayoutEngine</code>, renderer context and
+            display list. A docked panel reserves space from the app viewport; a
+            standalone panel runs in its own native window on a separate thread and
+            queues edits back to the frame thread.
+        </p>
+
+        <div class="callout note">
+            <strong>The panel is a normal component</strong>
+            It uses the same builders, props, hooks and layout engine as the app. That
+            keeps the inspector honest: bugs in the panel are bugs in the engine. It also
+            means the inspector cannot use inline styles; state-dependent sizing is
+            encoded in generated utility classes.
+        </div>
+
+        <h2 id="state">Shared state and refresh</h2>
+        <p>
+            The host updates <code>DevToolsState</code> from the frame loop and bumps a
+            single version counter. <code>InspectorPanel.Tick()</code> polls that version
+            and schedules a render only when it changed, so an idle inspector costs
+            almost nothing. Selection, hover and expansion use node identity
+            (<code>ReferenceEqualityComparer</code>), because nodes do not define value
+            equality.
+        </p>
+
+        <p>
+            Stylesheet and DOM mutations never run directly from the panel. They are
+            queued through <code>QueueEdit</code> and drained by the host before layout.
+            That is essential in window mode: the panel thread and the render thread are
+            different, and the table and box tree are not thread-safe.
+        </p>
+
+        <h2 id="elements">Elements tab</h2>
+        <p>
+            The tree is the logical tree, not just the live DOM shape. It includes
+            component and provider rows with their rendered output nested underneath, so
+            a developer can see why an element exists. Fragment nodes are followed
+            through; on first open the tree expands down to the first branching point,
+            at most eight levels.
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Feature</th><th>Behaviour</th></tr></thead>
+                <tbody>
+                    <tr><td>Selection / hover</td><td>Node identity, with a highlight overlay drawn by the host over the selected box.</td></tr>
+                    <tr><td>Inspect mode</td><td>Pointer clicks pick the app element under the cursor instead of interacting with the app.</td></tr>
+                    <tr><td>Expansion</td><td>A set of expanded nodes pruned every render when nodes unmount; selection can scroll itself into view.</td></tr>
+                    <tr><td>Component rows</td><td>Show the component type and its current output kind without pretending to be an element.</td></tr>
+                    <tr><td>Text rows</td><td>Show the text content and its node identity.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            The Styles pane matches rules with the same <code>DataTable</code> and
+            <code>RendererContext</code> the app used, groups them by origin and selector,
+            and reverses the list so the strongest group is first. Rule ranges recorded
+            at stylesheet rebuild time label each match as <code>user-agent</code>,
+            <code>author #N</code> or <code>devtools</code>.
+        </p>
+
+        <p>
+            Computed values come from the real <code>LayoutResult</code>, not from a
+            second style pass. If the element has no box, the pane says so instead of
+            inventing values. The grouping is cached by element identity, element
+            revision, state version and table instance, because matching, selector text
+            and declaration interning are the expensive parts of the pane.
+        </p>
+
+        <h3>Editing</h3>
+        <p>
+            Declarations are edited in place. Property changes commit on Enter or focus
+            loss; value changes commit live when the text looks complete and again on
+            change. Pasting into the add row parses one or more declarations, or a whole
+            rule block, and applies them to the same group. Edits are queued as table
+            mutations, so the next app layout sees them through the normal cascade.
+        </p>
+        <p>
+            The inspector can also create an element-level style rule for the selected
+            node and add declarations to it. It does not restructure the application
+            tree. Its own highlight and selection markers are private
+            <code>data-*</code> attributes on the live elements, not a second app tree.
+        </p>
+
+        <h2 id="color">Colour picker</h2>
+        <p>
+            <code>ColorPreview</code> converts between CSS colour text and the engine’s
+            packed <code>0xAARRGGBB</code>. It understands <code>#rgb</code>,
+            <code>#rgba</code>, <code>#rrggbb</code>, <code>#rrggbbaa</code>,
+            comma/space/slash <code>rgb()</code>/<code>rgba()</code> and a small named
+            set. Unsupported syntax never throws; it simply does not get a swatch.
+        </p>
+        <p>
+            The picker is a modal popup with a 110 px hue/saturation wheel, a live hex
+            field and preset swatches. Pointer angle selects hue, distance selects
+            saturation, and value stays at full brightness. Every move queues a rule
+            value edit, but identical interned values are skipped. Preset rows are laid
+            out eight per row because the engine has no inline styles.
+        </p>
+
+        <h2 id="performance">Performance tab</h2>
+        <p>
+            The host samples frame, layout, render and UILab update timings, frame count,
+            instruction count, box count, node count, CPU, managed/working/private
+            memory, thread count and GC generations. Sampling is throttled: the window
+            updates roughly four times per second, and the panel refreshes about once per
+            second while this tab is active.
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Surface</th><th>Content</th></tr></thead>
+                <tbody>
+                    <tr><td>Cards</td><td>FPS, CPU, managed/working set, GC counts, layout, render, update and total frames.</td></tr>
+                    <tr><td>Graphs</td><td>Frame history at a 33 ms scale, layout and render history at 16 ms scales.</td></tr>
+                    <tr><td>Bars</td><td>Quantised to 120 height classes; no inline styles or canvas drawing.</td></tr>
+                    <tr><td>History</td><td>Fixed-size ring buffers; the panel reads spans, it does not sample on the UI thread.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="animations">Animations tab</h2>
+        <p>
+            Keyframes are read directly from the <code>DataTable</code>. Frames are
+            grouped by animation name in first-seen order, then stops are grouped by
+            selector text such as <code>from</code>, <code>50%</code> or <code>to</code>.
+            Declarations are displayed from interned property and value ids. The selected
+            animation is part of <code>DevToolsState</code>; unknown selections fall back
+            to the first group.
+        </p>
+
+        <h2 id="deploy">Deploy tab</h2>
+        <p>
+            <code>DeployState</code> discovers the application project, derives targets
+            from its target frameworks and provides build buttons plus logs. Discovery
+            starts beside the entry assembly, then the base and current directories, and
+            walks upward. A project whose name matches the entry assembly wins when a
+            folder contains several projects.
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Target</th><th>Command / output</th></tr></thead>
+                <tbody>
+                    <tr><td>Desktop</td><td><code>dotnet build -c Release -f &lt;tfm&gt; -o builds/desktop</code></td></tr>
+                    <tr><td>Android</td><td><code>dotnet build</code> with APK packaging, then copy the signed APK to <code>builds/android</code>.</td></tr>
+                    <tr><td>WebAssembly</td><td><code>dotnet publish -f net10.0-browser -o builds/wasm</code>, then verify <code>index.html</code>.</td></tr>
+                    <tr><td>Custom</td><td>A <code>DeployTarget</code> delegate receives project paths, output directory, configuration and a log sink.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            Builds run on a worker and are sequential, because concurrent
+            <code>dotnet build</code> processes share intermediate directories. A busy
+            flag rejects overlapping starts; every target reports its own state, error,
+            duration, timestamp and trimmed log. Build output notifications are
+            throttled to a 200 ms window so a noisy build cannot monopolise the frame
+            loop.
+        </p>
+
+        <h3>Download server</h3>
+        <p>
+            The Deploy tab can expose the build directory over a tiny HTTP server. It
+            uses a raw <code>TcpListener</code> instead of <code>HttpListener</code>, so
+            no Windows URL reservation or administrator rights are needed. It binds all
+            IPv4 interfaces, supports <code>GET</code> and <code>HEAD</code>, lists the
+            build directory, streams large files, rejects path traversal and closes each
+            connection after one request.
+        </p>
+
+        <div class="callout warning">
+            <strong>Local-network file server, no authentication</strong>
+            The download server is intended for a trusted local network. Anyone who can
+            reach the port can browse and download the build artifacts. Stop it when not
+            deploying; changing the root stops a running server.
+        </div>
+
+        <h2 id="host-integration">Host integration</h2>
+        <p>
+            The host compiles the inspector stylesheet after the user agent and author
+            sheets, so its rules win source-order ties. Dock sizes are generated as
+            <code>dt-dockh-N</code> and <code>dt-dockw-N</code> classes rather than
+            inline styles. <code>DevToolsDock.Window</code> opens a separate native
+            window on an STA thread and shares the same state; edits are queued and
+            drained on the app frame thread.
+        </p>
+        <p>
+            Hiding the inspector exits inspect mode, closes the colour picker and removes
+            the docked viewport reservation. Disabling devtools removes its shortcut and
+            skips its stylesheet, layout engine and overlay submission entirely.
+        </p>
+
+        <h2 id="trade-offs">Trade-offs and sharp edges</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Decision</th><th>Cost</th></tr></thead>
+                <tbody>
+                    <tr><td>Live tree, no clone</td><td>Edits and selection reflect the real app immediately, but the inspector must respect node lifetimes and thread ownership.</td></tr>
+                    <tr><td>Panel is a UILab component</td><td>Dogfoods the engine and reuses all layout/paint code, but every inspector layout costs a second engine pass.</td></tr>
+                    <tr><td>Generated utility classes</td><td>Works without inline styles, but dock sizes and graph heights require a finite class table.</td></tr>
+                    <tr><td>Heuristic project discovery</td><td>Zero configuration for normal apps; a published app with no project files simply shows an empty Deploy tab.</td></tr>
+                    <tr><td>Sequential builds</td><td>Avoids MSBuild directory races, at the cost of build-all latency.</td></tr>
+                    <tr><td>Raw TCP download server</td><td>No elevation or URL reservations, but no TLS, authentication or HTTP/1.1 keep-alive.</td></tr>
+                    <tr><td>Throttled sampling</td><td>Keeps the inspector cheap, but the graphs are a coarse diagnostic view, not a profiler trace.</td></tr>
+                    <tr><td>Desktop-oriented</td><td>Window, docking and local build/deploy features assume the native host; the browser host does not include this inspector.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="code-tour">Code tour</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>File</th><th>Read it for…</th></tr></thead>
+                <tbody>
+                    <tr><td><code>DevToolsState.cs</code></td><td>Shared state, tabs, selection, expansion, stylesheet ranges, edit queue, versioning and performance stats.</td></tr>
+                    <tr><td><code>InspectorPanel.cs</code></td><td>Toolbar, tree, styles grouping and editing, colour picker, animations, performance dashboard and deploy UI.</td></tr>
+                    <tr><td><code>InspectorStyles.cs</code></td><td>Panel CSS, dock sizes and generated height/width utility classes.</td></tr>
+                    <tr><td><code>ColorPreview.cs</code></td><td>CSS colour parsing/formatting and HSV helpers.</td></tr>
+                    <tr><td><code>DeployState.cs</code></td><td>Project discovery, target construction, dotnet builds, logs, throttled notifications and download-server wiring.</td></tr>
+                    <tr><td><code>DownloadServer.cs</code></td><td>Raw TCP HTTP server, directory listing, file streaming and traversal rejection.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            The mental model: the inspector is a second UILab application that observes
+            the first one through shared state. It can read the live tree, compiled table
+            and layout result cheaply, but it never owns them; edits go back through the
+            host’s queue so the real application remains the source of truth.
+        </p>
+
+        <div class="page-nav">
+            <a class="prev" href="implementation-browser.html"><span>Previous</span>Browser</a>
+            <a class="next" href="implementation-cli.html"><span>Next</span>CLI tool</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh | CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/donkeh-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>

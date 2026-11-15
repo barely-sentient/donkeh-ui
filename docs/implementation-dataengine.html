@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>DataEngine | Donkeh</title>
+    <meta name="description" content="Implementation notes for Donkeh.DataEngine: design decisions, data structures, trade-offs and hot paths.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/donkeh-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+                <a href="routing.html">Routing and setPage</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Reference</span>
+                <a href="html-elements.html">HTML elements</a>
+                <a href="css-support.html">CSS support</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Primitives</span>
+                <a href="image.html">Image</a>
+                <a href="video.html">Video</a>
+                <a href="canvas.html">Canvas</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+                        <div class="nav-group">
+                <span class="nav-label">Implementation for Nerds</span>
+                <a href="implementation.html">Overview</a>
+                <a class="nav-sub" href="implementation-parser.html">Parser</a>
+                <a class="nav-sub" href="implementation-data.html">Data</a>
+                <a class="nav-sub" href="implementation-dataengine.html">DataEngine</a>
+                <a class="nav-sub" href="implementation-layoutlab.html">LayoutLab</a>
+                <a class="nav-sub" href="implementation-uilab.html">UILab</a>
+                <a class="nav-sub" href="implementation-hosting.html">Hosting</a>
+                <a class="nav-sub" href="implementation-windowing.html">Windowing</a>
+                <a class="nav-sub" href="implementation-android.html">Android</a>
+                <a class="nav-sub" href="implementation-browser.html">Browser</a>
+                <a class="nav-sub" href="implementation-inspector.html">Inspector</a>
+                <a class="nav-sub" href="implementation-cli.html">CLI tool</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/donkeh-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Implementation for Nerds <span>/</span> DataEngine</div>
+        <h1>DataEngine</h1>
+        <p class="lead">
+            <code>Donkeh.DataEngine</code> is the bridge between a token list and the
+            flat <code>DataTable</code>. It is a single forward pass over tokens:
+            no source text ownership, no AST, no backtracking, no re-tokenization.
+            It also owns the condition-compiler hook that turns a query prelude into a
+            predicate for the table.
+        </p>
+
+        <h2 id="role">What the engine owns</h2>
+        <p>
+            The parser below this layer has already removed whitespace and comments and
+            classified every token. DataEngine’s job is structural: decide whether a
+            token run is a rule, a declaration, an at-rule, a nested rule or a
+            descriptor, then write ids into the table. The source string is not retained,
+            and selector or condition token sequences are copied into the table’s arenas
+            so the returned table is independent of the token list.
+        </p>
+
+        <div class="tree">CSS text
+└── Tokenizer.Parse
+    └── List&lt;Token&gt;          (borrowed, never owned)
+        └── CssStreamParser
+            ├── StreamContext     condition / container / rule frames
+            ├── selector composer parent × child flattening
+            ├── text buffer       property/value/interning scratch
+            └── DataTable         selectors, rules, conditions, metadata
+                └── ConditionCompiler once per distinct prelude
+</div>
+
+        <p>
+            <code>DataEngine</code> itself is tiny and immutable. It stores one
+            <code>ConditionCompiler</code> and exposes three entry points:
+            <code>Build(string)</code>, <code>Build(List&lt;Token&gt;)</code> and
+            <code>Build(List&lt;Token&gt;, DataTable)</code>. The last one appends several
+            stylesheets into the same table, preserving call order for the cascade.
+            No compiler means <code>AlwaysFalseCompiler</code>, so gated rules fail closed
+            rather than applying by accident.
+        </p>
+
+        <h2 id="stream-parser">A ref struct, one pass</h2>
+        <p>
+            <code>CssStreamParser</code> is a <code>ref struct</code> that borrows the
+            token span and the destination table. It is stack-only, cannot cross an
+            <code>await</code>, and owns a pooled character buffer that must be returned.
+            That shape is deliberate: it keeps the parser allocation-light while making
+            the lifetime of its borrowed inputs explicit.
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>State</th><th>Purpose</th></tr></thead>
+                <tbody>
+                    <tr><td><code>_tokens</code></td><td>Borrowed token span. Original source offsets survive so gaps can be detected.</td></tr>
+                    <tr><td><code>_table</code></td><td>Destination table, mutated in place.</td></tr>
+                    <tr><td><code>_compiler</code></td><td>Invoked once per distinct condition prelude.</td></tr>
+                    <tr><td><code>StreamContext</code></td><td>Nested condition, container and rule frames plus a flat selector stack.</td></tr>
+                    <tr><td><code>_layerStack</code></td><td>Cascade layers currently entered, outermost first.</td></tr>
+                    <tr><td><code>_composer</code></td><td>Reused token buffer for parent/child selector composition.</td></tr>
+                    <tr><td><code>_selectorScratch</code></td><td>Selector ids for one rule, de-duplicated with a linear scan.</td></tr>
+                    <tr><td><code>_textBuffer</code></td><td>ArrayPool-backed scratch for property and value normalisation.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            The constructor rents 256 characters from
+            <code>ArrayPool&lt;char&gt;.Shared</code>; <code>Dispose</code> returns it.
+            Everything else is reused across the stylesheet, including the selector
+            composer and the selector-id scratch list. The table is pre-sized from
+            <code>tokens.Count / 8</code> so most growth reallocations are avoided
+            without keeping a per-token buffer.
+        </p>
+
+        <h2 id="block-parsing">Blocks, statements and local recovery</h2>
+        <p>
+            <code>Parse</code> calls <code>ParseBlock(topLevel: true)</code>, which loops
+            until EOF. A <code>}</code> closes a non-top-level block; stray closing braces
+            at top level are consumed and ignored. Semicolons at block level are skipped.
+            At-keywords go to <code>ParseAtRule</code>; everything else goes to
+            <code>ParseSegment</code>.
+        </p>
+        <p>
+            <code>ParseSegment</code> first checks for a custom property declaration
+            (<code>--name:</code>) before looking for the rule/declaration split. That
+            ordering matters because a custom-property value may contain braces, and it
+            must not be mistaken for a nested rule. Otherwise
+            <code>FindHeaderEnd</code> scans for the first top-level <code>{</code>,
+            <code>;</code> or <code>}</code>:
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Terminator</th><th>Interpretation</th></tr></thead>
+                <tbody>
+                    <tr><td><code>{</code></td><td>A style rule; the prelude is the selector list and the block is parsed recursively.</td></tr>
+                    <tr><td><code>;</code> or <code>}</code></td><td>A declaration or malformed segment; declaration parsing or local skip recovery.</td></tr>
+                    <tr><td>EOF</td><td>End of input; a truncated statement is abandoned.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            Error recovery is intentionally local and silent. A malformed declaration is
+            skipped to the next top-level <code>;</code>, <code>{</code> or <code>}</code>,
+            parenthesis- and bracket-aware so a semicolon inside <code>url(...)</code> or
+            an attribute selector does not end the skip. A malformed selector prelude
+            still consumes its block, but pushes a container frame that hides the enclosing
+            selector, so declarations cannot leak onto the parent. An at-rule whose
+            prelude ends at EOF or at a closing brace is abandoned without consuming the
+            brace. No parse exception is reported to the caller.
+        </p>
+
+        <h2 id="at-rules">At-rules and the condition chain</h2>
+        <p>
+            <code>ParseAtRule</code> finds the prelude terminator first. A semicolon
+            terminates statement at-rules; a brace starts a block; EOF or an enclosing
+            closing brace abandons the at-rule. Block at-rules are dispatched in a fixed
+            order:
+        </p>
+        <ol>
+            <li><code>@nest</code> — parsed as a nested style rule.</li>
+            <li>Conditions — <code>@media</code>, <code>@supports</code>, <code>@container</code>, <code>@document</code>, <code>@-moz-document</code>, <code>@starting-style</code>.</li>
+            <li><code>@keyframes</code> and <code>@-webkit-keyframes</code>.</li>
+            <li><code>@scope</code>, <code>@layer</code>.</li>
+            <li><code>@page</code> margin boxes and descriptor at-rules.</li>
+            <li>An unknown container, traversed with the selector context hidden.</li>
+        </ol>
+
+        <p>
+            Only condition blocks keep the enclosing selector context. A rule inside
+            <code>@media</code> therefore inherits the selector of the rule it is nested
+            in; a rule inside <code>@layer</code>, <code>@scope</code> or an unknown
+            container does not accidentally attach declarations to the parent. Conditions
+            call <code>DataTable.GetOrAddCondition</code> with the current condition id as
+            the parent, so nesting becomes an AND chain.
+        </p>
+
+        <div class="code" data-label="Nested conditions">
+<pre><code>@media (min-width: 768px) {
+    @media (orientation: portrait) {
+        .card { color: red; }
+    }
+}
+
+// condition ids form a parent chain:
+//   root -1
+//     └── (min-width: 768px)
+//           └── (orientation: portrait)
+// both executors are compiled once and cached.</code></pre>
+        </div>
+
+        <p>
+            The parser stores the outermost condition id on each rule. Evaluation walks
+            the parent chain and stops at the first failure. Conditions are interned by
+            <code>(tokens, parent)</code>, while executors are interned by tokens alone,
+            so the same media query nested under different parents shares one compiled
+            delegate. The engine never interprets the query text during matching.
+        </p>
+
+        <h2 id="selectors">Selector list flattening and nesting</h2>
+        <p>
+            <code>ParseRule</code> splits a selector prelude on commas that are not inside
+            parentheses or brackets, so <code>:is(.a, .b)</code> and
+            <code>[data-x="a,b"]</code> stay intact. Each branch is flattened against
+            every selector of the enclosing rule. At the root the branch is interned
+            verbatim; inside a nested rule the result is the cartesian product of parent
+            and child selectors, followed by a linear de-duplication pass because selector
+            lists are short.
+        </p>
+        <p>
+            <code>Compose</code> preserves CSS nesting semantics. A child without
+            <code>&amp;</code> becomes a descendant of the parent. Each <code>&amp;</code>
+            is replaced in place by the entire parent selector. Whitespace is reconstructed
+            as a synthetic gap, so <code>&amp; .a</code> stays a descendant while
+            <code>&amp;.a</code> stays one compound. A leading <code>&amp;</code> never
+            introduces a leading gap. Composed tokens are copied into the table before the
+            next pair, so the composer buffer can be reused for the entire stylesheet.
+        </p>
+
+        <div class="code" data-label="Nesting">
+<pre><code>.card, .panel {
+    & > .title { color: red; }
+    .body { color: blue; }
+}
+
+// flattened:
+// .card > .title, .panel > .title
+// .card .body, .panel .body</code></pre>
+        </div>
+
+        <p>
+            If no selector survives flattening, the block is still consumed as a container
+            so the token stream stays synchronized. That is the same “hide the parent”
+            rule used for malformed rule headers.
+        </p>
+
+        <h2 id="declarations">Declarations and normalization</h2>
+        <p>
+            <code>ParseDeclaration</code> locates the top-level colon with
+            <code>FindColon</code>, then scans the value with <code>FindValueEnd</code>.
+            Both scans track parentheses, square brackets and — for values — balanced
+            curly braces, so function arguments, attribute selectors and custom-property
+            blocks do not terminate early. The parser then chooses one of four paths:
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Context</th><th>Destination</th></tr></thead>
+                <tbody>
+                    <tr><td>Descriptor at-rule</td><td><code>CssDescriptor</code>, or <code>CssMarginBox</code> inside an <code>@page</code> margin box.</td></tr>
+                    <tr><td>Inside <code>@keyframes</code></td><td>One <code>CssKeyframe</code> per current keyframe selector, with the condition id.</td></tr>
+                    <tr><td>No selector or empty value</td><td>Discarded without interning.</td></tr>
+                    <tr><td>Normal style rule</td><td>One <code>Rule</code> per selector id, carrying property, value, condition and layer ids.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            Property names are ASCII-lower-cased unless they are custom properties.
+            Values preserve case because CSS values can be case-sensitive. Token text is
+            written into the pooled character buffer with one space wherever the original
+            source had a gap; comments and whitespace never appear as tokens, so a gap is
+            simply <code>previous.EndIndex &lt; current.StartIndex</code>. A single-token
+            property or value whose interned text already has the right casing reuses its
+            existing id and never touches the buffer.
+        </p>
+
+        <div class="callout tip">
+            <strong>The cheap path is the common path</strong>
+            Most declarations are one property token and one value token. The
+            <code>NormalizeAndIntern</code> fast path checks for exactly one token and
+            returns its interned id directly. Multi-token values such as
+            <code>0 8px 16px rgba(0,0,0,.2)</code> pay for normalization once, then all
+            repeated uses share the resulting id.
+        </div>
+
+        <h2 id="layers-keyframes">Layers, keyframes and descriptors</h2>
+        <p>
+            <code>@layer</code> blocks push an id onto a layer stack; every rule created
+            while that frame is active records <code>CurrentLayerId</code>. Statement
+            layers and block layers both call <code>GetOrAddLayer</code>, so the layer
+            order is assigned once and reused. Unlayered rules keep <code>-1</code>, which
+            Data treats as stronger than every layered rule.
+        </p>
+        <p>
+            <code>@keyframes</code> sets <code>_inKeyframes</code> and records the
+            animation name. Its inner selectors (<code>from</code>, <code>to</code>,
+            <code>50%</code>) are interned like normal selectors, but each declaration
+            becomes a <code>CssKeyframe</code> rather than a matchable style rule.
+            Descriptor at-rules such as <code>@font-face</code>, <code>@page</code>,
+            <code>@property</code>, <code>@counter-style</code>,
+            <code>@font-palette-values</code> and <code>@view-transition</code> store their
+            prelude as descriptor context and their declarations as
+            <code>CssDescriptor</code> records. <code>@page</code> margin boxes such as
+            <code>@top-center</code> become <code>CssMarginBox</code> records.
+        </p>
+        <p>
+            <code>@import</code>, <code>@charset</code>, <code>@namespace</code> and
+            <code>@scope</code> are recorded as metadata. Imports are never fetched;
+            resolving them is the host’s job. Scope preludes are stored as interned text,
+            not rewritten into selectors.
+        </p>
+
+        <h2 id="performance">Performance and allocation</h2>
+        <p>
+            The engine is built around reuse and one-way movement. There is no AST to
+            allocate, no backtracking cursor to reset and no per-selector token array. The
+            only large temporary is the token list produced by the tokenizer; the parser
+            itself reuses its composer, selector scratch, layer stack and pooled text
+            buffer.
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Bootstrap 5.3.8</th><th>Result</th></tr></thead>
+                <tbody>
+                    <tr><td>Input</td><td>232,108 characters, 46,438 tokens</td></tr>
+                    <tr><td>Output</td><td>2,762 selectors, 6,496 rules, 18 conditions, 8 keyframes, 1 charset</td></tr>
+                    <tr><td>Tokenize + build</td><td>~13 ms total, ~17.7 MB/s</td></tr>
+                    <tr><td>Transient allocation</td><td>~2.4 MB for tokens, parsing and interning</td></tr>
+                    <tr><td>GC collections</td><td>0 / 0 / 0 in the debugger run</td></tr>
+                    <tr><td>Tokenizer-only baseline</td><td>~5.5 ms of the ~13 ms total</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            The benchmark suite scales the same pipeline over 1M, 4M and 16M character
+            synthetic corpora, with a second corpus that repeats selectors and conditions
+            to stress identity lookup and dedup. The query benchmarks separately measure
+            rule scans, discriminator lookups and cached versus invalidated condition
+            evaluation, so build cost and match cost are not conflated.
+        </p>
+
+        <div class="callout note">
+            <strong>Where build time goes</strong>
+            Selector interning is the expensive part of a build: hashing tokens,
+            analysing compounds, parsing attribute filters and pseudo classes, and
+            deduplicating selector ids. Declaration parsing is comparatively cheap,
+            especially when the single-token normalization fast path applies. More
+            selectors per rule and deep nesting increase the cartesian product and
+            therefore the interning work.
+        </div>
+
+        <h2 id="trade-offs">Trade-offs and sharp edges</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Decision</th><th>Cost</th></tr></thead>
+                <tbody>
+                    <tr><td>Single forward pass, no AST</td><td>Very little temporary structure, but debugging is token-index based and there is no rich parse tree to inspect.</td></tr>
+                    <tr><td>Local recovery, no diagnostics</td><td>Malformed sections are skipped or hidden; nothing is reported to the caller. A typo can look like a missing rule.</td></tr>
+                    <tr><td>Table mutation is eager</td><td>The table is complete only when the parse finishes successfully; there is no rollback if a later section fails.</td></tr>
+                    <tr><td><code>ref struct</code> parser</td><td>Stack-only and allocation-light, but cannot be stored in a field, used across <code>await</code> or shared between threads.</td></tr>
+                    <tr><td>Condition compiler is injected</td><td>Media queries are supported by one compiler; <code>@supports</code> and <code>@container</code> need a host-supplied compiler or fail closed.</td></tr>
+                    <tr><td>Nesting is flattened at build time</td><td>Matching stays simple, but deeply nested selector lists can multiply quickly before deduplication.</td></tr>
+                    <tr><td>Normalization is pooled, not free</td><td>Multi-token values copy into the text buffer; repeated values then share one interned id.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="code-tour">Code tour</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>File</th><th>Read it for…</th></tr></thead>
+                <tbody>
+                    <tr><td><code>DataEngine/Source/DataEngine.cs</code></td><td>The three build entry points, table pre-sizing and the compiler injection point.</td></tr>
+                    <tr><td><code>DataEngine/Source/CssStreamParser.cs</code></td><td>The entire forward-only parser: blocks, at-rules, rules, nesting, declarations, recovery and normalization.</td></tr>
+                    <tr><td><code>Data/Source/StreamContext.cs</code></td><td>Condition/container/rule frames and the flat selector stack used for nesting.</td></tr>
+                    <tr><td><code>Data/Source/DataTable.cs</code></td><td><code>InternSelector</code>, <code>GetOrAddCondition</code>, <code>AddRule</code>, layers and metadata tables.</td></tr>
+                    <tr><td><code>DataEngine/Source/MediaConditionCompiler.cs</code></td><td>Token-level media-query compilation into <code>ConditionFunction</code>.</td></tr>
+                    <tr><td><code>DataEngine/Benchmarks/Benchmarks.cs</code></td><td>The 1M/4M/16M corpora, repeated-selector stress test and query benchmarks.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            The mental model is a one-way funnel: the tokenizer decides what each token
+            is; DataEngine decides how tokens relate structurally; Data stores those
+            relationships as integer edges and makes them queryable. Nothing in the
+            pipeline goes back to the source text after tokenization.
+        </p>
+
+        <div class="page-nav">
+            <a class="prev" href="implementation-data.html"><span>Previous</span>Data</a>
+            <a class="next" href="implementation-layoutlab.html"><span>Next</span>LayoutLab</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh | CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/donkeh-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>

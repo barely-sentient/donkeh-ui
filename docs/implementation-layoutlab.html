@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>LayoutLab | Donkeh</title>
+    <meta name="description" content="Implementation notes for Donkeh.LayoutLab: design decisions, data structures, trade-offs and hot paths.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/donkeh-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+                <a href="routing.html">Routing and setPage</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Reference</span>
+                <a href="html-elements.html">HTML elements</a>
+                <a href="css-support.html">CSS support</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Primitives</span>
+                <a href="image.html">Image</a>
+                <a href="video.html">Video</a>
+                <a href="canvas.html">Canvas</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+                        <div class="nav-group">
+                <span class="nav-label">Implementation for Nerds</span>
+                <a href="implementation.html">Overview</a>
+                <a class="nav-sub" href="implementation-parser.html">Parser</a>
+                <a class="nav-sub" href="implementation-data.html">Data</a>
+                <a class="nav-sub" href="implementation-dataengine.html">DataEngine</a>
+                <a class="nav-sub" href="implementation-layoutlab.html">LayoutLab</a>
+                <a class="nav-sub" href="implementation-uilab.html">UILab</a>
+                <a class="nav-sub" href="implementation-hosting.html">Hosting</a>
+                <a class="nav-sub" href="implementation-windowing.html">Windowing</a>
+                <a class="nav-sub" href="implementation-android.html">Android</a>
+                <a class="nav-sub" href="implementation-browser.html">Browser</a>
+                <a class="nav-sub" href="implementation-inspector.html">Inspector</a>
+                <a class="nav-sub" href="implementation-cli.html">CLI tool</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/donkeh-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Implementation for Nerds <span>/</span> LayoutLab</div>
+        <h1>LayoutLab</h1>
+        <p class="lead">
+            <code>LayoutLab</code> is the largest package and the one with the widest
+            job: take a matched CSS table, resolve styles, generate boxes, run the
+            formatting contexts, measure text, evaluate animations, and emit a compact
+            paint-instruction stream. It is not a browser engine clone; it is a
+            deliberate approximation that covers the CSS a real application uses and
+            keeps the frame path predictable.
+        </p>
+
+        <h2 id="pipeline">The frame pipeline</h2>
+        <p>
+            One engine instance is reused across frames. A full layout pass is a
+            sequence of well-defined phases, not a recursive box routine hidden in a
+            renderer:
+        </p>
+
+        <div class="tree">Layout(root, options)
+├── frame setup          viewport, fonts, renderer context, signatures
+├── style caches         resolve or reuse ComputedStyle per node
+├── BuildBox             element boxes, anonymous text, ::before/::after
+├── prune                drop cache entries for detached nodes
+├── LayoutRootBox        block / inline / flex / grid / table / floats
+├── ProcessAbsoluteBoxes absolute and fixed boxes, static positions
+├── BuildDisplayList     stacking contexts, paint ops, scroll translations
+└── Optimiser.Run        cull, merge, collapse scopes, compact constants
+                         └── LayoutResult (boxes, instructions, constants)
+</div>
+
+        <p>
+            The engine keeps the box tree in unscrolled absolute coordinates. Scroll
+            offsets are clamped per scroll container and applied as paint-time
+            translations. Scrolling can therefore repaint without rebuilding geometry,
+            and a viewport resize invalidates only the parts whose styles or metrics
+            actually depend on the new environment.
+        </p>
+
+        <h2 id="style">Style resolution</h2>
+        <p>
+            <code>StyleResolver</code> receives the node, the parent’s computed style
+            and the already-ordered matched rules from <code>Donkeh.Data</code>. It
+            applies declarations weakest-first and runs important declarations in a
+            second pass, which lets <code>!important</code> win without allocating a
+            per-property cascade map.
+        </p>
+        <ul>
+            <li>Inherited scalars — colour, font, writing mode and similar — are copied from the parent. Custom properties stay linked through <code>StyleParent</code> and are resolved lazily.</li>
+            <li>Text nodes are forced to <code>display: inline</code> and fragments to <code>display: contents</code>; these are framework constructs, not authored CSS.</li>
+            <li>Percentages, <code>em</code>, <code>rem</code>, viewport units and <code>auto</code> stay as <code>CssLength</code> values. Layout resolves them later against the correct containing block.</li>
+            <li>Parsed declaration values are cached by interned value id in <code>StyleValueCache</code>, so repeated <code>0 8px</code> values parse once.</li>
+        </ul>
+
+        <p>
+            <code>ComputedStyle</code> is a large mutable object rather than a frozen
+            record. That is deliberate: the animation runtime writes interpolated
+            values into the style between frames and reuses the same instance. Arrays,
+            filters and animation lists referenced by a style are treated as immutable
+            once published.
+        </p>
+
+        <h2 id="caching">Caches and invalidation</h2>
+        <p>
+            LayoutLab is built around the assumption that most of a frame does not
+            change. Several caches sit between the DOM and the geometry:
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Cache</th><th>Key / invalidation</th><th>What it saves</th></tr></thead>
+                <tbody>
+                    <tr><td>Style cache</td><td>Node revision, parent inherited-value hash, frame signature, renderer-context version, interaction version.</td><td>Re-cascading unchanged subtrees.</td></tr>
+                    <tr><td>Inherited-value hash</td><td>Memoised per <code>ComputedStyle</code> instance for the current pass.</td><td>Recomputing whether a child inherited something different.</td></tr>
+                    <tr><td>Value cache</td><td>Interned declaration value id.</td><td>Parsing the same CSS value over and over.</td></tr>
+                    <tr><td>Text layout cache</td><td>Text, text style and quantised available width; two generations of up to 1024 entries.</td><td>Re-wrapping and re-measuring identical runs.</td></tr>
+                    <tr><td>Box cache</td><td>Node identity, optional and explicit.</td><td>Allocating the box tree and child lists every frame.</td></tr>
+                    <tr><td>Animation state</td><td>Node identity and a monotonic frame stamp.</td><td>Restarting clocks and tracks for live nodes.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            The style signature includes viewport, font metrics, orientation, device
+            pixel ratio and renderer context. Interaction state is a separate version,
+            because hover or focus on one node can change a sibling through a selector
+            without changing either node’s DOM revision. Height-only resizes are
+            special-cased: they do not invalidate width-based queries unless the table
+            contains height media queries or a style uses viewport-height units.
+        </p>
+
+        <div class="callout note">
+            <strong>Results can alias engine storage</strong>
+            With <code>SnapshotResults</code> enabled the instruction stream and node
+            map are copied into the result. The box tree is still owned by the engine
+            and may be mutated in place when <code>ReuseLayoutBoxes</code> is enabled.
+            Treat a result as read-only, and snapshot it when it must outlive the next
+            frame.
+        </div>
+
+        <h2 id="boxes">Box generation</h2>
+        <p>
+            <code>BuildBox</code> walks the DOM once. It creates a box for every
+            generated element, skips <code>display: none</code>, flattens
+            <code>display: contents</code> into its children, creates synthetic text
+            nodes for direct text in flex/grid containers, and materialises generated
+            <code>::before</code>/<code>::after</code> content from the CSS table. The
+            resulting <code>LayoutBox</code> carries the node, style, parent, children,
+            border/padding/content rectangles, margins, scroll metrics and float context.
+        </p>
+        <p>
+            Boxes are the unit of layout reuse. With reuse enabled, a cached box is
+            reset — geometry, children, text, scroll and float state — while its node
+            identity and child-list capacity are kept. That removes the per-frame
+            allocation of the entire tree at the cost of mutating the previous result.
+        </p>
+
+        <h2 id="formatting">Formatting contexts</h2>
+        <p>
+            <code>LayoutContent</code> dispatches on the box’s formatting context. The
+            implementations share intrinsic-size measurement, length resolution,
+            floats and caching, so a nested flex item inside a grid cell inside a table
+            cell still behaves consistently.
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Context</th><th>Coverage</th></tr></thead>
+                <tbody>
+                    <tr><td>Block and inline flow</td><td>Block flow, inline runs, line boxes, text wrapping, inline-blocks, floats and block formatting contexts.</td></tr>
+                    <tr><td>Flex</td><td>Row/column, reverse axes, wrapping, grow/shrink, basis, gaps, auto margins, <code>order</code>, justify and align, multi-line cross sizing.</td></tr>
+                    <tr><td>Grid</td><td>Explicit tracks, <code>fr</code>, <code>minmax()</code>, <code>auto-fit</code>/<code>auto-fill</code>, named areas, row/column placement, spans, gaps and intrinsic contributions.</td></tr>
+                    <tr><td>Table</td><td>Row/cell collection, colspan/rowspan, max-content column sizing, collapsed or separate borders, border spacing and row-height refinement.</td></tr>
+                    <tr><td>Floats</td><td>Float context with clearance, avoidance by BFC roots and inline content flowing around active floats.</td></tr>
+                    <tr><td>Out of flow</td><td>Absolute and fixed boxes deferred until normal flow finishes; static positions seeded before flex/grid/table skip them.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            Flex is a good example of the engineering style. It rents scratch arrays
+            from <code>ArrayPool&lt;T&gt;</code>, sorts by <code>order</code>, calculates
+            base and minimum sizes, wraps lines, distributes positive and negative free
+            space, and runs up to four extra shrink passes to remove clamping overflow.
+            Auto minimum sizes use measured max-content as a floor, which is what keeps
+            a busy toolbar from crushing its buttons.
+        </p>
+        <p>
+            Grid uses a flattened track model (<code>Fixed</code>, <code>Percent</code>,
+            <code>Fr</code>, <code>Auto</code>, <code>MinContent</code>,
+            <code>MaxContent</code>, <code>FitContent</code>) and handles column flow by
+            transposing placement, line names and named areas. Table layout is
+            intentionally simpler: max-content column sizing with spanning-cell
+            distribution, then a second cell layout with final row heights.
+        </p>
+
+        <h2 id="text">Text and line layout</h2>
+        <p>
+            Text is deliberately decoupled from fonts. <code>ITextMeasurer</code> reports
+            advance width, ascent and descent for a run; the default
+            <code>SimpleTextMeasurer</code> uses a deterministic per-character advance
+            table rather than font files. The window host can replace it with a
+            font-backed measurer without changing layout code.
+        </p>
+        <p>
+            <code>TextLayoutEngine</code> performs line breaking, whitespace handling,
+            alignment, direction, letter spacing, text transforms and decoration
+            metadata. The result is a <code>TextLayout</code> of positioned lines, cached
+            by text, style and quantised width. Because the cache is bounded to two
+            generations, a live performance monitor or other constantly changing text
+            can disable text caching without affecting style resolution.
+        </p>
+
+        <div class="callout tip">
+            <strong>Approximation is a feature</strong>
+            Simple metrics make layout deterministic and cheap, and they keep the
+            engine independent of platform font stacks. The visible renderer still
+            measures real glyphs when it draws; LayoutLab only needs consistent advance
+            widths to decide line boxes.
+        </div>
+
+        <h2 id="paint">Paint instructions</h2>
+        <p>
+            Layout does not call OpenGL. It emits a portable display list. Each
+            <code>Instruction</code> is a fixed 24-byte value: four floats, an opcode,
+            flags, a 16-bit auxiliary index and a 32-bit payload. Small draws use the
+            floats directly; text, gradients, borders, transforms and other large
+            payloads live in a <code>ConstantPool</code> and are addressed by index.
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Paint stage</th><th>What it emits</th></tr></thead>
+                <tbody>
+                    <tr><td>Background</td><td>Colour, gradients, background images, layers, clipping and repeat.</td></tr>
+                    <tr><td>Borders and outlines</td><td>Per-side borders, rounded corners, collapsed table edges, outline offsets and triangle borders.</td></tr>
+                    <tr><td>Shadows and effects</td><td>Outer and inset shadows, filters, backdrop filters, blend modes and opacity scopes.</td></tr>
+                    <tr><td>Text</td><td>Line runs, decoration, selection/caret overlays and placeholder colours.</td></tr>
+                    <tr><td>Replaced content</td><td>Images, video frames and other host-supplied content.</td></tr>
+                    <tr><td>Scrollbars</td><td>Host-painted scrollbar tracks and thumbs derived from scroll metrics.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            The display-list builder walks stacking contexts in paint order, defers
+            fixed boxes to a second pass with inherited opacity, and applies scroll
+            translations while emitting. Transform, opacity, filter, clip-path, mask,
+            blend and composited-layer pushes are represented as explicit scoped
+            instructions so the renderer can batch and the optimiser can reason about
+            them.
+        </p>
+
+        <h2 id="optimiser">The optimiser</h2>
+        <p>
+            <code>Optimiser.Run</code> is a small, semantics-preserving pass over the
+            instruction stream. It drops no-op instructions and optional frame markers,
+            intersects clips, removes empty or redundant clips, drops identity opacity
+            scopes, culls draws outside the active clip when no transform or filter is
+            active, merges adjacent opaque rectangles, and optionally compacts the
+            constant pool. Rounded clips are never treated as redundant, and unmatched
+            pops are ignored rather than truncating the frame.
+        </p>
+
+        <h2 id="animation">Animations and transitions</h2>
+        <p>
+            <code>AnimationRuntime</code> is frame-driven and owns all per-node timing
+            state. The host supplies a monotonic time through
+            <code>LayoutOptions.AnimationTimeSeconds</code>; the runtime never reads the
+            wall clock. Keyframe tracks are parsed lazily from the <code>DataTable</code>
+            and cached by interned animation name. Transitions and keyframes share the
+            same interpolation model: supported properties interpolate, discrete
+            properties switch at the segment midpoint, and unsupported values keep their
+            base style.
+        </p>
+        <p>
+            The runtime distinguishes paint-only animations from layout animations.
+            Transform and opacity changes can refresh the display list without a full
+            layout pass; width, height, margin and similar changes cannot. A per-frame
+            stamp lets <code>Prune</code> drop state for nodes that left the tree, which
+            prevents unmounted panels and removed carousel slides from staying alive
+            through their animation state.
+        </p>
+
+        <h2 id="repaint">Repaint without relayout</h2>
+        <p>
+            <code>Repaint</code> rebuilds the display list from an existing box tree
+            when geometry is still valid. Scroll offsets never move boxes, so scrolling
+            refreshes scroll metrics and re-emits instructions without re-resolving
+            styles. <code>RepaintAnimated</code> is the same idea for paint-only
+            animations. This split is the main reason a scrolled or hovered UI does not
+            pay for a full style and layout pass.
+        </p>
+
+        <h2 id="trade-offs">Trade-offs and sharp edges</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Decision</th><th>Cost</th></tr></thead>
+                <tbody>
+                    <tr><td>Approximate text metrics by default</td><td>Layout widths are deterministic but not pixel-identical to the final font rasteriser. A host can plug in real metrics.</td></tr>
+                    <tr><td>CSS subset, not a browser clone</td><td>Some advanced layout modes, generated-content functions and font features are approximated or unsupported.</td></tr>
+                    <tr><td>Mutable computed styles</td><td>Animation can write in place, but sharing a style across threads or assuming immutability is unsafe.</td></tr>
+                    <tr><td>Box reuse mutates results</td><td>Fast, but a <code>LayoutResult</code> is only stable when snapshotted and never mutated by the next frame.</td></tr>
+                    <tr><td>Single layout thread</td><td>No locking in the hot path, but the engine, caches and animation runtime cannot be driven concurrently.</td></tr>
+                    <tr><td>Depth cap</td><td><code>MaxLayoutDepth</code> defaults to 512; nodes at the limit receive a box but their children are not visited.</td></tr>
+                    <tr><td>Table layout is simplified</td><td>Max-content column sizing and equal extra-space distribution, not the full CSS table algorithm.</td></tr>
+                    <tr><td>Display list is a contract</td><td>The renderer must respect scoped opcodes and the constant-pool layout; changing opcode semantics is a cross-package change.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="code-tour">Code tour</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>File</th><th>Read it for…</th></tr></thead>
+                <tbody>
+                    <tr><td><code>LayoutEngine.cs</code></td><td>Frame orchestration, box generation, caches, text measurement, absolute positioning and layout dispatch.</td></tr>
+                    <tr><td><code>LayoutEngine.Block.cs</code></td><td>Block and inline flow, line groups, floats and BFC rules.</td></tr>
+                    <tr><td><code>LayoutEngine.Flex.cs</code></td><td>Flex base sizes, wrapping, grow/shrink, alignment and scratch pooling.</td></tr>
+                    <tr><td><code>LayoutEngine.Grid.cs</code></td><td>Track expansion, placement, spans, named areas and column flow.</td></tr>
+                    <tr><td><code>LayoutEngine.Table.cs</code></td><td>Row/cell collection, spanning, column sizing and collapsed borders.</td></tr>
+                    <tr><td><code>LayoutEngine.Paint.cs</code></td><td>Stacking contexts, backgrounds, borders, text, shadows, scrollbars and display-list emission.</td></tr>
+                    <tr><td><code>StyleResolver.cs</code> + partials</td><td>Cascade application, property parsing, keywords, custom properties and animation specs.</td></tr>
+                    <tr><td><code>ComputedStyle.cs</code></td><td>The mutable, layout-ready style model and inherited-value copying.</td></tr>
+                    <tr><td><code>Text.cs</code></td><td>Text measurement, line breaking, whitespace, alignment and the text-layout cache.</td></tr>
+                    <tr><td><code>Instruction.cs</code> / <code>PaintSpecs.cs</code></td><td>The 24-byte instruction format, opcodes and constant-pool payloads.</td></tr>
+                    <tr><td><code>Optimiser.cs</code></td><td>Clip culling, scope collapsing, rectangle merging and constant compaction.</td></tr>
+                    <tr><td><code>AnimationRuntime.cs</code></td><td>Keyframe tracks, interpolation, transition state and per-node clocks.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            The useful way to read LayoutLab is as a pipeline of representations:
+            matched rules → computed styles → boxes → geometry → paint instructions.
+            Each stage caches what it can, invalidates narrowly, and hands the next
+            stage a compact value-oriented shape rather than a tree of rich objects.
+        </p>
+
+        <div class="page-nav">
+            <a class="prev" href="implementation-dataengine.html"><span>Previous</span>DataEngine</a>
+            <a class="next" href="implementation-uilab.html"><span>Next</span>UILab</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh | CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/donkeh-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>

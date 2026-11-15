@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Implementation for Nerds — Donkeh</title>
+    <meta name="description" content="Deep implementation notes for every Donkeh package: data structures, trade-offs, hot paths and the decisions behind the engine.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/donkeh-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+                <a href="routing.html">Routing and setPage</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Reference</span>
+                <a href="html-elements.html">HTML elements</a>
+                <a href="css-support.html">CSS support</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Primitives</span>
+                <a href="image.html">Image</a>
+                <a href="video.html">Video</a>
+                <a href="canvas.html">Canvas</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+                        <div class="nav-group">
+                <span class="nav-label">Implementation for Nerds</span>
+                <a href="implementation.html">Overview</a>
+                <a class="nav-sub" href="implementation-parser.html">Parser</a>
+                <a class="nav-sub" href="implementation-data.html">Data</a>
+                <a class="nav-sub" href="implementation-dataengine.html">DataEngine</a>
+                <a class="nav-sub" href="implementation-layoutlab.html">LayoutLab</a>
+                <a class="nav-sub" href="implementation-uilab.html">UILab</a>
+                <a class="nav-sub" href="implementation-hosting.html">Hosting</a>
+                <a class="nav-sub" href="implementation-windowing.html">Windowing</a>
+                <a class="nav-sub" href="implementation-android.html">Android</a>
+                <a class="nav-sub" href="implementation-browser.html">Browser</a>
+                <a class="nav-sub" href="implementation-inspector.html">Inspector</a>
+                <a class="nav-sub" href="implementation-cli.html">CLI tool</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/donkeh-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Implementation for Nerds</div>
+        <h1>Implementation for Nerds</h1>
+        <p class="lead">
+            The user documentation explains how to build with Donkeh. This area is the
+            other half: how each package works internally, why the boundaries are where
+            they are, which data structures carry the hot path, and what was rejected
+            along the way.
+        </p>
+
+        <div class="callout note">
+            <strong>Written from the implementation</strong>
+            Each package page now covers the problem it solves, its core data structures,
+            the hot path, the decisions that were difficult, and the limitations that are
+            still open. Start wherever your curiosity points.
+        </div>
+
+        <h2 id="reading-order">Reading order</h2>
+        <p>
+            The list follows the data flow rather than the solution order. Start at the
+            parser if you want the whole pipeline; jump straight to a package if you
+            are investigating one layer.
+        </p>
+
+        <div class="doc-link-grid">
+            <a class="doc-link" href="implementation-parser.html">
+                <strong>Donkeh.Parser</strong>
+                <span>Tokenizer, rule builders and interned tokens.</span>
+            </a>
+            <a class="doc-link" href="implementation-data.html">
+                <strong>Donkeh.Data</strong>
+                <span>Flat tables, selector records and cascade matching.</span>
+            </a>
+            <a class="doc-link" href="implementation-dataengine.html">
+                <strong>Donkeh.DataEngine</strong>
+                <span>Stream parser and media-condition compiler.</span>
+            </a>
+            <a class="doc-link" href="implementation-layoutlab.html">
+                <strong>Donkeh.LayoutLab</strong>
+                <span>Style resolution, layout, text, paint and animation.</span>
+            </a>
+            <a class="doc-link" href="implementation-uilab.html">
+                <strong>Donkeh.UILab</strong>
+                <span>Components, hooks, reconciliation, routing and HTML helpers.</span>
+            </a>
+            <a class="doc-link" href="implementation-hosting.html">
+                <strong>Donkeh.Hosting</strong>
+                <span>App model, AppRoot discovery and permissions.</span>
+            </a>
+            <a class="doc-link" href="implementation-windowing.html">
+                <strong>Donkeh.Windowing</strong>
+                <span>Desktop window loop, OpenGL, input, text and media.</span>
+            </a>
+            <a class="doc-link" href="implementation-android.html">
+                <strong>Donkeh.Windowing.Android</strong>
+                <span>Android activity and permission bridge.</span>
+            </a>
+            <a class="doc-link" href="implementation-browser.html">
+                <strong>Donkeh.Windowing.Browser</strong>
+                <span>DOM host and virtual-tree patch protocol.</span>
+            </a>
+            <a class="doc-link" href="implementation-inspector.html">
+                <strong>Donkeh.Inspector</strong>
+                <span>Hierarchy, styles, performance, animations and deploy.</span>
+            </a>
+            <a class="doc-link" href="implementation-cli.html">
+                <strong>Donkeh.CliTool</strong>
+                <span>Project generation, targets and framework resolution.</span>
+            </a>
+        </div>
+
+        <h2 id="format">What each page covers</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Section</th><th>Question it answers</th></tr></thead>
+                <tbody>
+                    <tr><td>Problem and boundary</td><td>What does this package own, and what is deliberately left to its neighbours?</td></tr>
+                    <tr><td>Core model</td><td>Which types, tables, buffers and invariants carry the package?</td></tr>
+                    <tr><td>Hot path</td><td>What runs every frame, every layout or every token, and why is it shaped that way?</td></tr>
+                    <tr><td>Trade-offs</td><td>What was simplified, approximated or rejected, and what would it cost to change it?</td></tr>
+                    <tr><td>Code tour</td><td>Where to start reading, which files matter, and which ones are generated or legacy.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="callout tip">
+            <strong>Bring the hard questions</strong>
+            This area is meant to be opinionated. Performance numbers, failed designs,
+            ugly edge cases and “we tried the obvious thing first” stories are all fair
+            game.
+        </div>
+
+        <div class="page-nav">
+            <a class="prev" href="canvas.html"><span>Previous</span>Canvas</a>
+            <a class="next" href="implementation-parser.html"><span>Next</span>Parser</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh — CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/donkeh-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>

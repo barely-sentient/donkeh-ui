@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Android | Donkeh</title>
+    <meta name="description" content="Implementation notes for Donkeh.Windowing.Android: design decisions, data structures, trade-offs and hot paths.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/donkeh-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+                <a href="routing.html">Routing and setPage</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Reference</span>
+                <a href="html-elements.html">HTML elements</a>
+                <a href="css-support.html">CSS support</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Primitives</span>
+                <a href="image.html">Image</a>
+                <a href="video.html">Video</a>
+                <a href="canvas.html">Canvas</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+                        <div class="nav-group">
+                <span class="nav-label">Implementation for Nerds</span>
+                <a href="implementation.html">Overview</a>
+                <a class="nav-sub" href="implementation-parser.html">Parser</a>
+                <a class="nav-sub" href="implementation-data.html">Data</a>
+                <a class="nav-sub" href="implementation-dataengine.html">DataEngine</a>
+                <a class="nav-sub" href="implementation-layoutlab.html">LayoutLab</a>
+                <a class="nav-sub" href="implementation-uilab.html">UILab</a>
+                <a class="nav-sub" href="implementation-hosting.html">Hosting</a>
+                <a class="nav-sub" href="implementation-windowing.html">Windowing</a>
+                <a class="nav-sub" href="implementation-android.html">Android</a>
+                <a class="nav-sub" href="implementation-browser.html">Browser</a>
+                <a class="nav-sub" href="implementation-inspector.html">Inspector</a>
+                <a class="nav-sub" href="implementation-cli.html">CLI tool</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/donkeh-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Implementation for Nerds <span>/</span> Android</div>
+        <h1>Android</h1>
+        <p class="lead">
+            <code>Donkeh.Windowing.Android</code> is deliberately small. It is the
+            framework-owned Android activity that boots the portable windowing stack on
+            an external GLES surface, applies mobile defaults, translates display density
+            into CSS pixels, and installs the Android runtime-permission provider. App
+            code still declares only an <code>[AppRoot]</code>.
+        </p>
+
+        <h2 id="job">What the package hides</h2>
+        <p>
+            The application project targets <code>net10.0-android</code> and references
+            this package, but never writes an activity. The host hides four things that
+            would otherwise leak into every app:
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Concern</th><th>Handled by</th></tr></thead>
+                <tbody>
+                    <tr><td>Launcher activity and manifest entry</td><td><code>DonkehActivity</code> is the <code>MainLauncher</code>, exported, with a fullscreen no-action-bar theme.</td></tr>
+                    <tr><td>GLES context and surface</td><td>Creates a Silk.NET view with OpenGL ES 3.0, depth 24, stencil 8, no MSAA, VSync and a 60 Hz cap.</td></tr>
+                    <tr><td>Density and lifecycle</td><td>Reads display density, converts the external surface into a CSS-pixel viewport and keeps the activity across configuration changes.</td></tr>
+                    <tr><td>Runtime permissions</td><td>Installs an <code>IPermissionService</code> that requests from the activity and completes from <code>OnRequestPermissionsResult</code>.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="activity">The activity</h2>
+        <p>
+            <code>DonkehActivity</code> derives from Silk.NET's SDL-backed
+            <code>SilkActivity</code>. Its attributes declare a fullscreen Material
+            no-action-bar theme and a configuration-change set that includes orientation,
+            keyboard, UI mode, density, screen layout and smallest screen size. Because
+            the activity handles those changes itself, rotation does not recreate it: the
+            same <code>DonkehWindow</code> keeps running and CSS reflows against the new
+            surface size.
+        </p>
+
+        <div class="code" data-label="Activity declaration">
+<pre><code>[Activity(
+    Label = "Donkeh",
+    MainLauncher = true,
+    Exported = true,
+    Theme = "@android:style/Theme.Material.NoActionBar.Fullscreen",
+    ConfigurationChanges = SilkActivity.ConfigChangesFlags
+        | ConfigChanges.UiMode
+        | ConfigChanges.Density
+        | ConfigChanges.ScreenLayout
+        | ConfigChanges.SmallestScreenSize)]
+public class DonkehActivity : SilkActivity</code></pre>
+        </div>
+
+        <h3>The SDL binding seam</h3>
+        <p>
+            <code>SilkActivity</code> is abstract, so .NET Android does not emit a static
+            JNI registration block for it, and the delegate getters that register
+            <code>n_loadLibraries</code>, <code>n_setOrientationBis</code> and
+            <code>n_onDestroy</code> are private on the binding base. The host
+            re-exposes those handlers for this concrete activity through
+            <code>GetBaseHandler</code>, which reflects the private static getter once.
+            <code>DynamicDependency</code> attributes keep the binding members rooted for
+            trimming.
+        </p>
+
+        <div class="callout note">
+            <strong>Reflection is confined to the binding seam</strong>
+            This is one of the few places where the host reaches into private framework
+            members. The dependency is deliberate: it keeps the app-facing activity
+            concrete without duplicating SDL's JNI bootstrap, and a Silk.NET binding
+            upgrade that renames a handler fails loudly with
+            <code>MissingMethodException</code>.
+        </div>
+
+        <h2 id="run">Starting the app</h2>
+        <p>
+            <code>OnRun</code> is the Android equivalent of the desktop entry point:
+        </p>
+
+        <ol>
+            <li>Discover the <code>[AppRoot]</code> definition.</li>
+            <li>Read <code>Resources.DisplayMetrics.Density</code>.</li>
+            <li>Create <code>AndroidPermissionService</code> and install it through <code>Host.UsePermissions</code>.</li>
+            <li>Create a GLES 3.0 view with a 24-bit depth buffer, 8-bit stencil, no MSAA, VSync and a 60 FPS cap.</li>
+            <li>Clone the app settings and override everything the activity owns: size, chrome, VSync, frame cap, samples, resizability, devtools and DPI.</li>
+            <li>Create <code>DonkehWindow</code>, run the view with the app root and merged styles, and let the shared window loop do the rest.</li>
+        </ol>
+
+        <div class="code" data-label="Mobile settings">
+<pre><code>var settings = app.Settings with
+{
+    Width = 0,                    // the activity owns the surface
+    Height = 0,
+    VSync = true,
+    TargetFramesPerSecond = 60,
+    Samples = 0,                  // no MSAA on the mobile path
+    Resizable = false,
+    Frameless = false,
+    EnableDevTools = false,
+    DpiScale = density
+};</code></pre>
+        </div>
+
+        <p>
+            An app’s requested window width, height, frame style, MSAA, drag-resize and
+            devtools settings are therefore visual suggestions on Android, not contracts.
+            The surface, frame pacing and chrome belong to the activity.
+        </p>
+
+        <h2 id="dpi">Density and CSS pixels</h2>
+        <p>
+            Android reports a surface in physical pixels and a density scalar, not a
+            desktop-style logical window. The host passes density as
+            <code>WindowSettings.DpiScale</code>, so the window divides view and pointer
+            coordinates by it before layout and hit testing. CSS pixels stay independent
+            of the panel resolution.
+        </p>
+        <p>
+            Some SDL builds already expose a logical window size and a larger drawable.
+            In that case applying density again would shrink the UI, so the
+            <code>Loaded</code> handler checks the ratio and resets <code>DpiScale</code>
+            to zero when the framebuffer is already larger than the logical size. The
+            same handler prints density, DPI, size, framebuffer and GL version for
+            diagnosis.
+        </p>
+
+        <h2 id="permissions">Runtime permissions</h2>
+        <p>
+            <code>AndroidPermissionService</code> translates Donkeh’s portable
+            <code>HostPermission</code> values into Android manifest permissions:
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Donkeh permission</th><th>Android permission(s)</th></tr></thead>
+                <tbody>
+                    <tr><td>Camera</td><td><code>CAMERA</code></td></tr>
+                    <tr><td>Microphone</td><td><code>RECORD_AUDIO</code></td></tr>
+                    <tr><td>Location</td><td><code>ACCESS_FINE_LOCATION</code>, <code>ACCESS_COARSE_LOCATION</code></td></tr>
+                    <tr><td>Notifications</td><td><code>POST_NOTIFICATIONS</code> on API 33+; pre-33 resolves true</td></tr>
+                    <tr><td>Photos</td><td><code>READ_MEDIA_IMAGES</code> on API 33+, otherwise <code>READ_EXTERNAL_STORAGE</code></td></tr>
+                    <tr><td>Storage</td><td><code>READ_MEDIA_IMAGES</code> on API 33+, otherwise read/write external storage</td></tr>
+                    <tr><td>Contacts / Calendar</td><td><code>READ_CONTACTS</code> / <code>READ_CALENDAR</code></td></tr>
+                    <tr><td>Bluetooth</td><td><code>BLUETOOTH_CONNECT</code> on API 31+, otherwise legacy <code>BLUETOOTH</code></td></tr>
+                    <tr><td>Motion</td><td><code>ACTIVITY_RECOGNITION</code> on API 29+, otherwise unsupported</td></tr>
+                    <tr><td>Clipboard</td><td>Resolves immediately; no runtime prompt</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            The provider first checks <code>CheckSelfPermission</code> for every required
+            name and returns immediately when all are granted. Otherwise it allocates a
+            request code, stores a pending completion in a dictionary, registers
+            cancellation, and posts <code>RequestPermissions</code> to the UI thread. The
+            activity forwards <code>OnRequestPermissionsResult</code> back to the
+            provider, which completes the task and removes the entry.
+        </p>
+
+        <div class="callout note">
+            <strong>Any-of versus all-of</strong>
+            For a permission that maps to multiple Android names, the current result
+            handler completes true when any requested name is granted. Location and
+            pre-33 storage are the practical cases. Treat the portable boolean as “the
+            platform granted enough to proceed”, not as proof that every manifest entry
+            was accepted.
+        </div>
+
+        <p>
+            <code>OnDestroy</code> calls <code>CancelAll</code>, so every pending prompt
+            resolves false when the activity closes. The app must still declare the
+            matching <code>uses-permission</code> entries; the framework’s Android
+            permission targets can emit them from the central
+            <code>DonkehAndroidPermissions</code> list, and a hand-written manifest can
+            add more.
+        </p>
+
+        <h2 id="differences">Android versus desktop</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Area</th><th>Android behaviour</th></tr></thead>
+                <tbody>
+                    <tr><td>Surface</td><td>Activity-owned GLES view; the app does not create a native desktop window.</td></tr>
+                    <tr><td>Frame pacing</td><td>VSync and a 60 FPS cap, regardless of desktop settings.</td></tr>
+                    <tr><td>Chrome and resize</td><td>No native title bar, frameless resize handles or window dragging.</td></tr>
+                    <tr><td>MSAA</td><td>Disabled; the mobile path keeps the surface and bandwidth cost down.</td></tr>
+                    <tr><td>Devtools</td><td>Disabled by default on this path; the inspector is a desktop tool.</td></tr>
+                    <tr><td>Orientation</td><td>Activity configuration changes keep the instance; layout reflows on resize.</td></tr>
+                    <tr><td>Renderer</td><td>GLES 3.0 through the same <code>DonkehWindow</code>, layout and GLRenderer pipeline.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="trade-offs">Trade-offs and sharp edges</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Decision</th><th>Cost</th></tr></thead>
+                <tbody>
+                    <tr><td>Framework-owned activity</td><td>Zero app boilerplate, but the app cannot subclass or replace the launcher without writing its own host.</td></tr>
+                    <tr><td>Reflection into SDL bindings</td><td>Keeps the JNI bootstrap working, but a binding rename is a compile-time-adjacent runtime failure.</td></tr>
+                    <tr><td>Density with a fallback</td><td>Correct CSS pixels on most devices, with a heuristic for SDL builds that already scale the view.</td></tr>
+                    <tr><td>Any-of permission result</td><td>Practical for paired permissions, but cannot tell the app which individual name failed.</td></tr>
+                    <tr><td>Fixed 60 Hz / no MSAA</td><td>Predictable thermal and bandwidth behaviour, at the cost of high-refresh devices and smoother edges.</td></tr>
+                    <tr><td>Manifest still app-owned</td><td>Permissions must be declared as well as requested; a missing manifest entry fails at runtime.</td></tr>
+                    <tr><td>No devtools path</td><td>Saves layout and renderer overhead on mobile, but debugging happens on desktop or through logging.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="code-tour">Code tour</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>File</th><th>Read it for…</th></tr></thead>
+                <tbody>
+                    <tr><td><code>DonkehActivity.cs</code></td><td>Activity attributes, SDL handler seam, app discovery, GLES view setup, settings overrides and DPI fallback.</td></tr>
+                    <tr><td><code>AndroidPermissionService.cs</code></td><td>Permission mapping, API-level differences, UI-thread request flow, pending completions and cancellation.</td></tr>
+                    <tr><td><code>Donkeh.Windowing.Android.csproj</code></td><td>The <code>net10.0-android</code> target, minimum API and SDK path fallbacks.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            The mental model: Android is not a separate UI stack. It is a thin activity
+            adapter that owns the surface and permissions, then hands a GLES view to the
+            same <code>DonkehWindow</code> used on desktop.
+        </p>
+
+        <div class="page-nav">
+            <a class="prev" href="implementation-windowing.html"><span>Previous</span>Windowing</a>
+            <a class="next" href="implementation-browser.html"><span>Next</span>Browser</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh | CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/donkeh-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>

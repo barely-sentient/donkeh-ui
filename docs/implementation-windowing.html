@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Windowing | Donkeh</title>
+    <meta name="description" content="Implementation notes for Donkeh.Windowing: design decisions, data structures, trade-offs and hot paths.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/donkeh-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+                <a href="routing.html">Routing and setPage</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Reference</span>
+                <a href="html-elements.html">HTML elements</a>
+                <a href="css-support.html">CSS support</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Primitives</span>
+                <a href="image.html">Image</a>
+                <a href="video.html">Video</a>
+                <a href="canvas.html">Canvas</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+                        <div class="nav-group">
+                <span class="nav-label">Implementation for Nerds</span>
+                <a href="implementation.html">Overview</a>
+                <a class="nav-sub" href="implementation-parser.html">Parser</a>
+                <a class="nav-sub" href="implementation-data.html">Data</a>
+                <a class="nav-sub" href="implementation-dataengine.html">DataEngine</a>
+                <a class="nav-sub" href="implementation-layoutlab.html">LayoutLab</a>
+                <a class="nav-sub" href="implementation-uilab.html">UILab</a>
+                <a class="nav-sub" href="implementation-hosting.html">Hosting</a>
+                <a class="nav-sub" href="implementation-windowing.html">Windowing</a>
+                <a class="nav-sub" href="implementation-android.html">Android</a>
+                <a class="nav-sub" href="implementation-browser.html">Browser</a>
+                <a class="nav-sub" href="implementation-inspector.html">Inspector</a>
+                <a class="nav-sub" href="implementation-cli.html">CLI tool</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/donkeh-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Implementation for Nerds <span>/</span> Windowing</div>
+        <h1>Windowing</h1>
+        <p class="lead">
+            <code>Donkeh.Windowing</code> is the native desktop host. It owns the
+            window loop, the OpenGL renderer, input and focus, text and font atlases,
+            image and media caches, scrollbars, the built-in inspector, and the desktop
+            entry point that turns an <code>[AppRoot]</code> into a running application.
+            It is the layer where the portable engine meets a real platform.
+        </p>
+
+        <h2 id="entry">Entry and lifetime</h2>
+        <p>
+            Desktop apps do not write a <code>Main</code>. The build targets generate one
+            that calls <code>AppRootHost.RunDesktop(args)</code>. That helper discovers
+            the app root, creates a <code>DonkehWindow</code> from its settings, and runs
+            the root component and merged stylesheet. The host also understands
+            <code>--screenshot &lt;path&gt;</code>, which captures frame 120 and closes
+            the window for deterministic smoke tests.
+        </p>
+
+        <div class="tree">AppRootHost.RunDesktop(args)
+├── AppRootLocator.Find()
+├── new DonkehWindow(app.Settings)  // compiles UA + inspector CSS
+└── window.Run(app.CreateRoot(), app.Styles)
+    ├── Silk.NET window / view creation
+    ├── Load: GL, fonts, images, renderer, input
+    ├── Render: flush → layout → paint → submit
+    └── Close: release GPU resources, dispose window
+</div>
+
+        <p>
+            <code>DonkehWindow</code> can run either a Silk.NET desktop window or an
+            attached <code>IView</code> supplied by a platform host. That is the seam
+            the Android host uses: the same window, layout and renderer logic runs
+            against an externally owned surface instead of creating a desktop window.
+        </p>
+
+        <h2 id="frame">The frame loop</h2>
+        <p>
+            <code>OnRender</code> is a fixed sequence. The ordering matters because each
+            stage decides whether the next one can reuse work:
+        </p>
+
+        <ol>
+            <li>Process pending pointer movement and pointer auto-scroll.</li>
+            <li>Raise <code>BeforeFrame</code>, the earliest host hook.</li>
+            <li>Advance smooth-scroll animations and sample the monotonic animation clock.</li>
+            <li>Flush UILab (and the inspector's renderer), then drain inspector edits and sync audio/video elements.</li>
+            <li>Read view size, framebuffer size and DPI; reserve space for a docked inspector.</li>
+            <li>Full layout, animated-style repaint, or scroll-only repaint — whichever is needed.</li>
+            <li>Prune interaction nodes, build overlays, submit the display lists and flush the renderer.</li>
+            <li>Run batched canvas recordings, then raw GL canvas callbacks.</li>
+            <li>Update inspector sampling and handle a pending screenshot.</li>
+        </ol>
+
+        <p>
+            The window distinguishes <code>NeedsLayout</code>, <code>NeedsPaint</code>
+            and <code>NeedsAnimatedPaint</code>. A UILab version change or a resize forces
+            layout; a scroll forces only the display list; a transform or opacity
+            animation refreshes styles and paint without rebuilding geometry. CSS
+            animations are re-laid-out at 60 Hz while presentation can stay at 144 Hz,
+            which bounds CPU cost without making motion look choppy.
+        </p>
+
+        <h2 id="gl">The OpenGL renderer</h2>
+        <p>
+            <code>GLRenderer</code> executes LayoutLab's instruction stream. It does not
+            issue one draw per element. Every paint instruction becomes a fixed-size
+            160-byte <code>GpuInstance</code> carrying its clip rectangle, affine
+            transform, colour, SDF parameters and texture selector. Shapes, text and
+            images all become instanced quads in one GPU-resident stream.
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Mechanism</th><th>Effect</th></tr></thead>
+                <tbody>
+                    <tr><td>Per-instance clip and transform</td><td>Clip or transform changes do not split batches; they are fragment-shader inputs.</td></tr>
+                    <tr><td>16 texture slots</td><td>Up to sixteen textures per batch; exceeding it starts a new texture epoch while preserving paint order.</td></tr>
+                    <tr><td>Indirect path</td><td>One indirect command per segment, submitted with multi-draw when available, otherwise draw-indirect.</td></tr>
+                    <tr><td>Direct fallback</td><td>Same geometry, one instanced draw per batch, for drivers without indirect support or for benchmarking.</td></tr>
+                    <tr><td>Three stream slots</td><td>Persistent mapped instance/command buffers rotate so the CPU can prepare frame N+1 while the GPU reads N.</td></tr>
+                    <tr><td>Unified shader</td><td>Rects, rounded rects, borders, ellipses, shadows, glyphs and images share one vertex expansion path.</td></tr>
+                    <tr><td>Window mask</td><td>Rounded window corners are applied in the shader and mirrored into the native window region where supported.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            The renderer owns the shader program, VAOs, instance and command buffers,
+            fallback white texture and gradient cache. <code>FontManager</code> and
+            <code>ImageCache</code> are borrowed and must outlive it. Every member must
+            run on the GL context thread.
+        </p>
+
+        <h2 id="text">Text and fonts</h2>
+        <p>
+            <code>FontManager</code> is a compact TrueType pipeline shared by layout and
+            painting. It discovers system fonts, caches faces per normalised request and
+            builds a fallback chain per face set. Glyphs are rasterised into atlases per
+            rounded pixel size; metrics are cached per quarter CSS pixel. Because
+            <code>TrueTypeTextMeasurer</code> and the renderer use the same manager,
+            measured line widths and painted advances always agree.
+        </p>
+        <p>
+            Measurement adds glyph advances and letter spacing, kerns adjacent runes on
+            the same face, and selects fallback faces per rune while keeping ascent and
+            descent from the primary face for stable line boxes. There is no shaping,
+            bidi reordering or tab expansion. Font and glyph caches are never evicted;
+            they live until the GL context is disposed.
+        </p>
+
+        <h2 id="media">Images, audio, video and canvas</h2>
+        <p>
+            These primitives all live at the host boundary because they need platform
+            resources the layout engine must not know about:
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Primitive</th><th>Windowing responsibility</th></tr></thead>
+                <tbody>
+                    <tr><td><code>img</code></td><td>Resolve file/data/packed sources, decode intrinsic dimensions, upload textures, apply object-fit and share the cache with CSS backgrounds.</td></tr>
+                    <tr><td><code>audio</code></td><td>Own the SoundFlow device and one player per element; playback setup runs on a worker, while controls and events are serviced on the frame thread.</td></tr>
+                    <tr><td><code>video</code></td><td>Own the LibVLC player, request 640×360 RGBA frames, copy the latest frame into a dynamic texture and paint host controls.</td></tr>
+                    <tr><td><code>canvas</code></td><td>Run <code>OnDraw</code> recordings inside the indirect batch and <code>OnContext</code> callbacks after the batch flush.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            Audio and video players are created asynchronously and pruned when their
+            elements leave the tree. Audio publishes state only after construction
+            finishes; video keeps a CPU frame buffer and uploads only when a new frame
+            arrives. The same screenshot, media and canvas paths are unavailable or
+            different on the browser host, which mirrors the DOM instead of running this
+            GL pipeline.
+        </p>
+
+        <h2 id="input">Input, focus and interaction</h2>
+        <p>
+            Input is resolved against the layout tree, not the DOM. A pointer hit walks
+            the box tree, respects <code>pointer-events</code>, scroll containers and
+            fixed boxes, and updates a chain of hovered and active elements. Focus is a
+            separate chain with optional focus-visible state, caret placement and
+            selection.
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Interaction</th><th>Implementation</th></tr></thead>
+                <tbody>
+                    <tr><td>Hover / active</td><td>Element flags on the node chain; style caches use an interaction version so sibling and descendant selectors refresh.</td></tr>
+                    <tr><td>Text editing</td><td>Focused text controls own caret, selection, clipboard, IME composition and keyboard navigation.</td></tr>
+                    <tr><td>Select menus</td><td>Host-painted popup list positioned from the select box; hit testing and option selection are explicit overlays.</td></tr>
+                    <tr><td>Scrolling</td><td>Wheel deltas find the nearest scroll container, clamp offsets, animate smooth scroll and repaint without relayout.</td></tr>
+                    <tr><td>Scrollbars</td><td>Host-painted thumbs and tracks with drag interaction and pointer auto-scroll.</td></tr>
+                    <tr><td>Media controls</td><td>Play/pause, scrubber and seek-drag handled directly by the window.</td></tr>
+                    <tr><td>Frameless windows</td><td><code>app-region: drag</code> starts a native window drag; edge/corner hit testing provides resize handles.</td></tr>
+                    <tr><td>Cursor</td><td>Computed <code>cursor</code> maps to a native standard cursor and is applied on the hover chain.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            Scrolling is especially important to the frame budget. Box geometry stays in
+            unscrolled coordinates; scroll offsets are clamped per container and applied
+            as paint translations. A wheel event or scrollbar drag therefore rebuilds the
+            display list and hit-test offsets, but never the box tree or resolved styles.
+        </p>
+
+        <h2 id="devtools">The inspector</h2>
+        <p>
+            The built-in inspector runs as a separate UILab tree with its own
+            <code>Renderer</code>, <code>LayoutEngine</code>, renderer context and
+            display list. When docked, it reduces the app viewport so the page reflows
+            instead of being covered. In window mode it runs in its own native window and
+            edits are queued back to the frame thread before layout.
+        </p>
+        <p>
+            Inspector work is throttled. The Performance tab samples roughly four times
+            per second rather than every frame; the Elements tab refreshes on UILab
+            version changes; selection scrolling is requested explicitly. Disabling
+            devtools removes its key handling and skips its stylesheet, layout engine and
+            overlay work entirely.
+        </p>
+
+        <h2 id="dpi">DPI, sizing and window shape</h2>
+        <p>
+            The window works in CSS pixels and maps from the framebuffer using the
+            reported ratio, or an explicit <code>DpiScale</code> on platforms that report
+            physical surfaces. Pointer coordinates are divided by the same ratio, so hits
+            land on the CSS pixel layout used. Min/max client sizes are enforced by
+            nudging the native window back into range; resize events collapse into one
+            layout per rendered frame.
+        </p>
+        <p>
+            Frameless windows use the CSS <code>app-region</code> and host-provided
+            resize handles. A configured corner radius is applied both in the shader and,
+            where the platform supports it, to the native window region. The clear colour
+            is skipped for rounded windows so the corners can show the desktop while the
+            root element paints the visible surface.
+        </p>
+
+        <h2 id="trade-offs">Trade-offs and sharp edges</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Decision</th><th>Cost</th></tr></thead>
+                <tbody>
+                    <tr><td>One frame thread</td><td>No locking in the hot path, but layout, rendering, input and media synchronisation must stay on that thread.</td></tr>
+                    <tr><td>OpenGL-only native path</td><td>Fast and portable across desktop/Android, but requires a GL context and has no software fallback.</td></tr>
+                    <tr><td>Approximate text shaping</td><td>Fallback and kerning only; no complex shaping, bidi or tab layout.</td></tr>
+                    <tr><td>Unbounded font/image caches</td><td>No steady-state re-decoding, but memory grows with distinct fonts and image sources.</td></tr>
+                    <tr><td>Fixed video frame size</td><td>640×360 keeps uploads predictable, at the cost of resolution for large displays.</td></tr>
+                    <tr><td>Optional input backend</td><td>Rendering survives a failed input platform, but the app is non-interactive until input works.</td></tr>
+                    <tr><td>Separate inspector tree</td><td>Isolation and independent layout, but duplicated renderers, style state and overlay submission.</td></tr>
+                    <tr><td>Desktop-oriented host</td><td>Android reuses the window through an attached view; browser rendering is a different DOM host entirely.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="code-tour">Code tour</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>File</th><th>Read it for…</th></tr></thead>
+                <tbody>
+                    <tr><td><code>AppRootHost.cs</code></td><td>The generated desktop entry point and screenshot mode.</td></tr>
+                    <tr><td><code>DonkehWindow.cs</code></td><td>Window lifecycle, frame loop, layout/repaint decisions, input, scrolling, focus, devtools and screenshots.</td></tr>
+                    <tr><td><code>Rendering/GLRenderer.cs</code></td><td>Instanced batching, indirect submission, GPU stream slots and shader-driven clips.</td></tr>
+                    <tr><td><code>Rendering/ShaderProgram.cs</code> / <code>GradientCache.cs</code></td><td>Shader setup and cached gradient textures.</td></tr>
+                    <tr><td><code>Text/FontManager.cs</code> / <code>TrueTypeTextMeasurer.cs</code></td><td>Font discovery, fallback, metrics, glyph atlases and the layout adapter.</td></tr>
+                    <tr><td><code>Text/ImageCache.cs</code></td><td>Source resolution, decoding, SVG rasterisation and texture caching.</td></tr>
+                    <tr><td><code>Audio/AudioHost.cs</code> / <code>Video/VideoHost.cs</code></td><td>Asynchronous media players, state publishing and frame upload.</td></tr>
+                    <tr><td><code>HtmlDefaults.cs</code></td><td>The built-in user-agent stylesheet and tag defaults.</td></tr>
+                    <tr><td><code>WindowRegion.cs</code></td><td>Native rounded-window regions.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            The mental model: Windowing is the platform adapter between a portable frame
+            description and a real GL surface. LayoutLab decides what to paint; Windowing
+            decides where the pixels go, what the pointer is over, which textures exist,
+            and how much of the previous frame can be reused.
+        </p>
+
+        <div class="page-nav">
+            <a class="prev" href="implementation-hosting.html"><span>Previous</span>Hosting</a>
+            <a class="next" href="implementation-android.html"><span>Next</span>Android</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh | CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/donkeh-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Hosting | Donkeh</title>
+    <meta name="description" content="Implementation notes for Donkeh.Hosting: design decisions, data structures, trade-offs and hot paths.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/donkeh-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+                <a href="routing.html">Routing and setPage</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Reference</span>
+                <a href="html-elements.html">HTML elements</a>
+                <a href="css-support.html">CSS support</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Primitives</span>
+                <a href="image.html">Image</a>
+                <a href="video.html">Video</a>
+                <a href="canvas.html">Canvas</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+                        <div class="nav-group">
+                <span class="nav-label">Implementation for Nerds</span>
+                <a href="implementation.html">Overview</a>
+                <a class="nav-sub" href="implementation-parser.html">Parser</a>
+                <a class="nav-sub" href="implementation-data.html">Data</a>
+                <a class="nav-sub" href="implementation-dataengine.html">DataEngine</a>
+                <a class="nav-sub" href="implementation-layoutlab.html">LayoutLab</a>
+                <a class="nav-sub" href="implementation-uilab.html">UILab</a>
+                <a class="nav-sub" href="implementation-hosting.html">Hosting</a>
+                <a class="nav-sub" href="implementation-windowing.html">Windowing</a>
+                <a class="nav-sub" href="implementation-android.html">Android</a>
+                <a class="nav-sub" href="implementation-browser.html">Browser</a>
+                <a class="nav-sub" href="implementation-inspector.html">Inspector</a>
+                <a class="nav-sub" href="implementation-cli.html">CLI tool</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/donkeh-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Implementation for Nerds <span>/</span> Hosting</div>
+        <h1>Hosting</h1>
+        <p class="lead">
+            <code>Donkeh.Hosting</code> is the small, platform-neutral contract every
+            host shares. It does not open windows or render anything. It discovers the
+            application root, carries the settings that native hosts need, and exposes
+            the platform flags and awaitable permission surface that app code can use
+            without referencing a specific host implementation.
+        </p>
+
+        <h2 id="boundary">What belongs here</h2>
+        <p>
+            The package deliberately has no dependency on Silk.NET, OpenGL, LibVLC or a
+            native window. That is what lets the same app assembly compile for desktop,
+            Android and the browser. A few types live here even though their namespaces
+            belong to other packages, precisely so settings can describe a platform
+            feature without pulling the implementation into every consumer:
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Type</th><th>Why it lives in Hosting</th></tr></thead>
+                <tbody>
+                    <tr><td><code>AppRootAttribute</code></td><td>Declares the root component and all host settings in one place.</td></tr>
+                    <tr><td><code>AppRootDefinition</code></td><td>Carries the discovered root factory, merged stylesheet and settings to any host.</td></tr>
+                    <tr><td><code>WindowSettings</code></td><td>Platform-neutral window description; the native host applies it.</td></tr>
+                    <tr><td><code>RenderPath</code></td><td>Lets settings select direct or indirect rendering without referencing the GL renderer.</td></tr>
+                    <tr><td><code>DevToolsDock</code></td><td>Lets settings choose an inspector position without referencing the inspector implementation.</td></tr>
+                    <tr><td><code>Host</code> / <code>HostPermissions</code></td><td>The app-facing platform and permission API.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="app-root">The attributed app root</h2>
+        <p>
+            An application declares one component:
+        </p>
+
+        <div class="code" data-label="App.cs">
+<pre><code>using Donkeh.Hosting;
+using Donkeh.UILab;
+using static Donkeh.UILab.HtmlHelper;
+
+[AppRoot(
+    Width = 1180,
+    Height = 760,
+    Title = "My app",
+    EnableDevTools = true,
+    Frameless = true,
+    CornerRadius = 9f)]
+public sealed class App : Component
+{
+    public override Node Render() =&gt;
+        Div(new() { ClassName = "app" });
+}</code></pre>
+        </div>
+
+        <p>
+            The attribute is the whole application contract. It carries window size,
+            title, frame style, VSync, frame cap, clear colour, MSAA samples, render
+            path, DPI override, resizability, min/max size, icon, topmost and transparency
+            flags, inspector settings, and an optional native corner radius.
+            <code>ToWindowSettings()</code> converts those constants into the mutable
+            struct a native host consumes.
+        </p>
+
+        <div class="callout note">
+            <strong>Attribute arguments are constants</strong>
+            C# attributes cannot take object initializers, so settings are named
+            properties. <code>CornerRadius</code> uses <code>float.NaN</code> to mean
+            “derive the window shape from CSS”; zero means a square frameless window.
+            Zero is also a sentinel for several native settings, so prefer
+            <code>WindowSettings.Default</code> over <code>default</code> when building
+            settings in code.
+        </div>
+
+        <h2 id="discovery">Discovery</h2>
+        <p>
+            <code>AppRootLocator.Find()</code> is the single discovery point used by
+            every platform entry point. It checks the entry assembly first, then every
+            loaded assembly. The first type with <code>[AppRoot]</code> wins.
+        </p>
+
+        <ol>
+            <li>The type must derive from <code>Component</code>.</li>
+            <li>It must not be abstract.</li>
+            <li>It must expose a public parameterless constructor.</li>
+        </ol>
+
+        <p>
+            Failures are explicit: a missing root, a non-component type, or a missing
+            constructor throws an <code>InvalidOperationException</code> with a message
+            that names the type. The attribute is not inherited, so a derived component
+            does not accidentally become a second root.
+        </p>
+
+        <p>
+            For migration, the locator falls back to the legacy
+            <code>[DonkehApp]</code>/<code>IDonkehApp</code> contract when no
+            <code>[AppRoot]</code> is present. New applications should use the
+            attribute; the legacy path exists so older projects keep compiling.
+        </p>
+
+        <h2 id="definition">The app definition</h2>
+        <p>
+            Discovery produces an <code>AppRootDefinition</code>: the component type,
+            the converted <code>WindowSettings</code>, the merged author stylesheet and
+            a factory that creates the root component node. The stylesheet is loaded
+            during definition construction through <code>Stylesheet.Load()</code>, so
+            reflection and embedded-resource reads happen once at startup rather than
+            per frame.
+        </p>
+
+        <div class="tree">AppRootLocator.Find()
+└── AppRootDefinition
+    ├── ComponentType     [AppRoot] type, or null for legacy
+    ├── Settings          WindowSettings copy
+    ├── Styles            merged embedded CSS
+    └── CreateRoot()      _.C(componentType)
+</div>
+
+        <p>
+            Hosts consume the definition differently but share the same object. The
+            desktop/browser entry point mounts <code>CreateRoot()</code> into a
+            <code>Renderer</code> and passes <code>Settings</code> to the window. The
+            Android activity discovers the same definitions and applies its own surface,
+            density and lifecycle rules.
+        </p>
+
+        <h2 id="settings">Window settings</h2>
+        <p>
+            <code>WindowSettings</code> is a mutable struct so it can be composed with
+            an object initializer and copied into the native window without a heap
+            allocation. Defaults are desktop-oriented: 1280 × 800, resizable, not
+            VSync, 144 FPS cap, opaque white clear colour, 4× MSAA, inspector enabled
+            at the bottom.
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Group</th><th>Fields</th></tr></thead>
+                <tbody>
+                    <tr><td>Geometry</td><td><code>Width</code>, <code>Height</code>, <code>Min/MaxWidth</code>, <code>Min/MaxHeight</code>, <code>Resizable</code>, <code>Frameless</code>, <code>FullScreen</code>, <code>Maximized</code>, <code>CornerRadius</code></td></tr>
+                    <tr><td>Presentation</td><td><code>VSync</code>, <code>TargetFramesPerSecond</code>, <code>ClearColor</code>, <code>Samples</code>, <code>RenderPath</code>, <code>Transparent</code>, <code>TopMost</code></td></tr>
+                    <tr><td>Identity</td><td><code>Title</code>, <code>Icon</code></td></tr>
+                    <tr><td>Scaling</td><td><code>DpiScale</code>; zero derives the ratio from the framebuffer, mobile hosts set display density explicitly</td></tr>
+                    <tr><td>Developer tools</td><td><code>EnableDevTools</code>, <code>DevToolsPosition</code></td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            Settings are copied when the native window is constructed. Changing a copy
+            afterwards has no effect on the live window, and some values are only
+            applied at creation. A <code>default(WindowSettings)</code> bypasses the
+            constructor and produces a fixed, non-resizable window with inspector off
+            and an uncapped frame rate — not the documented defaults.
+        </p>
+
+        <h2 id="render-path">Render path and devtools placement</h2>
+        <p>
+            <code>RenderPath.Auto</code> uses indirect submission when the driver
+            exposes the required extensions and falls back to direct instanced draws
+            otherwise. <code>Indirect</code> bakes geometry into one GPU-resident
+            buffer and submits indirect commands; <code>Direct</code> keeps the same
+            geometry but issues one instanced draw per batch, which is useful for
+            benchmarking or isolating driver problems. Browser hosts ignore the value.
+        </p>
+        <p>
+            <code>DevToolsDock</code> selects bottom, right or a separate native
+            inspector window. The enum lives in Hosting so settings can reference it
+            without forcing every consumer to reference <code>Donkeh.Inspector</code>.
+        </p>
+
+        <h2 id="permissions">Platform flags and permissions</h2>
+        <p>
+            <code>Host</code> exposes simple platform predicates:
+            <code>IsAndroid</code>, <code>IsIOS</code>, <code>IsWindows</code>,
+            <code>IsMac</code>, <code>IsLinux</code>, <code>IsWeb</code>,
+            <code>IsDesktop</code>, <code>IsMobile</code>, <code>IsBrowser</code> and a
+            friendly <code>PlatformName</code>. These are safe on every target and
+            require no host setup.
+        </p>
+        <p>
+            Permission checks are intentionally asynchronous because mobile and browser
+            platforms may need a system prompt:
+        </p>
+
+        <div class="code" data-label="Permissions">
+<pre><code>using Donkeh.Hosting;
+
+if (Host.IsAndroid)
+{
+    // Android-only setup.
+}
+
+if (await Host.Permissions.Camera())
+{
+    // Open the camera.
+}</code></pre>
+        </div>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Mechanism</th><th>Behaviour</th></tr></thead>
+                <tbody>
+                    <tr><td><code>Host.Permissions</code></td><td>Shared <code>HostPermissions</code> instance with camera, microphone, location, notifications, photos, storage, contacts, calendar, Bluetooth, motion and clipboard helpers.</td></tr>
+                    <tr><td>Grant cache</td><td>A granted result is cached for the host lifetime; a denial is not, so the app can retry after a settings change.</td></tr>
+                    <tr><td>In-flight deduplication</td><td>Concurrent requests for the same permission share one platform prompt.</td></tr>
+                    <tr><td>Cancellation</td><td>A cancelled prompt resolves to <code>false</code> rather than throwing.</td></tr>
+                    <tr><td>Provider replacement</td><td><code>Host.UsePermissions(service)</code> installs the platform provider and clears cached grants; passing <code>null</code> restores the default.</td></tr>
+                    <tr><td>Default provider</td><td>Desktop grants and lets the device API enforce access; mobile, browser and unknown platforms return <code>false</code> until their host installs a real provider.</td></tr>
+                    <tr><td>Failure policy</td><td>Unknown permissions, provider exceptions and cancelled prompts all fail closed.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="callout warning">
+            <strong>The default is not a security model</strong>
+            The desktop default answers “granted” because .NET has no common runtime
+            permission prompt. The actual camera, microphone or filesystem operation can
+            still fail. Mobile and browser hosts are expected to replace the provider
+            during startup; until they do, permission checks return false.
+        </div>
+
+        <h2 id="performance">Startup cost and steady state</h2>
+        <p>
+            Hosting is almost entirely startup code. Discovery reflects over loaded
+            assemblies once; the definition loads and merges stylesheets once; window
+            settings are copied once when the native window is created. After that,
+            platform flags are simple runtime checks and permission calls are cached or
+            deduplicated, so the package adds no per-frame work to the render loop.
+        </p>
+
+        <h2 id="trade-offs">Trade-offs and sharp edges</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Decision</th><th>Cost</th></tr></thead>
+                <tbody>
+                    <tr><td>Attribute + reflection discovery</td><td>Zero configuration, but trimming or aggressive AOT can remove the root type or its constructor; keep the root type rooted.</td></tr>
+                    <tr><td>One root per application</td><td>Simple entry points, but multi-window or multi-root apps need their own host layer.</td></tr>
+                    <tr><td>Public parameterless constructor</td><td>Cacheable construction, but no constructor injection or DI lifetime model.</td></tr>
+                    <tr><td>Stylesheet loading during discovery</td><td>Avoids per-frame reflection, but scans loaded assemblies and reads resources at startup.</td></tr>
+                    <tr><td>Global static permission provider</td><td>Easy app API, but process-wide; replacing it affects every consumer at once.</td></tr>
+                    <tr><td>Mutable settings struct</td><td>Allocation-free composition, but <code>default</code> has surprising sentinel behaviour.</td></tr>
+                    <tr><td>Host-agnostic enums in Hosting</td><td>Avoids implementation references in settings, at the cost of slightly surprising namespaces.</td></tr>
+                    <tr><td>Legacy app contract retained</td><td>Keeps older projects compiling, but there are now two discovery paths to understand.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="code-tour">Code tour</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>File</th><th>Read it for…</th></tr></thead>
+                <tbody>
+                    <tr><td><code>Hosting/Source/AppRootAttribute.cs</code></td><td>Every root setting and the conversion to <code>WindowSettings</code>.</td></tr>
+                    <tr><td><code>Hosting/Source/AppRootLocator.cs</code></td><td>Entry-assembly-first discovery, validation and legacy fallback.</td></tr>
+                    <tr><td><code>Hosting/Source/AppRootDefinition.cs</code></td><td>The object every host consumes: type, settings, styles and root factory.</td></tr>
+                    <tr><td><code>Hosting/Source/WindowSettings.cs</code></td><td>Native window fields, defaults, sentinels and creation-time semantics.</td></tr>
+                    <tr><td><code>Hosting/Source/AppModel.cs</code></td><td>The legacy <code>IDonkehApp</code>/<code>DonkehApp</code> contract.</td></tr>
+                    <tr><td><code>Hosting/Source/Host.cs</code></td><td>Platform predicates and permission-provider installation.</td></tr>
+                    <tr><td><code>Hosting/Source/HostPermissions.cs</code></td><td>Grant caching, in-flight deduplication and failure policy.</td></tr>
+                    <tr><td><code>Hosting/Source/RenderPath.cs</code> / <code>DevToolsDock.cs</code></td><td>The platform-neutral enums settings expose.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            The mental model: Hosting is the layer that lets a host and an app agree on
+            what an application is. The app declares a root and settings; Hosting
+            discovers them, loads its styles, and hands a platform-neutral definition to
+            whichever native or browser host is running.
+        </p>
+
+        <div class="page-nav">
+            <a class="prev" href="implementation-uilab.html"><span>Previous</span>UILab</a>
+            <a class="next" href="implementation-windowing.html"><span>Next</span>Windowing</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh | CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/donkeh-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>

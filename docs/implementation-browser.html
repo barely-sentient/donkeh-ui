@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Browser | Donkeh</title>
+    <meta name="description" content="Implementation notes for Donkeh.Windowing.Browser: design decisions, data structures, trade-offs and hot paths.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/donkeh-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+                <a href="routing.html">Routing and setPage</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Reference</span>
+                <a href="html-elements.html">HTML elements</a>
+                <a href="css-support.html">CSS support</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Primitives</span>
+                <a href="image.html">Image</a>
+                <a href="video.html">Video</a>
+                <a href="canvas.html">Canvas</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+                        <div class="nav-group">
+                <span class="nav-label">Implementation for Nerds</span>
+                <a href="implementation.html">Overview</a>
+                <a class="nav-sub" href="implementation-parser.html">Parser</a>
+                <a class="nav-sub" href="implementation-data.html">Data</a>
+                <a class="nav-sub" href="implementation-dataengine.html">DataEngine</a>
+                <a class="nav-sub" href="implementation-layoutlab.html">LayoutLab</a>
+                <a class="nav-sub" href="implementation-uilab.html">UILab</a>
+                <a class="nav-sub" href="implementation-hosting.html">Hosting</a>
+                <a class="nav-sub" href="implementation-windowing.html">Windowing</a>
+                <a class="nav-sub" href="implementation-android.html">Android</a>
+                <a class="nav-sub" href="implementation-browser.html">Browser</a>
+                <a class="nav-sub" href="implementation-inspector.html">Inspector</a>
+                <a class="nav-sub" href="implementation-cli.html">CLI tool</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/donkeh-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Implementation for Nerds <span>/</span> Browser</div>
+        <h1>Browser</h1>
+        <p class="lead">
+            <code>Donkeh.Windowing.Browser</code> is a DOM host, not a renderer. It
+            mounts the same UILab application, then mirrors the reconciled virtual tree
+            into real browser elements. CSS layout, focus, carets, selection, scrolling,
+            form controls and pseudo-classes stay with the browser; the host only keeps
+            the DOM in sync and forwards events to the same delegates a desktop host
+            would invoke.
+        </p>
+
+        <h2 id="bootstrap">Bootstrap</h2>
+        <p>
+            <code>DonkehBrowser.RunAsync</code> creates a default Blazor WebAssembly
+            host, registers <code>DomHost</code> as a singleton and starts it. Blazor is
+            used only for its WebAssembly runtime and JavaScript interop. No Blazor
+            components are rendered; UILab owns the UI tree.
+        </p>
+
+        <div class="code" data-label="DonkehBrowser.cs">
+<pre><code>var builder = WebAssemblyHostBuilder.CreateDefault(args);
+builder.Services.AddSingleton&lt;DomHost&gt;();
+
+var host = builder.Build();
+await host.Services.GetRequiredService&lt;DomHost&gt;().StartAsync();
+await host.RunAsync();</code></pre>
+        </div>
+
+        <p>
+            <code>DomHost.StartAsync</code> discovers the <code>[AppRoot]</code>,
+            imports an embedded JavaScript module, initializes it against the container
+            element, installs the browser permission provider, applies the merged
+            stylesheet and title, subscribes to <code>Renderer.AfterUpdate</code>,
+            mounts the component tree and performs the first sync.
+        </p>
+
+        <div class="callout tip">
+            <strong>The bridge is an embedded ES module</strong>
+            The JavaScript lives in the framework assembly and is imported as a
+            <code>data:text/javascript;base64,...</code> URL. Apps do not need a
+            <code>wwwroot</code> folder, static web asset manifest or <code>_content</code>
+            path. The bridge is a framework concern, not an app packaging detail.
+        </div>
+
+        <h2 id="identity">Stable ids and snapshots</h2>
+        <p>
+            Every virtual node gets a stable integer id the first time it is synced. The
+            browser stores the same id on its DOM node, and the C# host keeps both
+            directions:
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>State</th><th>Purpose</th></tr></thead>
+                <tbody>
+                    <tr><td><code>Node → int</code></td><td>Stable identity for patching, even across keyed reorders.</td></tr>
+                    <tr><td><code>int → Node</code></td><td>Resolves the handler and target for an incoming browser event.</td></tr>
+                    <tr><td><code>NodeSnapshot</code></td><td>Last applied tag, text, attribute map, event list, child order and folded text content.</td></tr>
+                    <tr><td>Root child ids</td><td>Tracks the flattened top-level order, with fragments removed from the DOM shape.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            A sync walks the live tree, compares each node with its snapshot and emits
+            only changed patches. Fragments have no DOM counterpart, so their children
+            occupy the fragment’s slot in the parent. Nodes that disappear from the walk
+            are removed from the maps and get a remove patch. The DOM node is never
+            recreated just because its position changed.
+        </p>
+
+        <div class="tree">Renderer.AfterUpdate
+└── RequestSync (coalesced)
+    └── SyncAsync
+        ├── walk live tree, assign ids on first sight
+        ├── diff text / attrs / events / children / folded text
+        ├── collect removals
+        └── serialize DomPatchBatch → JS apply()
+</div>
+
+        <h2 id="patches">The patch protocol</h2>
+        <p>
+            The patch vocabulary is deliberately small. The browser owns the real DOM;
+            the host only describes how it differs from the last applied snapshot.
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Patch</th><th>Effect</th></tr></thead>
+                <tbody>
+                    <tr><td><code>create</code></td><td>Create an element or text node with a stable id.</td></tr>
+                    <tr><td><code>remove</code></td><td>Remove a node and forget its id.</td></tr>
+                    <tr><td><code>children</code></td><td>Set the exact child order, inserting and moving existing nodes instead of rebuilding.</td></tr>
+                    <tr><td><code>text</code></td><td>Replace a text node’s value.</td></tr>
+                    <tr><td><code>content</code></td><td>Set folded element text, or clear it when real children return.</td></tr>
+                    <tr><td><code>attrs</code></td><td>Replace the full attribute map; the bridge preserves its own <code>data-donkeh-*</code> bookkeeping.</td></tr>
+                    <tr><td><code>events</code></td><td>Replace the event-name list stored on the element for delegation.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            Patches are serialized with a source-generated <code>JsonSerializerContext</code>,
+            which keeps the bridge trim-safe in published WebAssembly builds. The JS side
+            applies them in order and maintains a <code>Map&lt;number, Node&gt;</code>.
+            It also handles the cases where the DOM’s live state must win:
+        </p>
+
+        <ul>
+            <li>A focused text input keeps the user’s live value unless the virtual tree changed it to a different value.</li>
+            <li><code>value</code>, <code>checked</code> and <code>selected</code> are mirrored as properties as well as attributes, without disturbing a caret.</li>
+            <li>Removing <code>checked</code> or <code>selected</code> clears the corresponding property.</li>
+            <li><code>data-donkeh-*</code> attributes are reserved for the bridge and never removed by an attribute replacement.</li>
+        </ul>
+
+        <h2 id="events">Event delegation</h2>
+        <p>
+            The bridge installs one delegated listener per event family on the container,
+            not one listener per element. Each element carries its event-name list in a
+            data attribute. When a browser event fires, the bridge walks from the physical
+            target up to the nearest element that declares a handler for that event, then
+            calls back into .NET with:
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Argument</th><th>Meaning</th></tr></thead>
+                <tbody>
+                    <tr><td><code>handlerId</code></td><td>The nearest virtual element that owns the handler.</td></tr>
+                    <tr><td><code>targetId</code></td><td>The deepest virtual node under the physical event target.</td></tr>
+                    <tr><td><code>eventName</code></td><td>Normalized name such as <code>click</code>, <code>pointerdown</code>, <code>input</code> or <code>change</code>.</td></tr>
+                    <tr><td><code>x</code>, <code>y</code></td><td>Element-local coordinates, scroll deltas or media time, depending on the event.</td></tr>
+                    <tr><td><code>text</code>, <code>value</code></td><td>Key name, pasted text or control value.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            <code>DomHost.HandleEventAsync</code> resolves both ids, updates control state
+            for input/change/Enter and invokes the same delegate shapes as the desktop
+            host: parameterless actions, string handlers and two-float pointer handlers.
+            Browser key names are mapped to the desktop names: <code>Space</code>,
+            <code>Left</code>, <code>Right</code>, <code>Up</code>, <code>Down</code>,
+            <code>Escape</code> and single letters. A throwing handler is contained, as it
+            is on desktop.
+        </p>
+
+        <p>
+            Scroll and media tracking are opt-in per element. When an element declares
+            <code>scroll</code>, the bridge records its previous offsets and reports the
+            delta. Declaring media events attaches play, pause, ended and timeupdate
+            tracking. Both use passive listeners where possible.
+        </p>
+
+        <h2 id="browser-owned">What the browser owns</h2>
+        <p>
+            The browser path intentionally does not run LayoutLab or the OpenGL renderer.
+            It delegates far more to the platform than the desktop host:
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Concern</th><th>Owner</th></tr></thead>
+                <tbody>
+                    <tr><td>CSS layout, cascade and pseudo-classes</td><td>The browser.</td></tr>
+                    <tr><td>Focus, caret, selection and IME</td><td>The browser’s native form controls.</td></tr>
+                    <tr><td>Scrolling and scrollbars</td><td>The browser; the host consumes scroll deltas.</td></tr>
+                    <tr><td><code>img</code>, <code>video</code>, <code>audio</code></td><td>Native browser elements and media APIs.</td></tr>
+                    <tr><td><code>canvas</code></td><td>The element exists, but no C# draw callback is wired.</td></tr>
+                    <tr><td>Inspector</td><td>Not part of the browser host; devtools are desktop-only.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="permissions">Browser permissions</h2>
+        <p>
+            <code>BrowserPermissionService</code> forwards the supported capabilities to
+            the embedded module, which uses the corresponding browser API:
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Permission</th><th>Browser mechanism</th></tr></thead>
+                <tbody>
+                    <tr><td>Camera</td><td><code>getUserMedia({ video: true })</code>; the temporary stream is stopped immediately.</td></tr>
+                    <tr><td>Microphone</td><td><code>getUserMedia({ audio: true })</code>; same stop-after-check policy.</td></tr>
+                    <tr><td>Location</td><td><code>navigator.geolocation.getCurrentPosition</code> with a 15-second timeout.</td></tr>
+                    <tr><td>Notifications</td><td><code>Notification.requestPermission()</code>, with existing grant/deny states short-circuited.</td></tr>
+                    <tr><td>Storage</td><td><code>navigator.storage.persist()</code>.</td></tr>
+                    <tr><td>Motion</td><td><code>DeviceMotionEvent.requestPermission()</code> where available; otherwise true.</td></tr>
+                    <tr><td>Clipboard</td><td>A clipboard read, which requires a user gesture in most browsers.</td></tr>
+                    <tr><td>Photos, contacts, calendar, Bluetooth</td><td>Unsupported; returns false.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="callout warning">
+            <strong>User gesture required</strong>
+            Browsers gate camera, microphone, clipboard and some notification prompts on
+            a user gesture. Calling <code>Host.Permissions.Camera()</code> from a button
+            click works; calling it during startup may be rejected even though the same
+            API succeeds later. Failures resolve false rather than throwing.
+        </div>
+
+        <h2 id="performance">Why the bridge stays small</h2>
+        <ul>
+            <li><strong>Stable ids.</strong> Keyed reorders move existing DOM nodes; they do not recreate subtrees or lose browser focus.</li>
+            <li><strong>Snapshot diffs.</strong> Only changed text, attributes, events and child orders cross the interop boundary.</li>
+            <li><strong>Coalesced sync.</strong> Multiple renderer updates in flight collapse into one drain loop; the newest tree wins.</li>
+            <li><strong>Delegated events.</strong> One listener per event family on the container, not per element.</li>
+            <li><strong>No layout engine.</strong> The browser performs layout and paint; the host never builds boxes or instructions.</li>
+            <li><strong>Trim-safe JSON.</strong> Source-generated serialization avoids reflection metadata in published WASM builds.</li>
+        </ul>
+
+        <h2 id="trade-offs">Trade-offs and sharp edges</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Decision</th><th>Cost</th></tr></thead>
+                <tbody>
+                    <tr><td>DOM is authoritative</td><td>Native form behaviour is excellent, but the host must reconcile browser-driven value changes back into virtual node state.</td></tr>
+                    <tr><td>No layout engine</td><td>Browser CSS and layout do the real work, so desktop-specific layout behaviour and the inspector are unavailable.</td></tr>
+                    <tr><td>Data-URL module</td><td>No app packaging requirements, but the bridge is loaded as a generated module rather than a cacheable static asset.</td></tr>
+                    <tr><td>Full attribute replacement</td><td>Simple and correct, but every attribute map crosses the interop boundary when any attribute changes.</td></tr>
+                    <tr><td>Delegated events</td><td>One listener setup, but every event walks ancestors to find a handler.</td></tr>
+                    <tr><td>No canvas drawing</td><td>Native canvas exists, but C# callbacks are not bridged; there is no WebGL interop yet.</td></tr>
+                    <tr><td>Permission gesture rules</td><td>Apps must trigger prompts from interaction; startup checks can fail for reasons the host cannot control.</td></tr>
+                    <tr><td>WASM startup and trimming</td><td>The Blazor runtime is large compared with a native host; source-generated JSON and rooting keep the bridge safe under trimming.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="code-tour">Code tour</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>File</th><th>Read it for…</th></tr></thead>
+                <tbody>
+                    <tr><td><code>DonkehBrowser.cs</code></td><td>The Blazor WebAssembly bootstrap and singleton host registration.</td></tr>
+                    <tr><td><code>DomHost.cs</code></td><td>App mount, id maps, snapshots, patch generation, event dispatch and control-state reconciliation.</td></tr>
+                    <tr><td><code>DomPatch.cs</code></td><td>The small patch vocabulary and source-generated JSON contract.</td></tr>
+                    <tr><td><code>wwwroot/donkeh.js</code></td><td>DOM creation/patching, delegated listeners, scroll/media tracking and browser permission APIs.</td></tr>
+                    <tr><td><code>BrowserPermissionService.cs</code></td><td>The Donkeh-to-browser permission mapping and failure policy.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            The mental model: desktop paints a tree; the browser mirrors it. UILab remains
+            the source of truth for structure, but the browser is the source of truth for
+            layout, focus, form state and native interaction.
+        </p>
+
+        <div class="page-nav">
+            <a class="prev" href="implementation-android.html"><span>Previous</span>Android</a>
+            <a class="next" href="implementation-inspector.html"><span>Next</span>Inspector</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh | CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/donkeh-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>

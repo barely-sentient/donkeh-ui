@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>CLI tool | Donkeh</title>
+    <meta name="description" content="Implementation notes for Donkeh.CliTool: design decisions, data structures, trade-offs and hot paths.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/donkeh-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+                <a href="routing.html">Routing and setPage</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Reference</span>
+                <a href="html-elements.html">HTML elements</a>
+                <a href="css-support.html">CSS support</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Primitives</span>
+                <a href="image.html">Image</a>
+                <a href="video.html">Video</a>
+                <a href="canvas.html">Canvas</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+                        <div class="nav-group">
+                <span class="nav-label">Implementation for Nerds</span>
+                <a href="implementation.html">Overview</a>
+                <a class="nav-sub" href="implementation-parser.html">Parser</a>
+                <a class="nav-sub" href="implementation-data.html">Data</a>
+                <a class="nav-sub" href="implementation-dataengine.html">DataEngine</a>
+                <a class="nav-sub" href="implementation-layoutlab.html">LayoutLab</a>
+                <a class="nav-sub" href="implementation-uilab.html">UILab</a>
+                <a class="nav-sub" href="implementation-hosting.html">Hosting</a>
+                <a class="nav-sub" href="implementation-windowing.html">Windowing</a>
+                <a class="nav-sub" href="implementation-android.html">Android</a>
+                <a class="nav-sub" href="implementation-browser.html">Browser</a>
+                <a class="nav-sub" href="implementation-inspector.html">Inspector</a>
+                <a class="nav-sub" href="implementation-cli.html">CLI tool</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/donkeh-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Implementation for Nerds <span>/</span> CLI tool</div>
+        <h1>CLI tool</h1>
+        <p class="lead">
+            <code>Donkeh.CliTool</code> is the <code>donkeh</code> global tool. It is
+            deliberately small: parse a handful of commands, generate a project or a
+            component, wire platform targets into an SDK-style project, and get out of the
+            way. It never evaluates MSBuild, never runs a restore implicitly, and does not
+            own a template engine.
+        </p>
+
+        <h2 id="shape">Command surface</h2>
+        <div class="code" data-label="Terminal">
+<pre><code>donkeh new project [&lt;directory&gt;] [--name &lt;name&gt;] [--framework &lt;path&gt;] [--force]
+donkeh new component &lt;name&gt; [--project &lt;path&gt;] [--force]
+donkeh enable-target &lt;desktop|android|web&gt; [--project &lt;path&gt;]
+donkeh --help
+donkeh --version</code></pre>
+        </div>
+
+        <p>
+            <code>Program.cs</code> is a one-line entry point that returns
+            <code>Cli.Run(args)</code>. The CLI catches <code>CliException</code> and
+            unexpected exceptions alike, prints <code>error: …</code> to stderr and
+            returns exit code 1. Success paths return 0. There is no stack trace or
+            partial stack of console noise on a normal user mistake.
+        </p>
+
+        <h2 id="parsing">Argument parsing</h2>
+        <p>
+            <code>ParsedArguments</code> is a small hand-written parser, not
+            <code>System.CommandLine</code>. It collects positionals, accepts
+            <code>--option value</code> and <code>--option=value</code>, handles
+            <code>--force</code> and help flags, and rejects unknown options or missing
+            values with a clean message. That keeps startup tiny and avoids a dependency
+            whose help formatting would be larger than the tool.
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Input</th><th>Behaviour</th></tr></thead>
+                <tbody>
+                    <tr><td><code>new project .</code></td><td>Uses the current directory; the project name is derived from that folder.</td></tr>
+                    <tr><td><code>new project MyApp</code></td><td>Creates <code>MyApp/</code> and names the project <code>MyApp</code>.</td></tr>
+                    <tr><td><code>--name Acme.App</code></td><td>Overrides the project name and therefore the root namespace.</td></tr>
+                    <tr><td><code>--force</code></td><td>Allows overwriting generated files; without it an existing target is an error.</td></tr>
+                    <tr><td><code>--help</code></td><td>Prints command-specific help and exits 0.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="framework">Checkout or NuGet</h2>
+        <p>
+            <code>FrameworkLocator</code> decides whether a new project should reference a
+            local framework checkout or the published packages:
+        </p>
+
+        <ol>
+            <li>An explicit <code>--framework</code> must resolve to a directory containing <code>Build/Donkeh.props</code> or a repository root with a <code>Donkeh</code> folder; otherwise it is an error.</li>
+            <li>Without one, the locator walks up from the current directory and then the tool's base directory looking for the same markers.</li>
+            <li>If nothing is found, it returns <code>null</code> and the generator uses NuGet packages.</li>
+        </ol>
+
+        <p>
+            A checkout project imports <code>Build/Donkeh.props</code> and
+            <code>Build/Donkeh.targets</code>, uses project references, and carries a
+            generated <code>Directory.Build.targets</code>. A NuGet project has no
+            framework import; it references <code>Donkeh.Windowing</code> at the CLI's own
+            assembly version and leaves the framework's package build assets to supply the
+            entry point.
+        </p>
+
+        <div class="callout note">
+            <strong>No restore during generation</strong>
+            The CLI writes files and prints the next command. It does not run
+            <code>dotnet restore</code>, so generation stays fast and does not fail because
+            of a transient network or credential problem. <code>dotnet run</code> or
+            <code>dotnet restore</code> performs the restore when the developer is ready.
+        </div>
+
+        <h2 id="project">Project generation</h2>
+        <p>
+            <code>ProjectGenerator</code> creates the project file, <code>Program.cs</code>
+            and <code>.gitignore</code>, plus the checkout targets file when needed. The
+            generated app is intentionally minimal:
+        </p>
+
+        <div class="code" data-label="Program.cs">
+<pre><code>using Donkeh.Hosting;
+using Donkeh.UILab;
+using static Donkeh.UILab.HtmlHelper;
+
+namespace MyApp;
+
+[AppRoot(Width = 1000, Height = 700, Title = "MyApp")]
+public sealed class App : Component
+{
+    public override Node Render() =&gt;
+        Div(new()
+        {
+            ClassName = "app",
+            Attributes = new Dictionary&lt;string, string&gt;
+            {
+                ["style"] = "margin:0;width:100vw;height:100vh;background:#ffffff"
+            }
+        });
+}</code></pre>
+        </div>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Decision</th><th>Reason</th></tr></thead>
+                <tbody>
+                    <tr><td>Project name from folder</td><td><code>donkeh new project .</code> uses the containing directory name, so a normal folder does not need a second argument.</td></tr>
+                    <tr><td>Invalid filename characters replaced with <code>_</code></td><td>The project name becomes a file name and a namespace; sanitising here prevents a later failure.</td></tr>
+                    <tr><td>Version from the tool assembly</td><td>A released CLI references the matching package version; the generated file exposes <code>DonkehVersion</code> so it can be overridden.</td></tr>
+                    <tr><td>No <code>Main</code></td><td>The framework package or checkout build targets generate the entry point from <code>[AppRoot]</code>.</td></tr>
+                    <tr><td>No CSS file</td><td>The blank project has no component folder yet; <code>new component</code> adds one with its own stylesheet.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="component">Component generation</h2>
+        <p>
+            <code>new component FileList</code> finds the project, reads its
+            <code>RootNamespace</code>, normalises the component name and writes one folder
+            per component:
+        </p>
+
+        <div class="tree">src/
+└── Components/
+    └── FileList/
+        ├── FileList.cs
+        └── FileList.css</div>
+
+        <p>
+            The generated class uses the typed <code>HtmlHelper</code> builder and
+            registers its stylesheet with an assembly attribute:
+        </p>
+
+        <div class="code" data-label="FileList.cs">
+<pre><code>using Donkeh.UILab;
+using static Donkeh.UILab.HtmlHelper;
+
+[assembly: Donkeh.UILab.Stylesheet("src/Components/FileList/FileList.css")]
+
+namespace MyApp.Components;
+
+/// &lt;summary&gt;FileList component.&lt;/summary&gt;
+public sealed class FileList : Component
+{
+    /// &lt;inheritdoc/&gt;
+    public override Node Render() =&gt;
+        Div(new() { ClassName = "file-list" });
+}</code></pre>
+        </div>
+
+        <p>
+            The component namespace is <code>RootNamespace + ".Components"</code> unless
+            the root namespace already ends with <code>.Components</code>. The CSS class
+            is the PascalCase name converted to kebab case, including acronym handling such
+            as <code>MyHTTPClient</code> → <code>my-http-client</code>. Existing files are
+            refused unless <code>--force</code> is passed.
+        </p>
+
+        <h2 id="csproj">Formatting-preserving project edits</h2>
+        <p>
+            <code>CsprojEditor</code> does not deserialize and reserialize the project.
+            It detects the file's line ending, checks whether the resource path is already
+            present with either slash style, and inserts a small <code>ItemGroup</code>
+            immediately before the final <code>&lt;/Project&gt;</code>. Comments,
+            formatting, ordering and unrelated properties survive unchanged, and the
+            operation is idempotent.
+        </p>
+
+        <div class="code" data-label="Added item">
+<pre><code>&lt;ItemGroup&gt;
+  &lt;EmbeddedResource Include="src/Components/FileList/FileList.css" /&gt;
+&lt;/ItemGroup&gt;</code></pre>
+        </div>
+
+        <p>
+            The generator resolves namespaces through <code>XDocument</code> when the file
+            is valid XML, but falls back to the project file name if parsing fails. That
+            keeps a messy but buildable project editable without making XML parsing a hard
+            requirement.
+        </p>
+
+        <h2 id="targets">Target wiring</h2>
+        <p>
+            <code>enable-target</code> detects checkout versus NuGet mode by looking for
+            <code>Donkeh.props</code> in the project text, then edits the appropriate
+            surface:
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Target</th><th>Checkout project</th><th>NuGet project</th></tr></thead>
+                <tbody>
+                    <tr><td>desktop</td><td>Already enabled; the command reports that the target is already enabled.</td><td>Already enabled; the generated project already targets <code>net10.0</code>.</td></tr>
+                    <tr><td>android</td><td>Enables <code>&lt;DonkehAndroid&gt;true</code>, uncommenting the template flag when present.</td><td>Adds <code>net10.0-android</code>, <code>SupportedOSPlatformVersion 24</code> and a conditional <code>Donkeh.Windowing.Android</code> reference.</td></tr>
+                    <tr><td>web</td><td>Enables <code>&lt;DonkehWeb&gt;true</code>.</td><td>Adds <code>net10.0-browser</code>, browser-wasm RIDs, the browser host, the Blazor package and the WebAssembly SDK pack.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            The edits are regular-expression and text based, not MSBuild-aware. They
+            preserve the existing <code>TargetFramework</code> or append to
+            <code>TargetFrameworks</code>, add properties inside the first
+            <code>PropertyGroup</code> and add conditional <code>PackageReference</code>
+            items before the closing project tag. Enabling an already-enabled target is a
+            clean error instead of a silent no-op.
+        </p>
+
+        <h2 id="identifiers">Names and sanitising</h2>
+        <p>
+            <code>Identifiers</code> provides the small amount of naming policy the CLI
+            needs. Component names split on spaces, hyphens, underscores, dots and path
+            separators, then PascalCase each word. C# keywords gain a
+            <code>Component</code> suffix, names starting with a digit get an underscore,
+            and namespaces PascalCase each dotted segment. Kebab case inserts hyphens at
+            case boundaries, including acronym-to-word transitions.
+        </p>
+
+        <h2 id="tests">Tests</h2>
+        <p>
+            The CLI tests call the generators directly against temporary directories rather
+            than spawning processes. They cover checkout and NuGet project shapes,
+            component folder creation and stylesheet registration, target editing, force
+            protection and identifier normalisation. That keeps the feedback loop fast and
+            makes the generated file content part of the tested contract.
+        </p>
+
+        <h2 id="trade-offs">Trade-offs and sharp edges</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Decision</th><th>Cost</th></tr></thead>
+                <tbody>
+                    <tr><td>No MSBuild evaluation</td><td>Fast and dependency-free, but the CLI cannot understand complex property functions or imported target frameworks.</td></tr>
+                    <tr><td>Text-preserving XML edits</td><td>Keeps projects human-formatted, but assumes conventional SDK-style XML and inserts only at known anchors.</td></tr>
+                    <tr><td>Version from the tool assembly</td><td>Released tools align with packages automatically; a locally built CLI with a dev version may need <code>DonkehVersion</code> overridden.</td></tr>
+                    <tr><td>No implicit restore/run</td><td>Generation stays fast and offline-capable, at the cost of one explicit next command.</td></tr>
+                    <tr><td>Folder-per-component convention</td><td>Predictable and organised, but a project that intentionally keeps flat component files is not supported by the generator.</td></tr>
+                    <tr><td>Regex-based target edits</td><td>Small and readable, but unusual project structures may need manual edits.</td></tr>
+                    <tr><td>No uninstall/removal command</td><td>Generation is additive; deleting a component is a normal file operation, not a CLI feature.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="code-tour">Code tour</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>File</th><th>Read it for…</th></tr></thead>
+                <tbody>
+                    <tr><td><code>Program.cs</code></td><td>The one-line process entry point.</td></tr>
+                    <tr><td><code>Cli.cs</code></td><td>Command dispatch, help, project/component/target flows and error handling.</td></tr>
+                    <tr><td><code>FrameworkLocator.cs</code></td><td>Checkout detection and the NuGet fallback decision.</td></tr>
+                    <tr><td><code>ProjectGenerator.cs</code></td><td>Checkout and NuGet project templates, names and versioning.</td></tr>
+                    <tr><td><code>ComponentGenerator.cs</code></td><td>Folder layout, component template, namespace and stylesheet registration.</td></tr>
+                    <tr><td><code>TargetEnabler.cs</code></td><td>Property/TFM/package edits for Android and browser targets.</td></tr>
+                    <tr><td><code>CsprojEditor.cs</code></td><td>Minimal formatting-preserving embedded-resource edits.</td></tr>
+                    <tr><td><code>Identifiers.cs</code></td><td>PascalCase, namespace and kebab-case policy.</td></tr>
+                    <tr><td><code>Tests/GeneratorTests.cs</code></td><td>The generated-file contract and target-edit expectations.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            The mental model: the CLI is a thin, predictable file generator. It resolves
+            whether the developer is inside the framework checkout or consuming packages,
+            writes the smallest useful project or component, and edits SDK-style project
+            files without taking ownership of them.
+        </p>
+
+        <div class="page-nav">
+            <a class="prev" href="implementation-inspector.html"><span>Previous</span>Inspector</a>
+            <a class="next" href="implementation.html"><span>Next</span>Implementation for Nerds</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh | CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/donkeh-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>

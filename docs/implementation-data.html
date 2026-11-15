@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Data | Donkeh</title>
+    <meta name="description" content="Implementation notes for Donkeh.Data: design decisions, data structures, trade-offs and hot paths.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/donkeh-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+                <a href="routing.html">Routing and setPage</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Reference</span>
+                <a href="html-elements.html">HTML elements</a>
+                <a href="css-support.html">CSS support</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Primitives</span>
+                <a href="image.html">Image</a>
+                <a href="video.html">Video</a>
+                <a href="canvas.html">Canvas</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+                        <div class="nav-group">
+                <span class="nav-label">Implementation for Nerds</span>
+                <a href="implementation.html">Overview</a>
+                <a class="nav-sub" href="implementation-parser.html">Parser</a>
+                <a class="nav-sub" href="implementation-data.html">Data</a>
+                <a class="nav-sub" href="implementation-dataengine.html">DataEngine</a>
+                <a class="nav-sub" href="implementation-layoutlab.html">LayoutLab</a>
+                <a class="nav-sub" href="implementation-uilab.html">UILab</a>
+                <a class="nav-sub" href="implementation-hosting.html">Hosting</a>
+                <a class="nav-sub" href="implementation-windowing.html">Windowing</a>
+                <a class="nav-sub" href="implementation-android.html">Android</a>
+                <a class="nav-sub" href="implementation-browser.html">Browser</a>
+                <a class="nav-sub" href="implementation-inspector.html">Inspector</a>
+                <a class="nav-sub" href="implementation-cli.html">CLI tool</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/donkeh-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Implementation for Nerds <span>/</span> Data</div>
+        <h1>Data</h1>
+        <p class="lead">
+            <code>Donkeh.Data</code> is deliberately generic. It does not know how to
+            parse CSS and it does not know how to paint; it describes the relationships
+            between tokens, selectors, declarations and conditions. The representation is
+            a set of flat tables whose columns are almost entirely integer ids into
+            interned values or other tables.
+        </p>
+
+        <h2 id="model">The core idea: relationships as ids</h2>
+        <p>
+            A stylesheet is a graph: a selector owns declarations, a declaration
+            references a property and a value, a rule may be gated by a condition, and a
+            condition may be nested inside another. The obvious object model gives every
+            node a class and every edge a reference. That is pleasant to debug and
+            expensive to hold in memory.
+        </p>
+        <p>
+            Donkeh stores the graph as parallel lists. A rule is a <code>Rule</code>
+            value with five integers: selector id, property id, value id, condition id
+            and layer id. A selector record points into a shared token arena. A condition
+            is a compiled delegate plus a parent id. There are no per-rule objects, no
+            per-selector token arrays and no string fields in the hot structures.
+        </p>
+
+        <div class="code" data-label="Rule">
+<pre><code>public readonly struct Rule
+{
+    public required int SelectorId { get; init; }  // -> DataTable.Selectors
+    public required int PropertyId { get; init; }  // -> interned "background-color"
+    public required int ValueId    { get; init; }  // -> interned "#fff"
+    public int ConditionId { get; init; } = -1;    // -> DataTable.Conditions
+    public int LayerId     { get; init; } = -1;    // -> DataTable.Layers
+}</code></pre>
+        </div>
+
+        <p>
+            A rule is 20 bytes. Every negative id is an absent optional edge. Resolving a
+            rule to text is a lookup in <code>InternTable</code>, not a pointer chase
+            through a tree of small heap objects. The table itself is append-only while
+            parsing, so ids are dense, stable and safe to use as array indices.
+        </p>
+
+        <h2 id="tables">What lives in the table</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Table</th><th>Record</th><th>Purpose</th></tr></thead>
+                <tbody>
+                    <tr><td><code>Selectors</code></td><td><code>SelectorRecord</code></td><td>Token-arena slice, primary discriminator, packed specificity, compound slice, matchable flag, pseudo-element.</td></tr>
+                    <tr><td><code>Rules</code></td><td><code>Rule</code></td><td>Declaration edges: selector, property, value, condition and layer ids.</td></tr>
+                    <tr><td><code>Conditions</code></td><td><code>Condition</code></td><td>Compiled predicate, parent id and shared executor id.</td></tr>
+                    <tr><td><code>Imports</code>, <code>Namespaces</code>, <code>Layers</code>, <code>Scopes</code></td><td>small id records</td><td>At-rule metadata preserved for the host and cascade ordering.</td></tr>
+                    <tr><td><code>Keyframes</code>, <code>Descriptors</code>, <code>MarginBoxes</code>, <code>Charsets</code></td><td>small id records</td><td>Keyframe stops and descriptor blocks without attaching them to normal selectors.</td></tr>
+                    <tr><td>Selector / condition token arenas</td><td><code>Token[]</code></td><td>One flat token buffer for all selectors and one for all condition preludes.</td></tr>
+                    <tr><td>Compound / filter / pseudo arenas</td><td>value records</td><td>Selector analysis stored once, so matching never re-parses selector tokens.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            The <code>SelectorRecord</code> is the best example of the pattern. It does not
+            own its tokens or compounds. It stores <code>TokenOffset</code> and
+            <code>TokenLength</code> into the table's selector-token arena, plus
+            <code>CompoundOffset</code> and <code>CompoundCount</code> into the compound
+            arena. Attribute filters and pseudo classes are similarly sliced out of
+            table-wide arenas. A table with thousands of selectors has a handful of large
+            arrays instead of thousands of small ones.
+        </p>
+
+        <h3>Arenas and intrusive lists</h3>
+        <p>
+            Collision chains are not <code>List&lt;int&gt;</code> per hash bucket. The
+            table keeps a dictionary from key to head id and a parallel
+            <code>_next</code> list; the head is the newest entry and every record points
+            at the previous one. Selector hash buckets, condition buckets, executor
+            buckets, discriminator buckets, attribute-name buckets and per-selector rule
+            chains all use the same trick. That removes one allocation per bucket and
+            keeps traversal inside two contiguous arrays.
+        </p>
+
+        <div class="tree">_discriminatorHeads: { key → newest selector id }
+        │
+        ├── selector 42 → selector 17 → selector 9 → -1
+        │        _discriminatorNext[42] = 17
+        │        _discriminatorNext[17] = 9
+        │        _discriminatorNext[9]  = -1
+        └── key = (TokenKind.Identifier, interned "btn")
+</div>
+
+        <h2 id="memory">Why it is small</h2>
+        <p>
+            The memory benchmark reports a <strong>7.46×</strong> improvement over the
+            object-per-node representation. The saving is structural, not a micro
+            optimisation:
+        </p>
+        <ul>
+            <li><strong>Values, not objects.</strong> A rule is a 20-byte struct in one list; there is no object header, no reference field and no per-rule allocation.</li>
+            <li><strong>Strings are interned once.</strong> Repeated properties and values such as <code>color</code>, <code>display</code>, <code>0</code>, <code>block</code> and <code>#fff</code> are one id each, regardless of how many declarations use them.</li>
+            <li><strong>Selectors share arenas.</strong> Tokens live in one buffer. A selector record is an offset/length pair, not a token array.</li>
+            <li><strong>Analysis is stored once.</strong> Compounds, parsed attribute filters, pseudo records and the An+B values are produced when a selector is interned, not re-derived per match.</li>
+            <li><strong>Identical selectors are deduplicated.</strong> <code>.a .b</code> written twice is one selector with two rules; whitespace around explicit combinators normalises to the same token sequence.</li>
+            <li><strong>Executors are shared.</strong> The same media query under different parents compiles once; condition records differ only by parent id and delegate reference.</li>
+            <li><strong>Adjacent duplicate rules collapse.</strong> A flattened selector list that produces the same declaration twice stores it once when it is adjacent in source order.</li>
+        </ul>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Record</th><th>Approximate size</th><th>What dominates</th></tr></thead>
+                <tbody>
+                    <tr><td><code>Rule</code></td><td>20 B</td><td>Five 32-bit ids.</td></tr>
+                    <tr><td><code>Token</code></td><td>12 B</td><td>Kind, interned text id, packed 24-bit start + 8-bit length.</td></tr>
+                    <tr><td><code>Condition</code></td><td>delegate ref + 8 B</td><td>Shared <code>ConditionFunction</code>, parent id, executor id.</td></tr>
+                    <tr><td><code>AttributeFilter</code></td><td>~12 B</td><td>Name id, value id, byte operator, bool flag.</td></tr>
+                    <tr><td><code>PseudoRecord</code></td><td>~20 B</td><td>Kind, An+B terms and <code>:not()</code> argument slice.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            On Bootstrap 5.3.8 the pipeline sees 232,108 characters, 46,438 tokens,
+            2,762 unique selectors, 6,496 rules and 18 conditions. Build time is roughly
+            13 ms in the debugger’s release run, with 2.4 MB of transient allocation for
+            tokens and parsing. Those allocations are the build cost; the flattened table
+            is what survives.
+        </p>
+
+        <h2 id="conditions">Conditions are delegates</h2>
+        <p>
+            <code>Condition</code> is where the design becomes unusually direct. A
+            condition does not store an expression tree, an operator enum or a list of
+            feature values to interpret later. It stores a compiled
+            <code>ConditionFunction</code>:
+        </p>
+
+        <div class="code" data-label="ConditionFunction">
+<pre><code>public delegate bool ConditionFunction(in RendererContext context);
+
+public readonly struct Condition
+{
+    public required ConditionFunction Executor { get; init; }
+    public int ParentId { get; init; } = -1;
+    public int ExecutorId { get; init; }
+}</code></pre>
+        </div>
+
+        <p>
+            The compiler is called once per distinct prelude. Media queries become a
+            small immutable closure that compares fields on
+            <code>RendererContext</code>; <code>@supports</code> and
+            <code>@container</code> can be supplied by a different compiler. The rule
+            builder stores the resulting delegate reference and a condition id. At match
+            time the engine calls the delegate — there is no re-parsing and no
+            interpretation of the query text.
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Mechanism</th><th>Why it is fast</th></tr></thead>
+                <tbody>
+                    <tr><td>Compile once per prelude</td><td>The token scan, feature parsing and closure creation happen during stylesheet build, not per node.</td></tr>
+                    <tr><td>Shared executors</td><td>Conditions are interned by <code>(tokens, parent)</code>; executors are interned by tokens alone, so a responsive query compiles once even when nested in many scopes.</td></tr>
+                    <tr><td>Delegate call per condition</td><td><code>bool (in RendererContext)</code> is a direct call with no allocation and no virtual expression walk.</td></tr>
+                    <tr><td>Parent-chain short circuit</td><td>A nested rule evaluates its innermost condition and stops at the first failure.</td></tr>
+                    <tr><td>Version-stamped cache</td><td>Results are memoised per table and <code>RendererContext.Version</code>; every rule sharing a query pays for it once per environment change.</td></tr>
+                    <tr><td>Fail closed</td><td>A missing compiler, a null result or a thrown exception becomes <code>AlwaysFalse</code>, never an accidental match.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            <code>Condition.AlwaysTrue</code> and <code>AlwaysFalse</code> are static
+            delegates, and <code>AlwaysTrueCompiler</code> is useful for tests and for
+            builds that do not need media-query filtering. The cache is deliberately
+            conservative: a new context instance or a changed version invalidates it, so
+            results are never shared across environments.
+        </p>
+
+        <h2 id="selectors">Selector analysis at intern time</h2>
+        <p>
+            Interning a selector is the expensive moment, and it happens once. A single
+            pass splits the token sequence into compounds on combinators and descendant
+            gaps, tracks bracket/parenthesis depth so operators inside
+            <code>[attr^=v]</code> and <code>:nth-child()</code> are not mistaken for
+            combinators, parses attribute filters and pseudo classes, and computes
+            specificity.
+        </p>
+        <ul>
+            <li>Specificity is packed into one integer: 10 bits for ids, 10 for classes/attributes/pseudo-classes and 10 for types. It is computed once and read as an integer during sorting.</li>
+            <li>The right-most token becomes the <code>PrimaryDiscriminator</code>, normalised so identifiers, property names and function names share one bucket.</li>
+            <li><code>IsMatchable</code> is false for unsupported constructs. The selector is still stored for inspection, but matching never returns a wrong positive.</li>
+            <li><code>::before</code>/<code>::after</code> are recorded separately, letting the host skip generated-content matching entirely when a sheet never uses it.</li>
+            <li>Selectors whose subject is an attribute selector are indexed by the attribute name; structural pseudo-class subjects go into a small unkeyed list.</li>
+        </ul>
+
+        <p>
+            This is why matching does not have to re-tokenize or re-analyze anything. The
+            selector record already contains the plan: compounds, filters, pseudo
+            records, combinator links and specificity.
+        </p>
+
+        <h2 id="matching">Matching as a table lookup</h2>
+        <p>
+            <code>MatchRules</code> does not scan every selector. It collects candidate
+            ids from the node's own interned keys:
+        </p>
+        <ol>
+            <li>id, tag name, every class name and the universal bucket;</li>
+            <li>attribute-name buckets for selectors whose subject is an attribute;</li>
+            <li>the small list of structural pseudo-class subjects.</li>
+        </ol>
+        <p>
+            Every probe is an integer dictionary lookup and an intrusive-list walk. The
+            subject compound is verified first, then the selector is walked right to left
+            through the compound plan. Only after a selector matches are its rules walked
+            through the per-selector rule chain. Conditions are filtered last, so a rule
+            gated by a media query does not pay for the condition until its selector has
+            already matched.
+        </p>
+        <p>
+            The result is sorted weakest first: layer order, then specificity, then source
+            order. Applying rules in that order lets later declarations win exactly as
+            the cascade requires. The span overload writes into a caller-provided buffer
+            and reuses table scratch lists, which is the allocation-free path used by the
+            renderer.
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Bootstrap 5.3.8 measurement</th><th>Result</th></tr></thead>
+                <tbody>
+                    <tr><td>Stylesheet</td><td>232,108 characters, 46,438 tokens</td></tr>
+                    <tr><td>Selectors / rules / conditions</td><td>2,762 / 6,496 / 18</td></tr>
+                    <tr><td>Build time</td><td>~13 ms, ~17.7 MB/s, 2.4 MB transient allocation</td></tr>
+                    <tr><td>Matching a 4,512-element page</td><td>~4.25 µs/node, ~56,500 matches per pass</td></tr>
+                    <tr><td>Hot leaf / cold leaf</td><td>~8.25 µs (53 matches) / ~3.54 µs (1 match)</td></tr>
+                    <tr><td>Retained-memory benchmark</td><td>7.46× improvement over the object-per-node baseline</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="trade-offs">Trade-offs and sharp edges</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Decision</th><th>Cost</th></tr></thead>
+                <tbody>
+                    <tr><td>Ids instead of references</td><td>Every debugging session needs the intern table to turn an id back into text. Id 0 is a valid token; -1 is the absent sentinel.</td></tr>
+                    <tr><td>Flat arenas</td><td>Growing an arena invalidates previously returned spans. Re-read through <code>GetSelectorSpan</code> instead of caching the span.</td></tr>
+                    <tr><td>Append-only records</td><td>There is no general deletion. The inspector can edit a rule value or property in place; removing a selector would invalidate ids and is not supported.</td></tr>
+                    <tr><td>Global intern table</td><td>Stable ids for the process, but the table grows with distinct text and is never evicted.</td></tr>
+                    <tr><td>Shared scratch buffers</td><td>Matching is not re-entrant and the table is not thread-safe while being mutated.</td></tr>
+                    <tr><td>Build-time allocation</td><td>The flattened result is compact, but parsing and interning still allocate tokens, lists and distinct strings. The 2.4 MB Bootstrap number is transient build cost.</td></tr>
+                    <tr><td>Fail-closed conditions</td><td>An unsupported query silently disables its rules. That is safer than applying styles the engine cannot verify, but it can look like a missing rule.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="code-tour">Code tour</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>File</th><th>Read it for…</th></tr></thead>
+                <tbody>
+                    <tr><td><code>Data/Source/DataTable.cs</code></td><td>All tables, arenas, candidate indexes and the condition cache.</td></tr>
+                    <tr><td><code>Data/Source/DataTable.Matching.cs</code></td><td>Candidate collection, right-to-left selector verification and cascade ordering.</td></tr>
+                    <tr><td><code>Data/Source/Rule.cs</code></td><td>The 20-byte declaration edge.</td></tr>
+                    <tr><td><code>Data/Source/SelectorRecord.cs</code></td><td>The selector slice and packed specificity.</td></tr>
+                    <tr><td><code>Data/Source/Dom/SelectorAnalysis.cs</code></td><td>One-pass compound splitting, filter parsing, pseudo parsing and specificity.</td></tr>
+                    <tr><td><code>Data/Source/Dom/SelectorPlan.cs</code></td><td>Compound, combinator and pseudo records stored in shared arenas.</td></tr>
+                    <tr><td><code>Data/Source/Condition.cs</code></td><td><code>ConditionFunction</code>, shared executors and fail-closed defaults.</td></tr>
+                    <tr><td><code>DataEngine/Source/MediaConditionCompiler.cs</code></td><td>The media-query compiler that produces the delegate.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            The short version: the parser gives Data a stream of interned tokens; Data turns
+            those tokens into a compact relationship graph of integer edges. Matching then
+            works almost entirely by indexing, filtering and calling already-compiled
+            predicates, rather than by interpreting a stylesheet-shaped object graph.
+        </p>
+
+        <div class="page-nav">
+            <a class="prev" href="implementation-parser.html"><span>Previous</span>Parser</a>
+            <a class="next" href="implementation-dataengine.html"><span>Next</span>DataEngine</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh | CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/donkeh-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>
