@@ -4,7 +4,7 @@ using Silk.NET.Maths;
 
 namespace Donkeh.Windowing
 {
-    /// <summary>Creation options for an <see cref="DonkehWindow"/>.</summary>
+    /// <summary>Creation options for an <c>DonkehWindow</c>.</summary>
     /// <remarks>
     /// <para>
     /// This is a mutable struct, so it can be composed with an object initializer
@@ -21,11 +21,11 @@ namespace Donkeh.Windowing
     /// <para>
     /// Settings are copied when the window is constructed. Changing a copy
     /// afterwards has no effect on the live window, and some values are only
-    /// applied when <see cref="DonkehWindow.Run(Donkeh.UILab.Node, string)"/>
+    /// applied when <c>DonkehWindow.Run(Node, string)</c>
     /// creates the native window.
     /// </para>
     /// </remarks>
-    /// <seealso cref="DonkehWindow"/>
+    /// <seealso cref="IDonkehHostWindow"/>
     public struct WindowSettings
     {
         /// <summary>Creates settings with sensible desktop defaults.</summary>
@@ -167,7 +167,7 @@ namespace Donkeh.Windowing
         /// direct instanced draws otherwise. <see cref="Donkeh.Windowing.RenderPath.Direct"/>
         /// is useful for benchmarking or for isolating driver issues. The value is
         /// copied when the window is constructed; change
-        /// <see cref="DonkehWindow.RenderPath"/> to switch on a live window.
+        /// <c>DonkehWindow.RenderPath</c> to switch on a live window.
         /// </remarks>
         public RenderPath RenderPath;
 
@@ -187,7 +187,7 @@ namespace Donkeh.Windowing
         /// <value>
         /// Zero (the default) derives the ratio from
         /// <c>FramebufferSize / Size</c>. A positive value treats
-        /// <see cref="DonkehWindow"/>'s view size as device pixels and divides it by
+        /// <c>DonkehWindow</c>'s view size as device pixels and divides it by
         /// this value to obtain the CSS layout viewport.
         /// </value>
         /// <remarks>
@@ -218,7 +218,7 @@ namespace Donkeh.Windowing
 
         /// <summary>Where the inspector opens when it is first shown.</summary>
         /// <remarks>
-        /// Copied into <see cref="DevToolsState.Dock"/> at construction time only.
+        /// Copied into <c>DevToolsState.Dock</c> at construction time only.
         /// Change that live state afterwards to move the panel; editing this field
         /// later has no effect.
         /// </remarks>
@@ -342,19 +342,19 @@ namespace Donkeh.Windowing
         /// <remarks>
         /// Use it for non-GPU cleanup. It runs on the frame thread; throwing is
         /// swallowed so a faulty handler cannot stall teardown. This is the
-        /// settings-level equivalent of <see cref="DonkehWindow.Closed"/>.
+        /// settings-level equivalent of the host window's closed event.
         /// </remarks>
-        public Action<DonkehWindow>? OnClose;
+        public Action<IDonkehHostWindow>? OnClose;
 
         /// <summary>Alias for <see cref="OnClose"/>.</summary>
-        public Action<DonkehWindow>? OnClosed
+        public Action<IDonkehHostWindow>? OnClosed
         {
             get => OnClose;
             set => OnClose = value;
         }
 
         /// <summary>Alias for <see cref="OnClose"/>.</summary>
-        public Action<DonkehWindow>? Closing
+        public Action<IDonkehHostWindow>? Closing
         {
             get => OnClose;
             set => OnClose = value;

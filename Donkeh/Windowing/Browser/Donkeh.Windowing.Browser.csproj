@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!--
+        Browser host for Donkeh.
+
+        The host does not use the desktop layout or OpenGL pipeline. It mirrors the
+        UILab virtual tree into real DOM elements and lets the browser own CSS
+        layout, focus, caret, selection, scrolling and form behaviour.
+
+        The DOM bridge script is embedded so consumers never add wwwroot files or
+        static web assets. The framework also supplies a default host page when the
+        app does not provide one.
+    -->
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+        <RootNamespace>Donkeh.Windowing.Browser</RootNamespace>
+        <AssemblyName>Donkeh.Windowing.Browser</AssemblyName>
+        <LangVersion>latest</LangVersion>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.10" />
+        <ProjectReference Include="..\..\Hosting\Source\Donkeh.Hosting.csproj" />
+        <ProjectReference Include="..\..\UILab\Source\Donkeh.UILab.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <EmbeddedResource Include="wwwroot\donkeh.js"
+                          LogicalName="Donkeh.Windowing.Browser.donkeh.js" />
+    </ItemGroup>
+
+</Project>

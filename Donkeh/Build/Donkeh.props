@@ -1,0 +1,47 @@
+<Project>
+
+    <!--
+        Donkeh target opt-in.
+
+        A consumer chooses the hosts it wants:
+
+            <DonkehDesktop>true</DonkehDesktop>
+            <DonkehAndroid>true</DonkehAndroid>
+            <DonkehWeb>true</DonkehWeb>
+
+        The framework adds the matching target frameworks and references. Only
+        Desktop is on by default so an existing app keeps compiling unchanged.
+    -->
+    <PropertyGroup>
+        <DonkehDesktop Condition="'$(DonkehDesktop)' == ''">true</DonkehDesktop>
+        <DonkehAndroid Condition="'$(DonkehAndroid)' == ''">false</DonkehAndroid>
+        <DonkehWeb Condition="'$(DonkehWeb)' == ''">false</DonkehWeb>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <_DonkehTargets />
+        <_DonkehTargets Condition="'$(DonkehDesktop)' == 'true'">net10.0</_DonkehTargets>
+        <_DonkehTargets Condition="'$(DonkehAndroid)' == 'true'">$(_DonkehTargets);net10.0-android</_DonkehTargets>
+        <_DonkehTargets Condition="'$(DonkehWeb)' == 'true'">$(_DonkehTargets);net10.0-browser</_DonkehTargets>
+        <DonkehTargetFrameworks>$([System.String]::Copy('$(_DonkehTargets)').Trim(';'))</DonkehTargetFrameworks>
+        <!-- Restore needs the browser RID in the outer build; inner Android builds
+             keep the Android SDK's own ABI list. -->
+        <RuntimeIdentifiers Condition="'$(DonkehWeb)' == 'true' and '$(TargetFramework)' == ''">browser-wasm;android-arm64;android-x64</RuntimeIdentifiers>
+        <RuntimeIdentifiers Condition="'$(DonkehWeb)' == 'true' and '$(TargetFramework)' == 'net10.0-browser'">browser-wasm</RuntimeIdentifiers>
+    </PropertyGroup>
+
+    <!--
+        The WebAssembly pack is normally discovered through NuGet's generated
+        props, which run before the target framework is known. Point the SDK at
+        the browser pack explicitly so its props are imported for this inner
+        build.
+    -->
+    <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0-browser' and '$(PkgMicrosoft_NET_Sdk_WebAssembly_Pack)' != ''">
+        <_WebAssemblyPropsFile>$(PkgMicrosoft_NET_Sdk_WebAssembly_Pack)\build\Microsoft.NET.Sdk.WebAssembly.Browser.props</_WebAssemblyPropsFile>
+    </PropertyGroup>
+
+    <Import Sdk="Microsoft.NET.Sdk.BlazorWebAssembly"
+            Project="Sdk.props"
+            Condition="'$(TargetFramework)' == 'net10.0-browser'" />
+
+</Project>

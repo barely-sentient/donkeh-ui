@@ -1,13 +1,17 @@
 using System.Reflection;
-using Donkeh.Windowing;
 
-namespace Donkeh.Windowing.Android;
+namespace Donkeh.Windowing;
 
 /// <summary>
 /// Finds the <see cref="IDonkehApp"/> declared with
 /// <see cref="DonkehAppAttribute"/> in the application assembly.
 /// </summary>
-internal static class DonkehAppLocator
+/// <remarks>
+/// Every host uses the same discovery path: the entry assembly is checked first,
+/// then every loaded assembly. That lets desktop, Android and browser hosts start
+/// an application without the app creating a window or graphics context.
+/// </remarks>
+public static class DonkehAppLocator
 {
     /// <summary>Locates and creates the application instance.</summary>
     /// <returns>The application singleton for this process.</returns>

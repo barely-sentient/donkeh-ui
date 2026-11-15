@@ -1,0 +1,66 @@
+<Project>
+
+    <!-- References are conditional on the inner build's target framework. -->
+    <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+        <ProjectReference Include="$(MSBuildThisFileDirectory)..\Windowing\Source\Donkeh.Windowing.csproj" />
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-android'">
+        <ProjectReference Include="$(MSBuildThisFileDirectory)..\Windowing\Android\Donkeh.Windowing.Android.csproj" />
+        <ProjectReference Include="$(MSBuildThisFileDirectory)..\Windowing\Source\Donkeh.Windowing.csproj" />
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-browser'">
+        <ProjectReference Include="$(MSBuildThisFileDirectory)..\Windowing\Browser\Donkeh.Windowing.Browser.csproj" />
+        <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.10" />
+    </ItemGroup>
+
+    <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0-browser'">
+        <DefineConstants>$(DefineConstants);BROWSER</DefineConstants>
+        <!--
+            Keep the published host stable and self-contained: no hashed framework
+            filenames and no HTML placeholder rewriting. A plain static host can
+            serve the output without a static-web-assets-aware server.
+        -->
+        <OverrideHtmlAssetPlaceholders>false</OverrideHtmlAssetPlaceholders>
+        <WasmFingerprintAssets>false</WasmFingerprintAssets>
+        <WasmFingerprintDotnetJs>false</WasmFingerprintDotnetJs>
+        <!-- Reflection-based app discovery and stylesheet loading need the full metadata. -->
+        <PublishTrimmed>false</PublishTrimmed>
+    </PropertyGroup>
+
+    <!--
+        The browser host supplies a default page when the app does not provide
+        one. Apps that want to customise the shell can still add
+        wwwroot/index.html; the framework leaves it alone.
+    -->
+    <Target Name="DonkehEnsureBrowserHostPage"
+            BeforeTargets="AssignTargetPaths;ResolveCurrentProjectStaticWebAssetsInputs"
+            Condition="'$(TargetFramework)' == 'net10.0-browser' and !Exists('$(MSBuildProjectDirectory)\wwwroot\index.html')">
+        <PropertyGroup>
+            <_DonkehDefaultHostPage>$(MSBuildThisFileDirectory)..\Windowing\Browser\wwwroot\index.html</_DonkehDefaultHostPage>
+            <_DonkehGeneratedHostPage>$(IntermediateOutputPath)donkeh\index.html</_DonkehGeneratedHostPage>
+        </PropertyGroup>
+
+        <MakeDir Directories="$(IntermediateOutputPath)donkeh" />
+        <Copy SourceFiles="$(_DonkehDefaultHostPage)"
+              DestinationFiles="$(_DonkehGeneratedHostPage)"
+              SkipUnchangedFiles="true" />
+
+        <ItemGroup>
+            <Content Include="$(_DonkehGeneratedHostPage)"
+                     Link="wwwroot\index.html"
+                     CopyToOutputDirectory="PreserveNewest"
+                     CopyToPublishDirectory="PreserveNewest" />
+        </ItemGroup>
+    </Target>
+
+    <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0-browser' and '$(PkgMicrosoft_NET_Sdk_WebAssembly_Pack)' != ''">
+        <_WebAssemblyTargetsFile>$(PkgMicrosoft_NET_Sdk_WebAssembly_Pack)\build\Microsoft.NET.Sdk.WebAssembly.Browser.targets</_WebAssemblyTargetsFile>
+    </PropertyGroup>
+
+    <Import Sdk="Microsoft.NET.Sdk.BlazorWebAssembly"
+            Project="Sdk.targets"
+            Condition="'$(TargetFramework)' == 'net10.0-browser'" />
+
+</Project>

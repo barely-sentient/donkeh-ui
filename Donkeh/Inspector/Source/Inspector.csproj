@@ -11,6 +11,7 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <ProjectReference Include="..\..\Hosting\Source\Donkeh.Hosting.csproj" />
         <ProjectReference Include="..\..\Data\Source\Data.csproj" />
         <ProjectReference Include="..\..\DataEngine\Source\DataEngine.csproj" />
         <ProjectReference Include="..\..\Parser\Source\Donkeh.Parser.csproj" />

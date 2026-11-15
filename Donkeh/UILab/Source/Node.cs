@@ -241,6 +241,82 @@ namespace Donkeh.UILab
         public string Tag => InternTable.GetString(InternedTagName) ?? string.Empty;
 
         /// <summary>
+        /// Enumerates the element's HTML attributes, including <c>id</c> and
+        /// <c>class</c>.
+        /// </summary>
+        /// <returns>
+        /// One key/value pair per attribute, in storage order. The <c>id</c>
+        /// value has its leading <c>#</c> removed and <c>class</c> is a
+        /// whitespace-separated list.
+        /// </returns>
+        /// <remarks>
+        /// This is a host-facing view of the interned attribute map. It allocates
+        /// strings for the names and values, so presentation hosts should call it
+        /// only when they need to mirror the element into another tree.
+        /// </remarks>
+        public IEnumerable<KeyValuePair<string, string>> EnumerateAttributes()
+        {
+            if (InternedId >= 0)
+            {
+                var id = InternTable.GetString(InternedId) ?? string.Empty;
+                yield return new KeyValuePair<string, string>(
+                    "id",
+                    id.Length > 0 && id[0] == '#' ? id[1..] : id);
+            }
+
+            if (ClassIds.Length > 0)
+            {
+                var names = new string[ClassIds.Length];
+
+                for (var i = 0; i < names.Length; i++)
+                {
+                    names[i] = InternTable.GetString(ClassIds[i]) ?? string.Empty;
+                }
+
+                yield return new KeyValuePair<string, string>(
+                    "class",
+                    string.Join(' ', names));
+            }
+
+            for (var i = 0; i < Attributes.Length; i++)
+            {
+                var attribute = Attributes[i];
+                yield return new KeyValuePair<string, string>(
+                    InternTable.GetString(attribute.NameId) ?? string.Empty,
+                    InternTable.GetString(attribute.ValueId) ?? string.Empty);
+            }
+        }
+
+        /// <summary>
+        /// Enumerates the event names registered on the element.
+        /// </summary>
+        /// <returns>
+        /// Normalised lowercase event names such as <c>click</c> or
+        /// <c>pointerdown</c>, without an <c>on</c> prefix.
+        /// </returns>
+        /// <remarks>
+        /// Presentation hosts use this to mirror handler presence into their own
+        /// event system. The delegate itself stays owned by the virtual element.
+        /// </remarks>
+        public IEnumerable<string> EnumerateEventNames()
+        {
+            if (Events is null)
+            {
+                yield break;
+            }
+
+            foreach (var nameId in Events.Keys)
+            {
+                var name = InternTable.GetString(nameId);
+
+                if (!string.IsNullOrEmpty(name))
+                {
+                    yield return name;
+                }
+            }
+        }
+
+        /// <summary>
         /// Copies a props object onto this element, creating attributes, classes and
         /// event handlers.
         /// </summary>

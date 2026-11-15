@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!--
+        Platform-neutral application contract shared by every Donkeh host.
+
+        This project deliberately has no dependency on Silk.NET, OpenGL or any
+        native media stack. Desktop, Android and browser hosts all reference it,
+        so an application can implement IDonkehApp once and compile for any
+        combination of targets.
+    -->
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+        <RootNamespace>Donkeh.Windowing</RootNamespace>
+        <AssemblyName>Donkeh.Hosting</AssemblyName>
+        <LangVersion>latest</LangVersion>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\LayoutLab\Source\LayoutLab.csproj" />
+        <ProjectReference Include="..\..\UILab\Source\Donkeh.UILab.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Silk.NET.Maths" Version="2.23.0" />
+    </ItemGroup>
+
+</Project>

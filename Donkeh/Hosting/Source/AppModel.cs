@@ -3,6 +3,19 @@ using Donkeh.UILab;
 namespace Donkeh.Windowing;
 
 /// <summary>
+/// The platform surface that owns an application instance.
+/// </summary>
+/// <remarks>
+/// Desktop and mobile hosts pass the concrete window host to
+/// <see cref="WindowSettings.OnClose"/> and related callbacks. Browser hosts pass
+/// their own host object. Nothing in this contract requires Silk.NET, OpenGL or a
+/// native window.
+/// </remarks>
+public interface IDonkehHostWindow
+{
+}
+
+/// <summary>
 /// Describes an application that a Donkeh host can start on any platform.
 /// </summary>
 /// <remarks>

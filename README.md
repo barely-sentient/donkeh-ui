@@ -126,9 +126,12 @@ renderer. `Donkeh.Inspector` provides the devtools panel.
     ├── UILab/
     │   ├── Source/                  ← Donkeh.UILab
     │   └── Tests/                   ← builder and component tests
+    ├── Hosting/
+    │   └── Source/                  ← Donkeh.Hosting (app contract + settings)
     ├── Windowing/
     │   ├── Source/                  ← Donkeh.Windowing
     │   ├── Android/                 ← Donkeh.Windowing.Android (activity + GLES host)
+    │   ├── Browser/                 ← Donkeh.Windowing.Browser (native DOM host)
     │   └── Benchmarks/              ← direct vs indirect renderer harness
     └── Inspector/
         └── Source/                  ← Donkeh.Inspector
@@ -146,18 +149,29 @@ Donkeh.Parser            no references
 Donkeh.Inspector         ──► Donkeh.Data, Donkeh.DataEngine, Donkeh.Parser,
                              Donkeh.LayoutLab, Donkeh.UILab
 
+Donkeh.Hosting           ──► Donkeh.LayoutLab, Donkeh.UILab, Silk.NET.Maths
+
 Donkeh.Windowing         ──► Donkeh.Data, Donkeh.DataEngine, Donkeh.Parser,
-                             Donkeh.LayoutLab, Donkeh.UILab, Donkeh.Inspector
+                             Donkeh.LayoutLab, Donkeh.UILab, Donkeh.Inspector,
+                             Donkeh.Hosting
+
+Donkeh.Windowing.Android ──► Donkeh.Windowing, Donkeh.Hosting
+
+Donkeh.Windowing.Browser ──► Donkeh.Hosting, Donkeh.UILab,
+                             Microsoft.AspNetCore.Components.WebAssembly
 ```
 
 A useful way to read this: a CSS-only tool needs `Donkeh.Parser` +
 `Donkeh.Data` + `Donkeh.DataEngine`; a headless layout/layout-test harness adds
 `Donkeh.LayoutLab`; a desktop application adds `Donkeh.UILab` +
-`Donkeh.Windowing`; `Donkeh.Inspector` is optional on top.
+`Donkeh.Windowing`; `Donkeh.Inspector` is optional on top. The browser host
+replaces `Donkeh.Windowing` with `Donkeh.Windowing.Browser` and uses the same
+`Donkeh.UILab` tree.
 
-All projects target **`net10.0`**, enable nullable reference types and implicit
-usings, and are deterministic. `Donkeh.LayoutLab` and `Donkeh.Windowing` allow
-unsafe blocks for performance-critical memory access.
+All framework projects target **`net10.0`**; only the browser inner build targets
+`net10.0-browser`. Projects enable nullable reference types and implicit usings,
+and are deterministic. `Donkeh.LayoutLab` and `Donkeh.Windowing` allow unsafe
+blocks for performance-critical memory access.
 
 ---
 
@@ -1021,6 +1035,98 @@ Desktop video keeps its native bundle out of the core: `Donkeh.Windowing`
 references the managed `LibVLCSharp` package only, and a desktop app adds
 `VideoLAN.LibVLC.Windows` (as the demo does for `net10.0`). Android resolves
 LibVLCSharp's Android runtime instead.
+
+### WebAssembly
+
+The browser target uses the same `IDonkehApp` and UILab tree as desktop and
+Android, but replaces the framebuffer renderer with **native DOM elements**. The
+browser owns CSS layout, focus, caret, selection, scrolling, form controls and
+pseudo-classes; UILab still owns reconciliation, component state, hooks,
+contexts and event delegates.
+
+Opt in with properties in the app project:
+
+```xml
+<PropertyGroup>
+  <DonkehDesktop>true</DonkehDesktop>
+  <DonkehAndroid>true</DonkehAndroid>
+  <DonkehWeb>true</DonkehWeb>
+</PropertyGroup>
+```
+
+The framework then:
+
+- appends `net10.0-browser` to the target frameworks;
+- imports the Blazor WebAssembly and WebAssembly SDKs for the browser inner build;
+- adds the browser host reference and required packages;
+- embeds the DOM bridge script into `Donkeh.Windowing.Browser`, so the app needs
+  no `wwwroot`, JavaScript file or static web asset setup;
+- supplies a default `index.html` when the app does not provide one;
+- disables asset fingerprinting so the publish output works on any static host.
+
+The app only keeps platform entry points apart:
+
+```csharp
+#if !ANDROID && !BROWSER
+public static void Main(string[] args)
+{
+    var window = new DonkehWindow(app.Settings);
+    window.Run(app.BuildRoot(), app.Styles());
+}
+#endif
+
+#if BROWSER
+public static Task Main(string[] args) =>
+    DonkehBrowser.RunAsync(args);
+#endif
+```
+
+Build and publish:
+
+```powershell
+dotnet publish Demo\Demo.csproj -c Release -f net10.0-browser
+```
+
+Publish output is under `Demo\bin\Release\net10.0-browser\publish\wwwroot` and can
+be served by any static file server with the usual MIME types (`text/javascript`,
+`application/wasm`, `application/json`).
+
+#### How the bridge works
+
+`DomHost` mounts the renderer, injects `app.Styles()` into a `<style>` element and
+walks the live UILab tree. It assigns stable integer ids to virtual nodes and
+sends compact JSON patches only for changes:
+
+```text
+create / remove / children / text / content / attrs / events
+```
+
+JavaScript applies the patch batch to real DOM nodes. Keyed reorders move existing
+elements rather than recreating them, so focus, selection, scroll position and
+input value survive ordinary re-renders.
+
+Events are delegated and translated to the same delegate shapes the desktop host
+uses:
+
+- `click`, `mouseover`, `mouseout`, `contextmenu`, `focus`, `blur`, `submit`
+- `pointerdown`/`pointermove`/`pointerup`, with pointer capture and local
+  coordinates relative to the handler element
+- `input`, `change`, `keydown`, `paste`
+- `scroll`, with deltas measured from the previous scroll position
+- media `play`, `pause`, `ended` and `timeupdate`
+
+The browser host also mirrors text edits back into the virtual tree (`value`,
+`checked`, `textarea` content) and commits a text control on Enter, matching the
+desktop editing path. Desktop `keydown` handlers now fire too, so `OnKeyDown`
+behaves the same on both hosts.
+
+Browser differences are intentional:
+
+- native CSS and fonts decide final layout, so pixels are not promised to match
+  desktop;
+- `<audio>`/`<video>` use the browser media stack;
+- canvas is a browser-specific surface rather than the OpenGL instruction stream;
+- the built-in inspector is desktop-only; use the browser's own devtools.
 
 ---
 

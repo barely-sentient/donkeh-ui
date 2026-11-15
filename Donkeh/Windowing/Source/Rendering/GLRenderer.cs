@@ -7,29 +7,6 @@ using Silk.NET.OpenGL;
 namespace Donkeh.Windowing;
 
 /// <summary>
-/// Selects how <see cref="GLRenderer"/> submits its geometry to the GPU.
-/// </summary>
-/// <remarks>
-/// <see cref="Indirect"/> is the GPU-driven path: all geometry for a frame is
-/// baked into one GPU-resident instance buffer and submitted with indirect draw
-/// commands, so the CPU does not walk the scene issuing a draw call per object.
-/// <see cref="Direct"/> keeps the same geometry but submits one
-/// <c>glDrawArraysInstanced</c> per batch; it exists as a reference path for
-/// benchmarking and as a fallback on drivers without indirect-draw extensions.
-/// </remarks>
-public enum RenderPath
-{
-    /// <summary>Use indirect submission when the driver exposes the required extensions.</summary>
-    Auto,
-
-    /// <summary>Submit each batch with a direct instanced draw call.</summary>
-    Direct,
-
-    /// <summary>Submit batches through an indirect command buffer.</summary>
-    Indirect
-}
-
-/// <summary>
 /// Executes the layout engine's instruction stream with OpenGL. Shapes, text and
 /// images become instanced quads in a single GPU-resident buffer; indirect draw
 /// commands select the visible ranges, so a frame is normally one

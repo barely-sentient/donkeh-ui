@@ -94,6 +94,23 @@ namespace Donkeh.UILab
         /// </remarks>
         public bool AutoFlush { get; set; } = true;
 
+        /// <summary>
+        /// Raised after a mount or flush has applied a settled tree.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The event runs on the thread that owns the renderer, after effects have
+        /// been committed and <see cref="Version"/> has been updated. Hosts that
+        /// mirror the live tree into another presentation tree, such as the browser
+        /// DOM backend, use this as their single update signal.
+        /// </para>
+        /// <para>
+        /// The event is not raised for a flush that processed no components. A
+        /// handler must not mutate the tree directly; schedule host work instead.
+        /// </para>
+        /// </remarks>
+        public event Action? AfterUpdate;
+
         /// <summary>The live root node, or null before <see cref="Mount"/>.</summary>
         /// <value>
         /// The most recent live root, or <see langword="null"/> until the renderer
@@ -244,6 +261,7 @@ namespace Donkeh.UILab
             }
 
             Version++;
+            AfterUpdate?.Invoke();
             return _rootLive!;
         }
 
@@ -280,6 +298,7 @@ namespace Donkeh.UILab
             }
 
             _flushing = true;
+            var updated = false;
 
             try
             {
@@ -310,6 +329,7 @@ namespace Donkeh.UILab
                     if (changed)
                     {
                         Version++;
+                        updated = true;
                         changed = false;
                     }
 
@@ -328,6 +348,11 @@ namespace Donkeh.UILab
             finally
             {
                 _flushing = false;
+            }
+
+            if (updated)
+            {
+                AfterUpdate?.Invoke();
             }
         }
 

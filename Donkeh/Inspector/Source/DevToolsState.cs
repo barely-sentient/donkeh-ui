@@ -9,34 +9,6 @@ using Donkeh.UILab;
 
 namespace Donkeh.Inspector;
 
-/// <summary>Identifies where the inspector is docked.</summary>
-/// <remarks>
-/// <see cref="Bottom"/> is the zero value, so a freshly created
-/// <see cref="DevToolsState"/> docks at the bottom until the host applies a saved
-/// preference.
-/// </remarks>
-public enum DevToolsDock
-{
-    /// <summary>
-    /// Dock the panel across the bottom of the app viewport. Numeric value 0.
-    /// </summary>
-    Bottom,
-
-    /// <summary>
-    /// Dock the panel along the right edge of the app viewport. Numeric value 1.
-    /// </summary>
-    Right,
-
-    /// <summary>
-    /// Host the panel in its own native window. Numeric value 2.
-    /// </summary>
-    /// <remarks>
-    /// The window is created by the windowing layer on a background STA thread
-    /// and shares the same <see cref="DevToolsState"/> instance.
-    /// </remarks>
-    Window
-}
-
 /// <summary>Identifies the inspector tab currently shown in the panel body.</summary>
 public enum DevToolsTab
 {

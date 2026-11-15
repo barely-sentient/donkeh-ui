@@ -53,7 +53,7 @@ namespace Donkeh.Windowing;
 /// <seealso cref="WindowSettings"/>
 /// <seealso cref="Donkeh.LayoutLab.LayoutEngine"/>
 /// <seealso cref="GLRenderer"/>
-public sealed partial class DonkehWindow : IDisposable
+public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
 {
     // Attribute names are probed for almost every control operation, so they
     // are interned once instead of being allocated per lookup.
@@ -6047,6 +6047,10 @@ public sealed partial class DonkehWindow : IDisposable
         {
             return;
         }
+
+        // Application key handlers run before the host's editing shortcuts, so
+        // the same keydown delegate fires on desktop and in the browser.
+        Invoke(_focused, "keydown", key.ToString());
 
         if (key == Key.V && control && IsTextControl(_focused))
         {
