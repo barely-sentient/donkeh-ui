@@ -167,6 +167,12 @@ function applyAttributes(element, attributes) {
     const keep = new Set(Object.keys(attributes));
 
     for (const attribute of Array.from(element.attributes)) {
+        // The bridge owns these attributes. A full attribute replacement from
+        // the virtual tree must not remove the node id or event registry.
+        if (attribute.name.startsWith("data-donkeh-")) {
+            continue;
+        }
+
         if (!keep.has(attribute.name)) {
             element.removeAttribute(attribute.name);
 
