@@ -2,8 +2,9 @@ name: Build CLI
 
 on:
   push:
-    branches:
-      - '**'
+    tags:
+      - 'v*'
+      - '[0-9]*'
   release:
     types:
       - published
