@@ -1,0 +1,140 @@
+name: Build CLI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+      - '[0-9]*'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cli-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  CLI_PROJECT: Donkeh/CliTool/Source/Donkeh.CliTool.csproj
+
+jobs:
+  build:
+    name: CLI ${{ matrix.rid }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+            binary: donkeh.exe
+            asset: donkeh-win-x64.exe
+
+          - os: ubuntu-latest
+            rid: linux-x64
+            binary: donkeh
+            asset: donkeh-linux-x64
+
+          - os: ubuntu-latest
+            rid: linux-arm64
+            binary: donkeh
+            asset: donkeh-linux-arm64
+
+          - os: macos-latest
+            rid: osx-x64
+            binary: donkeh
+            asset: donkeh-osx-x64
+
+          - os: macos-latest
+            rid: osx-arm64
+            binary: donkeh
+            asset: donkeh-osx-arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore "$CLI_PROJECT" -r ${{ matrix.rid }}
+
+      - name: Publish
+        run: >
+          dotnet publish "$CLI_PROJECT"
+          -c Release
+          -r ${{ matrix.rid }}
+          --self-contained true
+          --no-restore
+          -p:PublishSingleFile=true
+          -p:EnableCompressionInSingleFile=true
+          -p:DebugType=None
+          -p:DebugSymbols=false
+          -o "artifacts/${{ matrix.rid }}"
+
+      - name: Prepare downloadable artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          source="artifacts/${{ matrix.rid }}/${{ matrix.binary }}"
+          target="artifacts/${{ matrix.asset }}"
+
+          if [[ ! -f "$source" ]]; then
+            echo "::error::Expected binary was not produced: $source"
+            find artifacts -maxdepth 3 -type f -print
+            exit 1
+          fi
+
+          mv "$source" "$target"
+
+          if [[ "${{ matrix.rid }}" != win-* ]]; then
+            chmod +x "$target"
+          fi
+
+          sha256sum "$target" > "$target.sha256"
+          ls -lh artifacts
+
+      - name: Upload CLI binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: donkeh-${{ matrix.rid }}
+          path: |
+            artifacts/${{ matrix.asset }}
+            artifacts/${{ matrix.asset }}.sha256
+          if-no-files-found: error
+
+  release:
+    name: Attach CLI binaries to release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download CLI artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: donkeh-*
+          merge-multiple: true
+
+      - name: Show release files
+        run: ls -lh artifacts
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true

@@ -133,6 +133,9 @@ renderer. `Donkeh.Inspector` provides the devtools panel.
     │   ├── Android/                 ← Donkeh.Windowing.Android (activity + GLES host)
     │   ├── Browser/                 ← Donkeh.Windowing.Browser (native DOM host)
     │   └── Benchmarks/              ← direct vs indirect renderer harness
+    ├── CliTool/
+    │   ├── Source/                  ← Donkeh.CliTool (`donkeh`)
+    │   └── Tests/                   ← project/component generator tests
     └── Inspector/
         └── Source/                  ← Donkeh.Inspector
 ```
@@ -917,6 +920,7 @@ a good target for future coverage.
 | Project | Output | Purpose |
 | --- | --- | --- |
 | `Donkeh/DataEngine/Debugger` | `CssDebug` CLI | Dump selectors, rules, counts and timings from a local file, URL or stdin. Supports `--selectors`, `--rules`, `--summary`, `--json`, `--limit`, `--all`, `--no-color`. |
+| `Donkeh/CliTool` | `donkeh` .NET tool | Create blank-window projects and components, embed stylesheets and register `[assembly: Stylesheet(...)]`. |
 | `Donkeh/Parser/Benchmark` | BenchmarkDotNet | Tokenizer throughput. |
 | `Donkeh/Data/Benchmarks` | BenchmarkDotNet | Real Bootstrap 5.3.8 parse and selector matching across 592–286,752 element DOMs. |
 | `Donkeh/DataEngine/Benchmarks` | BenchmarkDotNet | Tokenize/build/query on generated 1M/4M/16M character corpora, plus repeated-selector interning. |
@@ -956,6 +960,84 @@ tests and benchmarks):
 ```powershell
 dotnet build Donkeh.sln -c Release -p:GenerateDocumentationFile=true
 ```
+
+### CLI tool
+
+`Donkeh.CliTool` is packaged as the `donkeh` .NET tool. Run it from source:
+
+```powershell
+dotnet run --project Donkeh\CliTool\Source\Donkeh.CliTool.csproj -- --help
+```
+
+Or pack and install it locally:
+
+```powershell
+dotnet pack Donkeh\CliTool\Source\Donkeh.CliTool.csproj -c Release -o .\packages
+dotnet tool install --global Donkeh.CliTool --add-source .\packages
+```
+
+Create a minimal blank-window project in the current directory:
+
+```powershell
+donkeh new project
+```
+
+Create one in a new directory:
+
+```powershell
+donkeh new project MyApp
+```
+
+Generated project:
+
+```text
+MyApp/
+  MyApp.csproj
+  Program.cs
+  Directory.Build.targets
+  .gitignore
+```
+
+`Program.cs` contains only an attributed root component:
+
+```csharp
+[AppRoot(Width = 1000, Height = 700, Title = "MyApp")]
+public sealed class App : Component
+{
+    public override Node Render() =>
+        H("main", new Props { ... });
+}
+```
+
+Add another screen or control from the project directory:
+
+```powershell
+donkeh new component FileList
+```
+
+This creates:
+
+```text
+src/Components/FileList.cs
+src/Components/FileList.css
+```
+
+It also:
+
+- adds `<EmbeddedResource Include="src/Components/FileList.css" />` to the project;
+- writes `[assembly: Stylesheet("src/Components/FileList.css")]` at the top of the
+  component file;
+- converts `FileList` to the CSS class `file-list`.
+
+When the project is outside the framework checkout, pass the repository or
+framework path:
+
+```powershell
+donkeh new project --framework ..\ignite-ui
+```
+
+The generated project defaults to desktop. Uncomment `<DonkehAndroid>` or
+`<DonkehWeb>` in its `.csproj` to enable those hosts.
 
 ### Android
 

@@ -1,6 +1,8 @@
 bin/
 obj/
 builds/
+artifacts/
+cli-artifacts/
 BenchmarkDotNet.Artifacts/
 bdn.log
 /packages/
@@ -9,3 +11,4 @@ riderModule.iml
 .idea
 *.DotSettings.*
 Demo/*
+cli-artifacts

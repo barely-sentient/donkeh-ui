@@ -1,4 +1,4 @@
-
+﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Donkeh.Parser", "Donkeh\Parser\Source\Donkeh.Parser.csproj", "{506F12C6-A34C-4B8A-8C18-73686DDA1B2D}"
 EndProject
@@ -41,6 +41,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Donkeh.Windowing.Benchmarks", "Donkeh\Windowing\Benchmarks\Donkeh.Windowing.Benchmarks.csproj", "{B1F0C7E2-0A3D-4F6B-9C2E-7D5A8E4B1C3F}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Inspector", "Donkeh\Inspector\Source\Inspector.csproj", "{5057F52A-2F75-4B5C-B9EE-CBCEE1CD49A4}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Donkeh.CliTool", "Donkeh\CliTool\Source\Donkeh.CliTool.csproj", "{B1FE27D9-87C1-4FAA-9306-80B1E9A1E6E4}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -244,6 +246,18 @@ Global
 		{5057F52A-2F75-4B5C-B9EE-CBCEE1CD49A4}.Release|x64.Build.0 = Release|Any CPU
 		{5057F52A-2F75-4B5C-B9EE-CBCEE1CD49A4}.Release|x86.ActiveCfg = Release|Any CPU
 		{5057F52A-2F75-4B5C-B9EE-CBCEE1CD49A4}.Release|x86.Build.0 = Release|Any CPU
+		{B1FE27D9-87C1-4FAA-9306-80B1E9A1E6E4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B1FE27D9-87C1-4FAA-9306-80B1E9A1E6E4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B1FE27D9-87C1-4FAA-9306-80B1E9A1E6E4}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{B1FE27D9-87C1-4FAA-9306-80B1E9A1E6E4}.Debug|x64.Build.0 = Debug|Any CPU
+		{B1FE27D9-87C1-4FAA-9306-80B1E9A1E6E4}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{B1FE27D9-87C1-4FAA-9306-80B1E9A1E6E4}.Debug|x86.Build.0 = Debug|Any CPU
+		{B1FE27D9-87C1-4FAA-9306-80B1E9A1E6E4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B1FE27D9-87C1-4FAA-9306-80B1E9A1E6E4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B1FE27D9-87C1-4FAA-9306-80B1E9A1E6E4}.Release|x64.ActiveCfg = Release|Any CPU
+		{B1FE27D9-87C1-4FAA-9306-80B1E9A1E6E4}.Release|x64.Build.0 = Release|Any CPU
+		{B1FE27D9-87C1-4FAA-9306-80B1E9A1E6E4}.Release|x86.ActiveCfg = Release|Any CPU
+		{B1FE27D9-87C1-4FAA-9306-80B1E9A1E6E4}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
