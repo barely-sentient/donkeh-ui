@@ -391,6 +391,11 @@ namespace Donkeh.UILab
                 On("pointerup", onPointerUp);
             }
 
+            if (props.OnContextMenu is { } onContextMenu)
+            {
+                On("contextmenu", onContextMenu);
+            }
+
             if (props.OnInput is { } onInput)
             {
                 On("input", onInput);

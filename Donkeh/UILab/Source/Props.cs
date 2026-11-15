@@ -212,6 +212,12 @@ namespace Donkeh.UILab
         public Action<float, float>? OnPointerUp { get; init; }
 
         /// <summary>
+        /// Gets or sets the handler for the host's right-button context-menu event.
+        /// Coordinates are relative to the element's painted border box.
+        /// </summary>
+        public Action<float, float>? OnContextMenu { get; init; }
+
+        /// <summary>
         /// Gets or sets the handler for the <c>input</c> event. The handler receives
         /// the control's current text.
         /// </summary>

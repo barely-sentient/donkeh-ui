@@ -1866,6 +1866,7 @@ public sealed partial class DonkehWindow : IDisposable
         }
 
         ProcessPendingMouseMove();
+        UpdatePointerAutoScroll();
 
         BeforeFrame?.Invoke(this, delta);
 
@@ -4966,6 +4967,56 @@ public sealed partial class DonkehWindow : IDisposable
     }
 
     /// <summary>
+    /// Scrolls a captured pointer's nearest scroll container while a left-button
+    /// drag is held near its vertical edges. Re-dispatching pointermove after the
+    /// scroll keeps drag-selection geometry in sync even when the pointer pauses.
+    /// </summary>
+    private void UpdatePointerAutoScroll()
+    {
+        if (_pointerTarget is null || !IsLeftMouseButtonDown())
+        {
+            return;
+        }
+
+        var layout = LayoutFor(_pointerTarget);
+
+        if (layout is null)
+        {
+            return;
+        }
+
+        for (var node = (IgniteSupportedDomNode?)_pointerTarget; node is not null; node = node.Parent)
+        {
+            if (node is not ElementNode element || !layout.TryGetBox(element, out var box)
+                || box.ScrollHeight <= box.ClientHeight + 0.5f)
+            {
+                continue;
+            }
+
+            var bounds = PaintedBorderBox(box);
+            const float edge = 28;
+            var delta = _mouseY < bounds.Y + edge
+                ? -4
+                : _mouseY > bounds.Bottom - edge ? 4 : 0;
+
+            if (delta == 0)
+            {
+                return;
+            }
+
+            var (_, appliedY) = ScrollBy(box, 0, delta);
+
+            if (appliedY != 0)
+            {
+                Invoke(HitTest(_mouseX, _mouseY), "scroll", 0, appliedY);
+                InvokePointer(_pointerTarget, "pointermove", _mouseX, _mouseY);
+            }
+
+            return;
+        }
+    }
+
+    /// <summary>
     /// Routes a pointer press, from inspect-mode picking and pointer capture down
     /// to focus, text selection, dropdowns and control activation.
     /// </summary>
@@ -5033,6 +5084,18 @@ public sealed partial class DonkehWindow : IDisposable
 
         if (button == MouseButton.Left && TryBeginWindowDrag(HitTest(_mouseX, _mouseY)))
         {
+            return;
+        }
+
+        if (button == MouseButton.Right)
+        {
+            var contextTarget = FindPointerTarget(HitTest(_mouseX, _mouseY), "contextmenu");
+
+            if (contextTarget is not null)
+            {
+                InvokePointer(contextTarget, "contextmenu", _mouseX, _mouseY);
+            }
+
             return;
         }
 
@@ -5207,6 +5270,11 @@ public sealed partial class DonkehWindow : IDisposable
     {
         _devTools.PointerX = _mouseX;
         _devTools.PointerY = _mouseY;
+
+        if (button == MouseButton.Right)
+        {
+            return;
+        }
 
         if (_windowResizing)
         {
