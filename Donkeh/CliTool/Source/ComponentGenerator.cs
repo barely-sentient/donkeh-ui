@@ -29,17 +29,14 @@ internal static class ComponentGenerator
             ? rootNamespace
             : rootNamespace + ".Components";
 
-        var componentFile = Path.Combine(
+        var componentDirectory = Path.Combine(
             projectDirectory,
             "src",
             "Components",
-            className + ".cs");
-        var cssFile = Path.Combine(
-            projectDirectory,
-            "src",
-            "Components",
-            className + ".css");
-        var relativeCss = $"src/Components/{className}.css";
+            className);
+        var componentFile = Path.Combine(componentDirectory, className + ".cs");
+        var cssFile = Path.Combine(componentDirectory, className + ".css");
+        var relativeCss = $"src/Components/{className}/{className}.css";
 
         if (!force)
         {
@@ -56,7 +53,7 @@ internal static class ComponentGenerator
 
         TextFiles.Write(componentFile, $$"""
             using Donkeh.UILab;
-            using static Donkeh.UILab._;
+            using static Donkeh.UILab.HtmlHelper;
 
             [assembly: Donkeh.UILab.Stylesheet("{{relativeCss}}")]
 
@@ -67,7 +64,7 @@ internal static class ComponentGenerator
             {
                 /// <inheritdoc/>
                 public override Node Render() =>
-                    H("div", new Props { ClassName = "{{cssClass}}" });
+                    Div(new() { ClassName = "{{cssClass}}" });
             }
             """);
 

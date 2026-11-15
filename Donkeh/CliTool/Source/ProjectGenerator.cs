@@ -78,7 +78,7 @@ internal static class ProjectGenerator
         TextFiles.Write(programFile, $$"""
             using Donkeh.Hosting;
             using Donkeh.UILab;
-            using static Donkeh.UILab._;
+            using static Donkeh.UILab.HtmlHelper;
 
             namespace {{rootNamespace}};
 
@@ -87,8 +87,9 @@ internal static class ProjectGenerator
             {
                 /// <inheritdoc/>
                 public override Node Render() =>
-                    H("main", new Props
+                    Div(new()
                     {
+                        ClassName = "app",
                         Attributes = new Dictionary<string, string>
                         {
                             ["style"] = "margin:0;width:100vw;height:100vh;background:#ffffff"

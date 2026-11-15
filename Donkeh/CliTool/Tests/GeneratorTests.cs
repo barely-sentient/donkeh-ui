@@ -26,6 +26,7 @@ public sealed class GeneratorTests
         Assert.Contains("Donkeh.props", project, StringComparison.Ordinal);
         Assert.Contains("[AppRoot", program, StringComparison.Ordinal);
         Assert.Contains("class App : Component", program, StringComparison.Ordinal);
+        Assert.Contains("Div(new()", program, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -46,11 +47,13 @@ public sealed class GeneratorTests
             directory.Path,
             "src",
             "Components",
+            "MyWidget",
             "MyWidget.cs");
         var cssFile = Path.Combine(
             directory.Path,
             "src",
             "Components",
+            "MyWidget",
             "MyWidget.css");
 
         Assert.True(File.Exists(componentFile));
@@ -61,13 +64,14 @@ public sealed class GeneratorTests
         var project = File.ReadAllText(projectFile);
 
         Assert.Contains("class MyWidget : Component", component, StringComparison.Ordinal);
+        Assert.Contains("Div(new()", component, StringComparison.Ordinal);
         Assert.Contains(
-            "[assembly: Donkeh.UILab.Stylesheet(\"src/Components/MyWidget.css\")]",
+            "[assembly: Donkeh.UILab.Stylesheet(\"src/Components/MyWidget/MyWidget.css\")]",
             component,
             StringComparison.Ordinal);
         Assert.Contains(".my-widget", css, StringComparison.Ordinal);
         Assert.Contains(
-            "<EmbeddedResource Include=\"src/Components/MyWidget.css\" />",
+            "<EmbeddedResource Include=\"src/Components/MyWidget/MyWidget.css\" />",
             project,
             StringComparison.Ordinal);
     }

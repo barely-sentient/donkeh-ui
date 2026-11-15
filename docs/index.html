@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Donkeh — CSS-driven UI for .NET</title>
+    <meta name="description" content="Donkeh is a CSS-driven UI framework for .NET with desktop, Android and WebAssembly hosts.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="getting-started.html">Documentation</a>
+        <a class="topbar-link" href="https://github.com/barely-sentient/ignite-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<main class="landing" id="content">
+    <section class="hero">
+        <div>
+            <span class="hero-eyebrow">CSS-driven UI for .NET 10</span>
+            <h1>Build interfaces with <span class="gradient">real CSS.</span></h1>
+            <p class="lead">
+                Donkeh brings a full CSS engine, a reconciled virtual DOM and native
+                desktop, Android and browser hosts to plain C#. Write components once;
+                choose the platforms you want.
+            </p>
+            <div class="hero-actions">
+                <a class="button primary" href="getting-started.html">Get started <span aria-hidden="true">→</span></a>
+                <a class="button" href="creating-a-component.html">Create a component</a>
+                <a class="button" href="https://github.com/barely-sentient/ignite-ui">View source</a>
+            </div>
+            <div class="host-strip" aria-label="Supported hosts">
+                <span>Desktop · OpenGL</span>
+                <span>Android · OpenGL ES</span>
+                <span>WebAssembly · native DOM</span>
+            </div>
+        </div>
+
+        <div class="hero-code">
+            <div class="code" data-label="Program.cs">
+<pre><code>using Donkeh.Hosting;
+using Donkeh.UILab;
+using static Donkeh.UILab.HtmlHelper;
+
+[AppRoot(Width = 1180, Height = 760, Title = "My app")]
+public sealed class App : Component
+{
+    public override Node Render() =>
+        Div(new() { ClassName = "app" });
+}</code></pre>
+            </div>
+        </div>
+    </section>
+
+    <section class="section-head">
+        <div class="eyebrow">Why Donkeh</div>
+        <h2 style="margin-top:0">A UI engine that respects the platform.</h2>
+        <p>One component model, three very different hosts, and no JavaScript runtime required.</p>
+    </section>
+
+    <section class="feature-grid">
+        <article class="feature">
+            <div class="feature-icon">#</div>
+            <h3>Real CSS, not a lookalike</h3>
+            <p>Selectors, specificity, cascade layers, custom properties, media queries, keyframes, transitions, gradients, shadows and modern layout.</p>
+        </article>
+        <article class="feature">
+            <div class="feature-icon">◫</div>
+            <h3>One tree, four hosts</h3>
+            <p>The same UILab tree renders to OpenGL on desktop, OpenGL ES on Android, or native DOM elements in the browser.</p>
+        </article>
+        <article class="feature">
+            <div class="feature-icon">↻</div>
+            <h3>Hooks and context</h3>
+            <p>State, reducers, effects, memoisation, callbacks, refs and typed context providers with in-place reconciliation.</p>
+        </article>
+        <article class="feature">
+            <div class="feature-icon">⌕</div>
+            <h3>Built-in inspector</h3>
+            <p>Inspect the live hierarchy, edit matched styles, sample frame/layout/render timings, browse keyframes and build targets.</p>
+        </article>
+        <article class="feature">
+            <div class="feature-icon">⌘</div>
+            <h3>A project CLI</h3>
+            <p>Create blank-window projects and components, embed stylesheets automatically, and keep platform entry points out of your app.</p>
+        </article>
+        <article class="feature">
+            <div class="feature-icon">◎</div>
+            <h3>Host capabilities</h3>
+            <p>Platform flags and awaitable camera, microphone, location, notification, storage and clipboard permission requests.</p>
+        </article>
+    </section>
+
+    <section class="section-head">
+        <div class="eyebrow">Quick start</div>
+        <h2 style="margin-top:0">From zero to a blank window.</h2>
+        <p>Install the CLI, create a project, and run it. The framework supplies the platform entry point.</p>
+    </section>
+
+    <div class="code" data-label="Terminal">
+<pre><code>dotnet tool install --global Donkeh.CliTool
+donkeh new project MyApp
+cd MyApp
+dotnet run</code></pre>
+    </div>
+
+    <section class="section-head">
+        <div class="eyebrow">Documentation</div>
+        <h2 style="margin-top:0">Start where you need.</h2>
+    </section>
+
+    <div class="start-grid">
+        <a class="start-card" href="getting-started.html">
+            <span class="start-number">01</span>
+            <span>
+                <h3>Getting started</h3>
+                <p>Requirements, project setup, directory structure, host opt-ins and the first build.</p>
+            </span>
+        </a>
+        <a class="start-card" href="creating-a-component.html">
+            <span class="start-number">02</span>
+            <span>
+                <h3>Creating a component</h3>
+                <p>Components, props, stylesheet registration, CSS files and embedded images.</p>
+            </span>
+        </a>
+        <a class="start-card" href="using-hooks.html">
+            <span class="start-number">03</span>
+            <span>
+                <h3>Hooks and providers</h3>
+                <p>State, effects, reducers, memoisation, refs, context and reusable custom hooks.</p>
+            </span>
+        </a>
+        <a class="start-card" href="inspector-hierarchy.html">
+            <span class="start-number">04</span>
+            <span>
+                <h3>The inspector</h3>
+                <p>Explore the hierarchy, edit styles, read performance graphs, browse animations and deploy builds.</p>
+            </span>
+        </a>
+        <a class="start-card" href="host-permissions.html">
+            <span class="start-number">05</span>
+            <span>
+                <h3>Host permissions</h3>
+                <p>Platform flags and awaitable device permissions across desktop, Android and the browser.</p>
+            </span>
+        </a>
+        <a class="start-card" href="https://github.com/barely-sentient/ignite-ui">
+            <span class="start-number">↗</span>
+            <span>
+                <h3>Source and releases</h3>
+                <p>Browse the implementation, download the CLI binaries, or cut a release.</p>
+            </span>
+        </a>
+    </div>
+
+    <footer class="page-footer">
+        <p>Donkeh — CSS-driven UI for .NET.</p>
+        <p><a href="getting-started.html">Read the docs</a></p>
+    </footer>
+</main>
+</body>
+</html>

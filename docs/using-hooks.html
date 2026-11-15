@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Using hooks · Donkeh</title>
+    <meta name="description" content="State, reducers, effects, memoisation, refs and context hooks in Donkeh components.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/ignite-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/ignite-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Components <span>/</span> Using hooks</div>
+        <h1>Using hooks</h1>
+        <p class="lead">
+            Hooks give a component state, effects, memoised values and context access.
+            They are declared by call order, so every render must call the same hooks
+            in the same order.
+        </p>
+
+        <h2 id="rules">Rules of hooks</h2>
+        <ul>
+            <li>Call hooks only from <code>Render</code>.</li>
+            <li>Call them unconditionally, in the same order on every render.</li>
+            <li>Do not call them from loops, conditions or nested local functions.</li>
+            <li>Conditional output belongs in the returned tree, not around a hook call.</li>
+        </ul>
+
+        <div class="code" data-label="Correct">
+<pre><code>public override Node Render()
+{
+    var (visible, setVisible) = State(false);
+    var (count, setCount) = State(0);
+
+    return H("div", null,
+        Show(visible, H("span", Text(count.ToString()))));
+}</code></pre>
+        </div>
+
+        <h2 id="state">State</h2>
+        <p>
+            <code>State&lt;T&gt;</code> returns the current value and a setter. Setters
+            mark the component dirty; the renderer applies the update after the current
+            handler or effect finishes.
+        </p>
+
+        <div class="code" data-label="Counter.cs">
+<pre><code>public sealed class Counter : Component
+{
+    public override Node Render()
+    {
+        var (count, setCount) = State(0);
+
+        return H("button", new Props
+        {
+            ClassName = "counter",
+            OnClick = () =&gt; setCount(count + 1)
+        }, Text($"Clicked {count} times"));
+    }
+}</code></pre>
+        </div>
+
+        <h3 id="state-update">Functional updates</h3>
+        <p>
+            Use <code>StateWithUpdate</code> when the next value depends on the
+            previous one, especially when several updates happen in one handler.
+        </p>
+
+        <div class="code" data-label="Functional update">
+<pre><code>var (count, setCount, updateCount) = StateWithUpdate(0);
+
+updateCount(value =&gt; value + 1);
+updateCount(value =&gt; value + 1);</code></pre>
+        </div>
+
+        <p>
+            The first render can also be lazy: pass <code>() =&gt; CreateInitial()</code>
+            to either <code>State</code> or <code>StateWithUpdate</code>. The factory
+            runs once, when the hook slot is created.
+        </p>
+
+        <h2 id="reducer">Reducer</h2>
+        <p>
+            <code>Reducer</code> is useful when state transitions have names or several
+            fields change together.
+        </p>
+
+        <div class="code" data-label="Reducer.cs">
+<pre><code>public sealed record EditorState(string Text, bool Dirty);
+
+public abstract record EditorAction
+{
+    public sealed record Edit(string Text) : EditorAction;
+    public sealed record Save : EditorAction;
+}
+
+public override Node Render()
+{
+    var (state, dispatch) = Reducer&lt;EditorState, EditorAction&gt;(
+        new EditorState("", false),
+        (current, action) =&gt; action switch
+        {
+            EditorAction.Edit edit =&gt; current with { Text = edit.Text, Dirty = true },
+            EditorAction.Save =&gt; current with { Dirty = false },
+            _ =&gt; current
+        });
+
+    return H("input", new Props
+    {
+        Value = state.Text,
+        OnInput = text =&gt; dispatch(new EditorAction.Edit(text))
+    });
+}</code></pre>
+        </div>
+
+        <h2 id="effects">Effects</h2>
+        <p>
+            Effects run after the virtual tree has been applied and the renderer has
+            committed it. Use the dependency list to control when they run.
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Call</th><th>When it runs</th></tr></thead>
+                <tbody>
+                    <tr><td><code>Effect(action)</code></td><td>After every commit.</td></tr>
+                    <tr><td><code>Effect(action, deps)</code></td><td>After a commit where a dependency value changed.</td></tr>
+                    <tr><td><code>Effect(action, [])</code></td><td>Once after mount.</td></tr>
+                    <tr><td><code>Effect(Func&lt;Action?&gt;)</code></td><td>After every commit; the returned action is the cleanup.</td></tr>
+                    <tr><td><code>Effect(Func&lt;Action?&gt;, deps)</code></td><td>When dependencies change; the previous cleanup runs first.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="code" data-label="Subscription with cleanup">
+<pre><code>public override Node Render()
+{
+    Effect(() =&gt;
+    {
+        var connection = Connect(endpoint);
+        return () =&gt; connection.Dispose();
+    }, [endpoint]);
+
+    return H("p", Text("Connected"));
+}</code></pre>
+        </div>
+
+        <p>
+            Dependency arrays are compared element by element. An empty array has no
+            elements to differ, so it runs once. Arrays are stored by reference, so do
+            not mutate a dependency array after passing it.
+        </p>
+
+        <h3 id="layout-effect">Layout effects</h3>
+        <p>
+            <code>LayoutEffect</code> runs synchronously during commit, after the tree
+            is patched but before passive effects. Use it for measurements or
+            adjustments that the next frame should see.
+        </p>
+
+        <div class="code" data-label="Layout effect">
+<pre><code>LayoutEffect(() =&gt;
+{
+    // Runs after the tree is applied and before passive effects.
+}, []);</code></pre>
+        </div>
+
+        <h2 id="memo">Memo and callbacks</h2>
+        <p>
+            <code>Memo</code> caches an expensive value and recomputes when a
+            dependency changes. <code>Callback</code> does the same for a delegate,
+            which is useful when passing handlers to children.
+        </p>
+
+        <div class="code" data-label="Memo.cs">
+<pre><code>var summary = Memo(
+    () =&gt; BuildSummary(items),
+    items.Length);
+
+var save = Callback(
+    () =&gt; Save(name, email),
+    name, email);</code></pre>
+        </div>
+
+        <div class="callout note">
+            <strong>Memo is an optimisation</strong>
+            The factory runs on the render that creates the slot and whenever a
+            dependency differs. Without a dependency list there is nothing to compare,
+            so it recomputes every render.
+        </div>
+
+        <h2 id="ref">Refs</h2>
+        <p>
+            <code>UseRef</code> returns the same mutable holder across renders. Writes
+            to it do not schedule a render, so it is useful for timers, subscriptions
+            and other values that should not participate in rendering.
+        </p>
+
+        <div class="code" data-label="Ref.cs">
+<pre><code>var firstRun = UseRef(true);
+
+Effect(() =&gt;
+{
+    if (firstRun.Value)
+    {
+        firstRun.Value = false;
+        // one-time setup
+    }
+}, []);</code></pre>
+        </div>
+
+        <h2 id="context">Context</h2>
+        <p>
+            <code>UseContext(Context&lt;T&gt;)</code> reads the nearest provider value,
+            or the context default when no provider is in scope. The value is resolved
+            from the scope captured when the component last rendered.
+        </p>
+
+        <div class="code" data-label="Context.cs">
+<pre><code>var theme = UseContext(ThemeContext.Value);
+
+return H("main", new Props
+{
+    Attributes = new Dictionary&lt;string, string&gt;
+    {
+        ["style"] = $"background:{theme.Background}"
+    }
+});</code></pre>
+        </div>
+
+        <p><a href="creating-a-provider.html">Creating a provider</a> covers the publisher side and nesting rules.</p>
+
+        <h2 id="lifecycle">Lifecycle overrides</h2>
+        <p>
+            Components also expose virtual lifecycle methods when an effect is not the
+            right shape.
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Method</th><th>When it runs</th></tr></thead>
+                <tbody>
+                    <tr><td><code>OnMount()</code></td><td>After the first commit.</td></tr>
+                    <tr><td><code>OnUpdate()</code></td><td>After a re-render; not called when <code>ShouldRender</code> vetoes it.</td></tr>
+                    <tr><td><code>OnUnmount()</code></td><td>When the component leaves the tree.</td></tr>
+                    <tr><td><code>ShouldRender()</code></td><td>Return false to skip a parent-driven render; own state updates are not vetoed.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="code" data-label="Lifecycle.cs">
+<pre><code>public sealed class Page : Component
+{
+    protected override void OnMount()
+    {
+        // Called after the first commit.
+    }
+
+    protected override void OnUpdate()
+    {
+        // Called after a re-render.
+    }
+
+    protected override void OnUnmount()
+    {
+        // Called when the component leaves the tree.
+    }
+}</code></pre>
+        </div>
+
+        <h2 id="props">Props</h2>
+        <p>
+            Use <code>Component&lt;TProps&gt;</code> when a component receives props.
+            The renderer assigns <code>Props</code> before calling
+            <code>Render</code> and again on every parent render.
+        </p>
+
+        <div class="code" data-label="Typed props">
+<pre><code>public sealed class GreetingProps : Props
+{
+    public string Name { get; init; } = "";
+}
+
+public sealed class Greeting : Component&lt;GreetingProps&gt;
+{
+    public override Node Render() =&gt;
+        H("p", Text($"Hello, {Props.Name}"));
+}</code></pre>
+        </div>
+
+        <div class="page-nav">
+            <a class="prev" href="creating-a-provider.html"><span>Previous</span>Creating a provider</a>
+            <a class="next" href="developing-hooks.html"><span>Next</span>Developing hooks</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh — CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/ignite-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>

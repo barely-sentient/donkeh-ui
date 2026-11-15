@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Inspector performance · Donkeh</title>
+    <meta name="description" content="Read frame, layout, render, CPU, memory and GC statistics in the Donkeh inspector.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/ignite-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/ignite-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Inspector <span>/</span> Performance</div>
+        <h1>Using the performance tab</h1>
+        <p class="lead">
+            The Performance tab turns the last few seconds of frame work into a small
+            dashboard. It is designed to show where a frame goes, not to replace a
+            profiler.
+        </p>
+
+        <h2 id="sampling">What is sampled</h2>
+        <p>
+            The host samples while the Performance tab is visible, at most every
+            <strong>0.25 seconds</strong>. Each graph keeps up to <strong>120
+            samples</strong>. The panel refreshes roughly once per second, so the
+            numbers are recent but not instantaneous.
+        </p>
+
+        <div class="callout note">
+            <strong>Sampling pauses when hidden</strong>
+            Leave the tab open while reproducing a slow interaction. Switching away
+            stops the sample stream, so the graph will not contain work performed while
+            another tab was active.
+        </div>
+
+        <h2 id="cards">The summary cards</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Card</th><th>Meaning</th></tr></thead>
+                <tbody>
+                    <tr><td><strong>FPS</strong></td><td>Whole frames per second derived from the latest wall-clock frame time. The small line also shows the frame time in milliseconds.</td></tr>
+                    <tr><td><strong>CPU</strong></td><td>Process-wide CPU usage percentage and the current thread count. The first sample has no baseline, so it reports zero.</td></tr>
+                    <tr><td><strong>Managed</strong></td><td>Managed heap bytes. The secondary line shows the process working set.</td></tr>
+                    <tr><td><strong>GC</strong></td><td>Gen 0, gen 1 and gen 2 collection counts.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="graphs">The graphs</h2>
+        <p>
+            Three bar graphs show the retained history. They use fixed vertical scales
+            so different runs are comparable:
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Graph</th><th>Scale</th><th>Use it to spot</th></tr></thead>
+                <tbody>
+                    <tr><td>Frame time</td><td>33 ms full height</td><td>Overall hitches and frames that missed the display budget.</td></tr>
+                    <tr><td>Layout time</td><td>16 ms full height</td><td>Layout rebuilds caused by state, styles or viewport changes.</td></tr>
+                    <tr><td>Render time</td><td>16 ms full height</td><td>Display-list submission and GPU-facing work.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            A tall frame bar with short layout and render bars points at work outside
+            the measured passes, such as waiting on the platform or another thread. A
+            tall layout bar points at geometry churn. A tall render bar points at
+            display-list or submission cost.
+        </p>
+
+        <h2 id="budget">Frame budgets</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Refresh rate</th><th>Budget per frame</th></tr></thead>
+                <tbody>
+                    <tr><td>60 Hz</td><td>16.7 ms</td></tr>
+                    <tr><td>120 Hz</td><td>8.3 ms</td></tr>
+                    <tr><td>144 Hz</td><td>6.9 ms</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            The graph scales are diagnostic aids, not hard budgets. A 16 ms layout bar
+            on a 144 Hz display is already too large for a smooth frame.
+        </p>
+
+        <h2 id="workflow">A practical workflow</h2>
+        <ol class="steps">
+            <li>Open the Performance tab and leave it visible.</li>
+            <li>Reproduce one interaction, then stop. Avoid a long sequence that mixes several causes.</li>
+            <li>Compare the three graphs. Is the spike in layout, render, or only frame time?</li>
+            <li>Switch to Elements and inspect the subtree involved. Check for unnecessary class changes, large text updates, or layout-affecting styles.</li>
+            <li>Reduce the work: keep subtrees stable, key list items, memoise derived data, and avoid triggering full-tree changes for local state.</li>
+        </ol>
+
+        <div class="callout tip">
+            <strong>Look for repeated spikes</strong>
+            One tall bar is often startup or a one-off allocation. A regular pattern of
+            spikes is the useful signal: it maps to an interaction or animation that
+            runs on a timer or every frame.
+        </div>
+
+        <h2 id="limits">What it does not tell you</h2>
+        <ul>
+            <li>It does not attribute time to a specific C# method; use a sampling profiler for that.</li>
+            <li>It does not capture GPU timings on every driver.</li>
+            <li>It does not sample while the tab is hidden.</li>
+            <li>It is desktop/Android inspector tooling; use browser devtools for the WASM host.</li>
+        </ul>
+
+        <div class="page-nav">
+            <a class="prev" href="inspector-hierarchy.html"><span>Previous</span>Inspector hierarchy</a>
+            <a class="next" href="inspector-animations.html"><span>Next</span>Inspector animations</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh — CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/ignite-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>

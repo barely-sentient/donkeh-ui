@@ -168,8 +168,8 @@ public static class Cli
 
             Commands:
               new project       Create a minimal app that opens a blank window.
-              new component     Create src/Components/<Name>.cs and .css, embed the
-                                stylesheet, and register [assembly: Stylesheet(...)].
+              new component     Create src/Components/<Name>/<Name>.cs and .css, embed
+                                the stylesheet, and register [assembly: Stylesheet(...)].
 
             Options:
               -h, --help        Show this help.
@@ -202,12 +202,12 @@ public static class Cli
               donkeh new component <name> [--project <path>] [--force]
 
             Creates:
-              src/Components/<Name>.cs
-              src/Components/<Name>.css
+              src/Components/<Name>/<Name>.cs
+              src/Components/<Name>/<Name>.css
 
             It also adds the CSS as an EmbeddedResource and writes
-            [assembly: Stylesheet("src/Components/<Name>.css")] at the top of the
-            component file.
+            [assembly: Stylesheet("src/Components/<Name>/<Name>.css")] at the top of
+            the component file.
 
             Options:
               --project <path>     Project file or project directory.

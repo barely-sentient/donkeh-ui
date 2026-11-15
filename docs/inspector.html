@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Using the inspector · Donkeh</title>
+    <meta name="description" content="Open, dock and use the Donkeh developer inspector.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/ignite-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/ignite-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Inspector</div>
+        <h1>Using the inspector</h1>
+        <p class="lead">
+            The inspector is a live, in-app devtools panel. It reads the same UILab
+            tree the renderer draws and writes style edits back into the live
+            stylesheet.
+        </p>
+
+        <h2 id="enable">Enable it</h2>
+        <p>
+            Devtools are enabled by default on desktop. Set
+            <code>EnableDevTools = true</code> on <code>[AppRoot]</code>, or in
+            <code>WindowSettings</code> when using the low-level window API.
+        </p>
+
+        <div class="code" data-label="Program.cs">
+<pre><code>[AppRoot(
+    Width = 1180,
+    Height = 760,
+    Title = "My app",
+    EnableDevTools = true)]
+public sealed class App : Component
+{
+    public override Node Render() =&gt; Div(new() { ClassName = "app" });
+}</code></pre>
+        </div>
+
+        <h2 id="open">Open, close and dock</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Action</th><th>How</th></tr></thead>
+                <tbody>
+                    <tr><td>Toggle</td><td><kbd>F12</kbd> or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd></td></tr>
+                    <tr><td>Close</td><td>The close button in the toolbar</td></tr>
+                    <tr><td>Dock bottom</td><td>The bottom-edge dock button; the app viewport shrinks above it.</td></tr>
+                    <tr><td>Dock right</td><td>The right-edge dock button; the app viewport shrinks beside it.</td></tr>
+                    <tr><td>Window mode</td><td>The window dock button opens a standalone inspector window.</td></tr>
+                    <tr><td>Resize</td><td>Drag the splitter between the app and the docked panel.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            The panel can also be controlled from code:
+            <code>ShowDevTools()</code>, <code>HideDevTools()</code>,
+            <code>ToggleDevTools()</code> and <code>DevTools.Dock</code>.
+        </p>
+
+        <h2 id="tabs">Tabs at a glance</h2>
+        <div class="doc-link-grid">
+            <a class="doc-link" href="inspector-hierarchy.html">
+                <strong>Hierarchy</strong>
+                <span>Walk the live tree, pick elements and edit matched styles.</span>
+            </a>
+            <a class="doc-link" href="inspector-performance.html">
+                <strong>Performance</strong>
+                <span>Read frame, layout, render, CPU, memory and GC samples.</span>
+            </a>
+            <a class="doc-link" href="inspector-animations.html">
+                <strong>Animations</strong>
+                <span>Browse registered <code>@keyframes</code> groups and their stops.</span>
+            </a>
+            <a class="doc-link" href="inspector-deploy.html">
+                <strong>Deploy</strong>
+                <span>Build desktop, Android and WebAssembly targets and download them.</span>
+            </a>
+        </div>
+
+        <h2 id="browser">Desktop and browser</h2>
+        <p>
+            The inspector is part of the desktop/Android renderer. The browser host
+            renders into native DOM and leaves inspection to the browser devtools,
+            which already know about CSS, layout and accessibility.
+        </p>
+
+        <div class="page-nav">
+            <a class="prev" href="developing-hooks.html"><span>Previous</span>Developing hooks</a>
+            <a class="next" href="inspector-hierarchy.html"><span>Next</span>Hierarchy</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh — CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/ignite-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>

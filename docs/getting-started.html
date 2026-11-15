@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Getting started · Donkeh</title>
+    <meta name="description" content="Install Donkeh, create a project and run a blank window on desktop, Android or the browser.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/ignite-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/ignite-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Getting started</div>
+        <h1>Getting started</h1>
+        <p class="lead">
+            The quickest route is a generated project. The framework supplies the
+            platform entry points, the root component, the stylesheet loading and the
+            host wiring. Your app starts at <code>[AppRoot]</code>.
+        </p>
+
+        <div class="pill-row">
+            <span class="pill accent">.NET 10</span>
+            <span class="pill">Desktop</span>
+            <span class="pill">Android</span>
+            <span class="pill">WebAssembly</span>
+        </div>
+
+        <h2 id="requirements">Requirements</h2>
+        <ul>
+            <li><strong>.NET SDK 10</strong> with the usual <code>dotnet</code> CLI.</li>
+            <li><strong>Desktop:</strong> Windows, Linux or macOS with OpenGL 3.3. The desktop host creates a GLFW window.</li>
+            <li><strong>Android:</strong> the .NET Android workload and an Android SDK. The generated APK is standalone.</li>
+            <li><strong>Browser:</strong> a .NET 10 browser build. No extra workload is needed for the Blazor-based WASM host.</li>
+        </ul>
+
+        <h2 id="install-cli">Install the CLI</h2>
+        <p>
+            The <code>donkeh</code> tool generates projects and components. Install it
+            from NuGet, or run it directly from the repository:
+        </p>
+
+        <div class="code" data-label="Terminal">
+<pre><code>dotnet tool install --global Donkeh.CliTool
+
+# or run from a checkout
+dotnet run --project Donkeh/CliTool/Source/Donkeh.CliTool.csproj -- --help</code></pre>
+        </div>
+
+        <h2 id="create-project">Create a project</h2>
+        <p>Run one of these from the directory where the project should live:</p>
+
+        <div class="code" data-label="Terminal">
+<pre><code># current directory becomes the project root
+donkeh new project
+
+# or create a new directory and project
+donkeh new project MyApp</code></pre>
+        </div>
+
+        <p>
+            The project defaults to desktop. The generated <code>Program.cs</code>
+            contains a single attributed root component, so there is no <code>Main</code>
+            to write and no platform-specific entry-point code.
+        </p>
+
+        <h2 id="structure">Directory structure</h2>
+        <div class="tree">MyApp/
+├── MyApp.csproj
+├── Program.cs
+├── Directory.Build.targets
+├── .gitignore
+├── src/
+│   └── Components/
+│       └── FileList/
+│           ├── FileList.cs
+│           └── FileList.css
+├── Assets/
+│   └── logo.png
+└── builds/
+    ├── desktop/
+    ├── android/
+    └── wasm/</div>
+
+        <p>
+            The generated project only carries the source it needs. The
+            <code>Directory.Build.targets</code> file imports the framework's host
+            wiring; the <code>.csproj</code> imports the target-framework props.
+        </p>
+
+        <h2 id="app-root">The app root</h2>
+        <p>
+            <code>[AppRoot]</code> marks the component the framework should mount. Its
+            named properties replace the old <code>IDonkehApp.Settings</code> object.
+        </p>
+
+        <div class="code" data-label="Program.cs">
+<pre><code>using Donkeh.Hosting;
+using Donkeh.UILab;
+using static Donkeh.UILab.HtmlHelper;
+
+[AppRoot(
+    Width = 1180,
+    Height = 760,
+    Title = "My app",
+    EnableDevTools = true)]
+public sealed class App : Component
+{
+    public override Node Render() =>
+        Div(new() { ClassName = "app" });
+}</code></pre>
+        </div>
+
+        <div class="callout note">
+            <strong>Attributes are constants</strong>
+            C# attributes cannot take object initializers such as
+            <code>new WindowSettings { ... }</code>. Use the attribute's named
+            properties, for example <code>Width = 1180</code> and
+            <code>Frameless = true</code>.
+        </div>
+
+        <p>
+            The framework discovers the attribute in the entry assembly, creates the
+            root component, loads every <code>[Stylesheet]</code> declaration, and
+            starts the matching host. Desktop and browser builds compile a generated
+            <code>Main</code>; Android uses the framework activity.
+        </p>
+
+        <h2 id="hosts">Choose hosts</h2>
+        <p>
+            Add opt-in properties to the project file. Only the hosts you enable are
+            added to <code>$(DonkehTargetFrameworks)</code>.
+        </p>
+
+        <div class="code" data-label="MyApp.csproj">
+<pre><code>&lt;PropertyGroup&gt;
+  &lt;DonkehDesktop&gt;true&lt;/DonkehDesktop&gt;
+  &lt;DonkehAndroid&gt;true&lt;/DonkehAndroid&gt;
+  &lt;DonkehWeb&gt;true&lt;/DonkehWeb&gt;
+&lt;/PropertyGroup&gt;</code></pre>
+        </div>
+
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr><th>Property</th><th>Target</th><th>Output</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>DonkehDesktop</code></td><td><code>net10.0</code></td><td>Desktop</td></tr>
+                    <tr><td><code>DonkehAndroid</code></td><td><code>net10.0-android</code></td><td>APK</td></tr>
+                    <tr><td><code>DonkehWeb</code></td><td><code>net10.0-browser</code></td><td>Static site</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            Android permissions can also be declared centrally. The framework emits
+            the matching manifest entries:
+        </p>
+
+        <div class="code" data-label="MyApp.csproj">
+<pre><code>&lt;PropertyGroup&gt;
+  &lt;DonkehAndroidPermissions&gt;Camera;Microphone;Location;Notifications&lt;/DonkehAndroidPermissions&gt;
+&lt;/PropertyGroup&gt;</code></pre>
+        </div>
+
+        <h2 id="build-run">Build and run</h2>
+        <p>From the project directory:</p>
+
+        <div class="code" data-label="Terminal">
+<pre><code># desktop, the default host
+dotnet run
+
+# build every enabled target
+dotnet build
+
+# Android APK
+dotnet build -f net10.0-android
+
+# browser static site
+dotnet publish -c Release -f net10.0-browser</code></pre>
+        </div>
+
+        <p>
+            Browser output is written to the project's <code>builds/wasm</code>
+            folder. Serve it with any static file server that returns the correct
+            MIME types for <code>.js</code>, <code>.wasm</code> and
+            <code>.json</code>.
+        </p>
+
+        <div class="callout tip">
+            <strong>Desktop smoke test</strong>
+            The generated desktop host accepts <code>--screenshot &lt;path&gt;</code>,
+            renders 120 frames, writes a BMP and closes. The CLI and framework use it
+            for headless checks.
+        </div>
+
+        <h2 id="where-code-goes">Where code goes</h2>
+        <div class="doc-link-grid">
+            <a class="doc-link" href="creating-a-component.html">
+                <strong>Components</strong>
+                <span>Put reusable UI in <code>src/Components</code>. A component is a class deriving from <code>Component</code>.</span>
+            </a>
+            <a class="doc-link" href="creating-a-provider.html">
+                <strong>Shared state</strong>
+                <span>Use typed <code>Context&lt;T&gt;</code> providers for values that many components need.</span>
+            </a>
+            <a class="doc-link" href="using-hooks.html">
+                <strong>State and effects</strong>
+                <span>Use hooks inside <code>Render</code> for state, effects, memoisation and context reads.</span>
+            </a>
+            <a class="doc-link" href="host-permissions.html">
+                <strong>Device access</strong>
+                <span>Ask for camera, microphone, location and other permissions through <code>Host.Permissions</code>.</span>
+            </a>
+        </div>
+
+        <h2 id="manual">Manual project setup</h2>
+        <p>
+            If you are not using the CLI, the app project needs the framework's target
+            wiring. In a checkout, import the props after the opt-in properties and
+            import the targets from a <code>Directory.Build.targets</code>:
+        </p>
+
+        <div class="code" data-label="MyApp.csproj">
+<pre><code>&lt;Project Sdk="Microsoft.NET.Sdk"&gt;
+  &lt;PropertyGroup&gt;
+    &lt;DonkehDesktop&gt;true&lt;/DonkehDesktop&gt;
+  &lt;/PropertyGroup&gt;
+
+  &lt;Import Project="..\Donkeh\Build\Donkeh.props" /&gt;
+
+  &lt;PropertyGroup&gt;
+    &lt;OutputType&gt;Exe&lt;/OutputType&gt;
+    &lt;TargetFrameworks&gt;$(DonkehTargetFrameworks)&lt;/TargetFrameworks&gt;
+    &lt;ImplicitUsings&gt;enable&lt;/ImplicitUsings&gt;
+    &lt;Nullable&gt;enable&lt;/Nullable&gt;
+  &lt;/PropertyGroup&gt;
+&lt;/Project&gt;</code></pre>
+        </div>
+
+        <div class="code" data-label="Directory.Build.targets">
+<pre><code>&lt;Project&gt;
+  &lt;Import Project="..\Donkeh\Build\Donkeh.targets" /&gt;
+&lt;/Project&gt;</code></pre>
+        </div>
+
+        <div class="page-nav">
+            <a class="prev" href="index.html"><span>Previous</span>Overview</a>
+            <a class="next" href="creating-a-component.html"><span>Next</span>Creating a component</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh — CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/ignite-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>

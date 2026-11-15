@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Host permissions · Donkeh</title>
+    <meta name="description" content="Platform flags and awaitable permission requests for Donkeh hosts.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/ignite-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/ignite-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Runtime <span>/</span> Host permissions</div>
+        <h1>Host permissions</h1>
+        <p class="lead">
+            <code>Donkeh.Hosting.Host</code> exposes the current platform and awaitable
+            permission requests. The framework supplies desktop, Android and browser
+            providers, so application code uses one API everywhere.
+        </p>
+
+        <h2 id="platform">Platform flags</h2>
+        <div class="code" data-label="Platform checks">
+<pre><code>using Donkeh.Hosting;
+
+if (Host.IsAndroid)
+{
+    // Android-only setup.
+}
+
+if (Host.IsDesktop || Host.IsWeb)
+{
+    // Shared responsive path.
+}
+
+Console.WriteLine(Host.PlatformName);</code></pre>
+        </div>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Member</th><th>True when</th></tr></thead>
+                <tbody>
+                    <tr><td><code>Host.IsAndroid</code></td><td>Running on Android.</td></tr>
+                    <tr><td><code>Host.IsIOS</code></td><td>Running on iOS.</td></tr>
+                    <tr><td><code>Host.IsWindows</code></td><td>Running on Windows.</td></tr>
+                    <tr><td><code>Host.IsMac</code></td><td>Running on macOS.</td></tr>
+                    <tr><td><code>Host.IsLinux</code></td><td>Running on Linux.</td></tr>
+                    <tr><td><code>Host.IsWeb</code></td><td>Running in a browser.</td></tr>
+                    <tr><td><code>Host.IsBrowser</code></td><td>Alias for <code>IsWeb</code>.</td></tr>
+                    <tr><td><code>Host.IsDesktop</code></td><td>Windows, macOS or Linux, excluding the browser.</td></tr>
+                    <tr><td><code>Host.IsMobile</code></td><td>Android or iOS.</td></tr>
+                    <tr><td><code>Host.PlatformName</code></td><td>A friendly name such as <code>Web</code> or <code>Windows</code>.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="request">Requesting a permission</h2>
+        <p>
+            Every permission method returns <code>Task&lt;bool&gt;</code> and accepts an
+            optional <code>CancellationToken</code>.
+        </p>
+
+        <div class="code" data-label="Camera">
+<pre><code>using Donkeh.Hosting;
+
+if (await Host.Permissions.Camera())
+{
+    // Open the camera.
+}</code></pre>
+        </div>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Method</th><th>Capability</th></tr></thead>
+                <tbody>
+                    <tr><td><code>Camera()</code></td><td>Camera capture.</td></tr>
+                    <tr><td><code>Microphone()</code></td><td>Audio capture.</td></tr>
+                    <tr><td><code>Location()</code></td><td>Current location.</td></tr>
+                    <tr><td><code>Notifications()</code></td><td>System notifications.</td></tr>
+                    <tr><td><code>Photos()</code></td><td>Photo library / images.</td></tr>
+                    <tr><td><code>Storage()</code></td><td>File storage access.</td></tr>
+                    <tr><td><code>Contacts()</code></td><td>Contacts.</td></tr>
+                    <tr><td><code>Calendar()</code></td><td>Calendar.</td></tr>
+                    <tr><td><code>Bluetooth()</code></td><td>Nearby Bluetooth devices.</td></tr>
+                    <tr><td><code>Motion()</code></td><td>Motion or activity data.</td></tr>
+                    <tr><td><code>Clipboard()</code></td><td>System clipboard.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            A known permission can also be requested through the enum:
+            <code>Host.Permissions.Request(HostPermission.Camera)</code>.
+        </p>
+
+        <h2 id="behaviour">Behaviour</h2>
+        <ul>
+            <li>Granted results are cached for the session.</li>
+            <li>Denied results are not cached, so the app can retry after the user changes a setting.</li>
+            <li>Concurrent calls for the same permission share one in-flight request.</li>
+            <li>Unsupported capabilities return <code>false</code> instead of throwing.</li>
+            <li>Cancellation is best-effort; a platform prompt may still be visible after the task completes.</li>
+        </ul>
+
+        <h2 id="providers">Platform providers</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Host</th><th>Provider</th></tr></thead>
+                <tbody>
+                    <tr><td>Desktop</td><td>Default grants access and lets the device API fail if the OS has blocked it.</td></tr>
+                    <tr><td>Android</td><td>Requests runtime permissions from the activity and completes from <code>OnRequestPermissionsResult</code>.</td></tr>
+                    <tr><td>Browser</td><td>Uses <code>getUserMedia</code>, geolocation, Notification, Storage, DeviceMotion and Clipboard APIs.</td></tr>
+                    <tr><td>iOS / unsupported</td><td>Returns <code>false</code> until a host installs a provider.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="callout note">
+            <strong>Browser user gestures</strong>
+            Camera, microphone and notification requests should be started from a click
+            or key handler. Browsers block or ignore permission prompts that do not come
+            from a user gesture.
+        </div>
+
+        <h2 id="android-manifest">Android manifest</h2>
+        <p>
+            The app can let the framework generate the matching
+            <code>uses-permission</code> entries. Add the permission tokens to the
+            project file:
+        </p>
+
+        <div class="code" data-label="MyApp.csproj">
+<pre><code>&lt;PropertyGroup&gt;
+  &lt;DonkehAndroidPermissions&gt;Camera;Microphone;Location;Notifications&lt;/DonkehAndroidPermissions&gt;
+&lt;/PropertyGroup&gt;</code></pre>
+        </div>
+
+        <p>
+            Supported tokens are <code>Camera</code>, <code>Microphone</code>,
+            <code>Location</code>, <code>Notifications</code>, <code>Photos</code>,
+            <code>Storage</code>, <code>Contacts</code>, <code>Calendar</code>,
+            <code>Bluetooth</code> and <code>Motion</code>. The framework emits the
+            entries into the merged Android manifest. You can still use a hand-written
+            manifest if you prefer.
+        </p>
+
+        <h2 id="custom">Custom providers</h2>
+        <p>
+            A host can replace the permission provider during startup. Implement
+            <code>IPermissionService</code> and install it before mounting the app:
+        </p>
+
+        <div class="code" data-label="Custom provider">
+<pre><code>using Donkeh.Hosting;
+
+public sealed class MyPermissionService : IPermissionService
+{
+    public Task&lt;bool&gt; RequestAsync(
+        HostPermission permission,
+        CancellationToken cancellationToken = default)
+    {
+        // Ask the platform, then return true or false.
+        return Task.FromResult(false);
+    }
+}
+
+Host.UsePermissions(new MyPermissionService());</code></pre>
+        </div>
+
+        <p>
+            <code>Host.UsePermissions(null)</code> restores the desktop default. Calling
+            it clears cached grants so a new platform session starts clean.
+        </p>
+
+        <div class="callout tip">
+            <strong>One API for all hosts</strong>
+            Keep permission checks in event handlers and other user-driven paths. The
+            same <code>Host.Permissions</code> call works on desktop, Android and the
+            browser without platform-specific <code>#if</code> blocks in application
+            code.
+        </div>
+
+        <div class="page-nav">
+            <a class="prev" href="inspector-deploy.html"><span>Previous</span>Inspector deploy</a>
+            <a class="next" href="index.html"><span>Back to</span>Overview</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh — CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/ignite-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>

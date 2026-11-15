@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Inspector animations · Donkeh</title>
+    <meta name="description" content="Browse registered keyframes in the Donkeh inspector.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/ignite-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/ignite-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Inspector <span>/</span> Animations</div>
+        <h1>Using the animations tab</h1>
+        <p class="lead">
+            The Animations tab is a browser for every registered
+            <code>@keyframes</code> group in the active stylesheets. It shows the stops
+            and declarations the renderer will use.
+        </p>
+
+        <h2 id="open">Open the tab</h2>
+        <p>
+            Open the inspector, then choose <strong>Animations</strong> in the tab strip.
+            The tab reads the current compiled CSS table; it does not sample the live
+            animation clock.
+        </p>
+
+        <h2 id="layout">The two panes</h2>
+        <div class="code" data-label="Animations tab">
+<pre><code>┌──────────────────────┬────────────────────────────────────────┐
+│ @keyframes           │ @keyframes pulse                       │
+│                      │ 3 declarations                         │
+│ pulse                │                                        │
+│ fade-in              │ from                                   │
+│ slide-up             │   opacity: 0                           │
+│                      │ 50%                                    │
+│                      │   opacity: 1                           │
+│                      │ to                                     │
+│                      │   opacity: 0.6                         │
+└──────────────────────┴────────────────────────────────────────┘</code></pre>
+        </div>
+
+        <ul>
+            <li>The left pane lists keyframe groups by name, in first-seen order.</li>
+            <li>Click a group to inspect it.</li>
+            <li>The right pane lists each stop, its declaration count and the property values.</li>
+            <li>If the selected animation disappears, the inspector falls back safely and shows an empty selection.</li>
+            <li>When no keyframes are registered, the tab shows a quiet placeholder instead of an empty list.</li>
+        </ul>
+
+        <h2 id="source">Where the groups come from</h2>
+        <p>
+            Any <code>@keyframes</code> rule parsed from the built-in or author
+            stylesheets is collected. A typical component stylesheet looks like this:
+        </p>
+
+        <div class="code" data-label="Pulse.css">
+<pre><code>@keyframes pulse {
+    from {
+        opacity: 0.25;
+        transform: scale(0.98);
+    }
+
+    50% {
+        opacity: 1;
+        transform: scale(1);
+    }
+
+    to {
+        opacity: 0.25;
+        transform: scale(0.98);
+    }
+}
+
+.status-dot {
+    animation: pulse 1.6s ease-in-out infinite;
+}</code></pre>
+        </div>
+
+        <p>
+            The Animations tab groups the three stops under <code>pulse</code>. The
+            card in the right pane also shows the number of declarations so a missing
+            property is easy to spot.
+        </p>
+
+        <h2 id="read">What to check</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Check</th><th>Why</th></tr></thead>
+                <tbody>
+                    <tr><td>The name matches the <code>animation</code> property</td><td>A typo creates no animation and no keyframe group is applied.</td></tr>
+                    <tr><td>Stops are in the expected order</td><td><code>from</code>/<code>to</code> and percentages are shown in source order.</td></tr>
+                    <tr><td>Every stop has the properties you expect</td><td>A missing declaration at one stop can produce a visible jump.</td></tr>
+                    <tr><td>Vendor-neutral property names</td><td>The engine uses standard CSS property names; verify transforms and filters in the styles pane.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="callout note">
+            <strong>Read-only view</strong>
+            The Animations tab does not scrub a timeline or pause an animation. Use it
+            to verify definitions, then edit the component stylesheet or the Elements
+            tab to change them.
+        </div>
+
+        <h2 id="workflow">A practical workflow</h2>
+        <ol class="steps">
+            <li>Locate the animation name in the left pane.</li>
+            <li>Confirm every expected stop and property is present.</li>
+            <li>Switch to Elements and select the animated element.</li>
+            <li>Check the matched rule that declares <code>animation</code>, including duration, easing and iteration count.</li>
+            <li>Edit the stylesheet, then reopen or refresh the inspector to see the updated keyframes.</li>
+        </ol>
+
+        <div class="callout tip">
+            <strong>Performance</strong>
+            Prefer transforms and opacity for continuous animations. The Performance
+            tab will show whether an animation is contributing to layout or render
+            spikes.
+        </div>
+
+        <div class="page-nav">
+            <a class="prev" href="inspector-performance.html"><span>Previous</span>Inspector performance</a>
+            <a class="next" href="inspector-deploy.html"><span>Next</span>Inspector deploy</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh — CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/ignite-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>

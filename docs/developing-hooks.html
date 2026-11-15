@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Developing hooks · Donkeh</title>
+    <meta name="description" content="Build reusable custom hooks on a Donkeh component base class.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/ignite-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/ignite-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Components <span>/</span> Developing hooks</div>
+        <h1>Developing hooks</h1>
+        <p class="lead">
+            Built-in hooks are protected members of <code>Component</code>. A custom
+            hook is therefore a reusable method on a component base class that calls
+            one or more built-in hooks in a fixed order.
+        </p>
+
+        <div class="callout note">
+            <strong>Use a base class</strong>
+            The framework deliberately keeps hook calls tied to the component
+            instance. If several components should share a hook, put it on a shared
+            base class such as <code>HookedComponent</code>. Static helpers cannot call
+            the protected hook methods directly.
+        </div>
+
+        <h2 id="base-class">Create a hook base class</h2>
+        <p>
+            Name custom hooks with a <code>Use</code> prefix. Return the state and
+            actions the caller needs, and keep every built-in hook call unconditional.
+        </p>
+
+        <div class="code" data-label="HookedComponent.cs">
+<pre><code>using Donkeh.UILab;
+
+namespace MyApp;
+
+public abstract class HookedComponent : Component
+{
+    protected (bool Value, Action Toggle) UseToggle(bool initial = false)
+    {
+        var (value, _, updateValue) = StateWithUpdate(initial);
+
+        return (value, () =&gt; updateValue(current =&gt; !current));
+    }
+}</code></pre>
+        </div>
+
+        <p>
+            A component derives from the base class and composes the hooks it needs:
+        </p>
+
+        <div class="code" data-label="TogglePanel.cs">
+<pre><code>using Donkeh.UILab;
+using static Donkeh.UILab._;
+
+namespace MyApp;
+
+public sealed class TogglePanel : HookedComponent
+{
+    public override Node Render()
+    {
+        var (open, toggle) = UseToggle();
+
+        return H("section", new Props { ClassName = "panel" },
+            H("button", new Props
+            {
+                ClassName = "panel-toggle",
+                OnClick = toggle
+            }, Text(open ? "Hide" : "Show")),
+            Show(open, H("div", new Props { ClassName = "panel-body" },
+                Text("Panel content"))));
+    }
+}</code></pre>
+        </div>
+
+        <h2 id="compose">Compose existing hooks</h2>
+        <p>
+            Custom hooks can call any built-in hook, and can call other custom hooks.
+            The overall order must still be stable across renders.
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Built-in</th><th>Use inside a custom hook for</th></tr></thead>
+                <tbody>
+                    <tr><td><code>State</code></td><td>Local values owned by the calling component.</td></tr>
+                    <tr><td><code>StateWithUpdate</code></td><td>Updates that depend on the previous value.</td></tr>
+                    <tr><td><code>Reducer</code></td><td>Named state transitions or grouped fields.</td></tr>
+                    <tr><td><code>Effect</code></td><td>Subscriptions, I/O and cleanup.</td></tr>
+                    <tr><td><code>LayoutEffect</code></td><td>Commit-time measurements and adjustments.</td></tr>
+                    <tr><td><code>Memo</code></td><td>Derived values that are expensive to build.</td></tr>
+                    <tr><td><code>Callback</code></td><td>Stable delegates passed to children.</td></tr>
+                    <tr><td><code>UseRef</code></td><td>Mutable values that should not trigger renders.</td></tr>
+                    <tr><td><code>UseContext</code></td><td>Reading a typed context inside a reusable hook.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="typed-base">Typed component base classes</h2>
+        <p>
+            If components share both hooks and props, derive the base class from
+            <code>Component&lt;TProps&gt;</code>. The public props property remains
+            available to the derived component.
+        </p>
+
+        <div class="code" data-label="HookedComponent.cs">
+<pre><code>public abstract class HookedComponent&lt;TProps&gt; : Component&lt;TProps&gt;
+    where TProps : Props
+{
+    protected bool UseMounted()
+    {
+        var (mounted, setMounted) = State(false);
+
+        Effect(() =&gt; setMounted(true), []);
+
+        return mounted;
+    }
+}</code></pre>
+        </div>
+
+        <h2 id="rules">Guidelines</h2>
+        <ul>
+            <li><strong>Keep the call order stable.</strong> Do not wrap a hook call in an <code>if</code>, loop, or conditional local function.</li>
+            <li><strong>Do not call hooks from constructors, lifecycle methods, or event handlers.</strong> Hooks belong in <code>Render</code>.</li>
+            <li><strong>Return actions, not setters, when possible.</strong> A custom hook can hide its state representation behind a small API.</li>
+            <li><strong>Keep hooks per component.</strong> Two component instances have independent hook slots, even if they use the same base class.</li>
+            <li><strong>Use effects for external work.</strong> Do not start timers, subscriptions, or blocking work directly in <code>Render</code>.</li>
+        </ul>
+
+        <div class="callout note">
+            <strong>Hook slots are positional</strong>
+            The renderer maps the first hook call to slot 0, the second to slot 1, and
+            so on. Adding or removing a hook between renders changes the slot type and
+            throws. Keep the sequence stable for the lifetime of the component.
+        </div>
+
+        <h2 id="example">Effects inside hooks</h2>
+        <p>
+            A custom hook can own a subscription and return its cleanup. The effect
+            dependencies are evaluated by the renderer; the hook itself does not need
+            to track them.
+        </p>
+
+        <div class="code" data-label="Connection hook">
+<pre><code>protected void UseConnection(string endpoint)
+{
+    Effect(() =&gt;
+    {
+        var connection = Connect(endpoint);
+        return () =&gt; connection.Dispose();
+    }, [endpoint]);
+}</code></pre>
+        </div>
+
+        <p>
+            Keep side effects out of the render body itself. Return a value, or return
+            an action that the component can attach to an event, and let
+            <code>Effect</code> own the external lifetime.
+        </p>
+
+        <div class="callout note">
+            <strong>Hooks can compose</strong>
+            A custom hook may call another custom hook. The same call-order rule
+            applies to the whole chain, so each call must happen on every render.
+        </div>
+
+        <div class="page-nav">
+            <a class="prev" href="using-hooks.html"><span>Previous</span>Using hooks</a>
+            <a class="next" href="inspector-hierarchy.html"><span>Next</span>Inspector hierarchy</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh — CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/ignite-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>

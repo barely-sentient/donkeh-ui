@@ -1,4 +1,0 @@
-<Project>
-  <!-- Framework-owned target wiring; the app only opts in with Donkeh* properties. -->
-  <Import Project="..\Donkeh\Build\Donkeh.targets" />
-</Project>

@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Creating a component · Donkeh</title>
+    <meta name="description" content="Create a Donkeh component, attach a stylesheet and use embedded images.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/ignite-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/ignite-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Components <span>/</span> Creating a component</div>
+        <h1>Creating a component</h1>
+        <p class="lead">
+            A component is a class deriving from <code>Component</code>. Its
+            <code>Render</code> method returns a virtual node tree. Styles are real
+            CSS files embedded in the assembly.
+        </p>
+
+        <h2 id="cli">From the CLI</h2>
+        <p>Run this from the project directory:</p>
+
+        <div class="code" data-label="Terminal">
+<pre><code>donkeh new component FileList</code></pre>
+        </div>
+
+        <p>That creates one folder per component:</p>
+
+        <div class="tree">src/
+└── Components/
+    └── FileList/
+        ├── FileList.cs
+        └── FileList.css</div>
+
+        <p>It also updates the project file and writes the assembly attribute:</p>
+
+        <div class="code" data-label="FileList/FileList.cs">
+<pre><code>using Donkeh.UILab;
+using static Donkeh.UILab.HtmlHelper;
+
+[assembly: Donkeh.UILab.Stylesheet("src/Components/FileList/FileList.css")]
+
+namespace MyApp.Components;
+
+public sealed class FileList : Component
+{
+    public override Node Render() =>
+        Div(new() { ClassName = "file-list" });
+}</code></pre>
+        </div>
+
+        <div class="code" data-label="FileList/FileList.css">
+<pre><code>.file-list {
+    display: block;
+}</code></pre>
+        </div>
+
+        <div class="code" data-label="MyApp.csproj">
+<pre><code>&lt;ItemGroup&gt;
+  &lt;EmbeddedResource Include="src/Components/FileList/FileList.css" /&gt;
+&lt;/ItemGroup&gt;</code></pre>
+        </div>
+
+        <h2 id="manual">Writing one by hand</h2>
+        <p>
+            Components can render elements, text, other components, fragments and
+            conditional/list helpers. Use the typed <code>HtmlHelper</code> builders
+            for common tags, or the terse <code>_</code> helpers such as
+            <code>H</code> and <code>Text</code>.
+        </p>
+
+        <div class="code" data-label="Card/Card.cs">
+<pre><code>using Donkeh.UILab;
+using static Donkeh.UILab.HtmlHelper;
+using static Donkeh.UILab._;
+
+[assembly: Donkeh.UILab.Stylesheet("src/Components/Card/Card.css")]
+
+namespace MyApp.Components;
+
+public sealed class Card : Component
+{
+    public override Node Render() =>
+        Div(new() { ClassName = "card" },
+            H2(new() { ClassName = "card-title" }, Text("Hello")),
+            P(new() { ClassName = "card-copy" },
+                Text("A small card component.")),
+            Button(new()
+            {
+                ClassName = "card-action",
+                OnClick = () => Console.WriteLine("clicked")
+            }, Text("Open")));
+}</code></pre>
+        </div>
+
+        <div class="code" data-label="Card/Card.css">
+<pre><code>.card {
+    padding: 20px;
+    border: 1px solid #dce2ec;
+    border-radius: 14px;
+    background: #ffffff;
+}
+
+.card-title {
+    margin: 0 0 8px;
+    font-size: 18px;
+}
+
+.card-action:hover {
+    background: #eef1ff;
+}</code></pre>
+        </div>
+
+        <h2 id="html-helpers">Typed HTML helpers</h2>
+        <p>
+            <code>HtmlHelper</code> provides one factory per common HTML element. The
+            first argument is a <code>Props</code> instance, so target-typed
+            <code>new()</code> keeps the call short, and the remaining arguments are
+            children.
+        </p>
+
+        <div class="code" data-label="Typed helpers">
+<pre><code>using static Donkeh.UILab.HtmlHelper;
+using static Donkeh.UILab._;
+
+public override Node Render() =&gt;
+    Div(new() { ClassName = "toolbar" },
+        Span(new() { ClassName = "toolbar-title" }, Text("Files")),
+        Input(new() { Type = "search", Placeholder = "Search" }),
+        Button(new() { ClassName = "primary" }, Text("Open")));</code></pre>
+        </div>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Helper</th><th>Element</th></tr></thead>
+                <tbody>
+                    <tr><td><code>Div</code>, <code>Section</code>, <code>Main</code></td><td>Page structure</td></tr>
+                    <tr><td><code>H1</code>…<code>H6</code>, <code>P</code></td><td>Headings and paragraphs</td></tr>
+                    <tr><td><code>Span</code>, <code>A</code>, <code>Strong</code></td><td>Inline content</td></tr>
+                    <tr><td><code>Button</code>, <code>Input</code>, <code>Select</code>, <code>Textarea</code></td><td>Form controls</td></tr>
+                    <tr><td><code>Img</code>, <code>Picture</code>, <code>Source</code></td><td>Media</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            The typed helpers produce the same nodes as
+            <code>H("div", ...)</code>, so the two styles can be mixed freely. Use
+            whichever makes the component easier to read.
+        </p>
+
+        <h2 id="props">Props and typed components</h2>
+        <p>
+            Derive a props class from <code>Props</code> and use
+            <code>Component&lt;TProps&gt;</code> when a component needs values from its
+            parent. Use <code>C&lt;TComponent, TProps&gt;</code> to create it.
+        </p>
+
+        <div class="code" data-label="Badge.cs">
+<pre><code>using Donkeh.UILab;
+using static Donkeh.UILab._;
+
+public sealed class BadgeProps : Props
+{
+    public string Label { get; init; } = "";
+    public bool Strong { get; init; }
+}
+
+public sealed class Badge : Component&lt;BadgeProps&gt;
+{
+    public override Node Render() =>
+        H("span", new Props
+        {
+            ClassName = Props.Strong ? "badge badge-strong" : "badge"
+        }, Text(Props.Label));
+}</code></pre>
+        </div>
+
+        <div class="code" data-label="Usage">
+<pre><code>H("div", new Props { ClassName = "toolbar" },
+    C&lt;Badge, BadgeProps&gt;(new BadgeProps { Label = "New" }),
+    C&lt;Badge, BadgeProps&gt;(new BadgeProps { Label = "Urgent", Strong = true }));</code></pre>
+        </div>
+
+        <h2 id="composition">Composition helpers</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Helper</th><th>Use</th></tr></thead>
+                <tbody>
+                    <tr><td><code>H(tag, props, children)</code></td><td>Create an element node.</td></tr>
+                    <tr><td><code>Text(value)</code></td><td>Create a text node; null becomes no node.</td></tr>
+                    <tr><td><code>C&lt;T&gt;()</code></td><td>Create a component node.</td></tr>
+                    <tr><td><code>Show(condition, node)</code></td><td>Include a node only when true.</td></tr>
+                    <tr><td><code>Each(items, item =&gt; node)</code></td><td>Project a sequence into a fragment.</td></tr>
+                    <tr><td><code>F(params nodes)</code></td><td>Group nodes in a transparent fragment.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            Give list children a stable <code>Key</code> so reordering reuses the
+            existing node and component state:
+        </p>
+
+        <div class="code" data-label="Keyed list">
+<pre><code>var rows = items.Select(item =&gt;
+    H("div", new Props
+    {
+        Key = item.Id,
+        ClassName = "row"
+    }, Text(item.Name))).ToArray();
+
+return H("div", new Props { ClassName = "list" }, rows);</code></pre>
+        </div>
+
+        <h2 id="styles">CSS in the assembly</h2>
+        <p>
+            The <code>[Stylesheet]</code> attribute is metadata only. The CSS file must
+            also be an <code>EmbeddedResource</code> in the same assembly. The host
+            loads every declaration through <code>Stylesheet.Load()</code> and merges
+            them in declaration order after the built-in user-agent sheet.
+        </p>
+
+        <div class="code" data-label="MyApp.csproj">
+<pre><code>&lt;ItemGroup&gt;
+  &lt;EmbeddedResource Include="src/Components/Card/Card.css" /&gt;
+  &lt;EmbeddedResource Include="src/Components/Toolbar/Toolbar.css" /&gt;
+&lt;/ItemGroup&gt;</code></pre>
+        </div>
+
+        <div class="callout note">
+            <strong>Paths are project-relative</strong>
+            Each component keeps its CSS beside its source. Use the same path in both
+            places; forward slashes are accepted by MSBuild and by the stylesheet
+            resolver. The CLI writes
+            <code>src/Components/Name/Name.css</code>.
+        </div>
+
+        <p>
+            Styles are ordinary CSS: class selectors, IDs, attribute selectors,
+            pseudo-classes, media queries, custom properties, keyframes and
+            transitions. The built-in inspector can edit the matched rules live.
+        </p>
+
+        <h2 id="images">Embedded images</h2>
+        <p>
+            Images use the same pattern: declare them with <code>[Image]</code> and
+            embed the file. The resolver checks the on-disk path first, then the
+            embedded bytes declared in the assembly.
+        </p>
+
+        <div class="code" data-label="MyApp.csproj">
+<pre><code>&lt;ItemGroup&gt;
+  &lt;EmbeddedResource Include="Assets/logo.png" /&gt;
+  &lt;EmbeddedResource Include="Assets/hero.jpg" /&gt;
+&lt;/ItemGroup&gt;</code></pre>
+        </div>
+
+        <div class="code" data-label="Program.cs">
+<pre><code>[assembly: Donkeh.UILab.Image("Assets/logo.png")]
+[assembly: Donkeh.UILab.Image("Assets/hero.jpg")]</code></pre>
+        </div>
+
+        <div class="code" data-label="Using images">
+<pre><code>H("img", new Props
+{
+    Src = "Assets/logo.png",
+    Alt = "Logo"
+});
+
+// CSS
+H("div", new Props { ClassName = "hero" });</code></pre>
+        </div>
+
+        <div class="code" data-label="Styles.css">
+<pre><code>.hero {
+    min-height: 280px;
+    background-image: url("Assets/hero.jpg");
+    background-size: cover;
+    background-position: center;
+}</code></pre>
+        </div>
+
+        <p>
+            The same asset pipeline is used by <code>img</code>, CSS
+            <code>url(...)</code> backgrounds, and the window icon through
+            <code>AppRoot.Icon</code> or <code>WindowSettings.Icon</code>. For code
+            that needs raw bytes, use <code>Image.TryGetBytes("Assets/logo.png", out var bytes)</code>.
+        </p>
+
+        <div class="callout tip">
+            <strong>Asset checklist</strong>
+            Add the file to the project as an <code>EmbeddedResource</code>, declare
+            it with <code>[Image]</code>, and refer to it with the same
+            project-relative path. The browser host receives the decoded image
+            through the same virtual tree.
+        </div>
+
+        <div class="page-nav">
+            <a class="prev" href="getting-started.html"><span>Previous</span>Getting started</a>
+            <a class="next" href="creating-a-provider.html"><span>Next</span>Creating a provider</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh — CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/ignite-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>

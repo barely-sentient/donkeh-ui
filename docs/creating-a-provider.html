@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Creating a provider · Donkeh</title>
+    <meta name="description" content="Share values with a typed context provider in Donkeh.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/ignite-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/ignite-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Components <span>/</span> Creating a provider</div>
+        <h1>Creating a provider</h1>
+        <p class="lead">
+            Providers share a typed value with a subtree without threading props
+            through every component. They are transparent nodes: no box, no selector
+            match, just a context scope around their children.
+        </p>
+
+        <h2 id="context">Define a context</h2>
+        <p>
+            A context is a static, strongly typed key with a default value. Put it in
+            a static class so the provider and consumers use the same instance.
+        </p>
+
+        <div class="code" data-label="ThemeContext.cs">
+<pre><code>using Donkeh.UILab;
+
+namespace MyApp;
+
+public sealed record Theme(string Accent, string Background);
+
+public static class ThemeContext
+{
+    public static readonly Context&lt;Theme&gt; Value = new(
+        new Theme("#5957d9", "#ffffff"));
+
+    public static readonly Theme Dark = new("#9a97ff", "#0b1018");
+}</code></pre>
+        </div>
+
+        <h2 id="provider">Publish a value</h2>
+        <p>
+            Call <code>Provider(context, value, children...)</code> around the subtree
+            that should see the value. The provider is transparent, so its children
+            occupy its slot in the parent.
+        </p>
+
+        <div class="code" data-label="App.cs">
+<pre><code>using Donkeh.UILab;
+using static Donkeh.UILab._;
+
+public sealed class App : Component
+{
+    public override Node Render()
+    {
+        var (dark, setDark) = State(false);
+        var theme = dark ? ThemeContext.Dark : ThemeContext.Value.DefaultValue;
+
+        return Provider(ThemeContext.Value, theme,
+            H("main", new Props { ClassName = "app" },
+                H("button", new Props
+                {
+                    ClassName = "theme-toggle",
+                    OnClick = () =&gt; setDark(!dark)
+                }, Text(dark ? "Use light theme" : "Use dark theme")),
+                C&lt;Toolbar&gt;()));
+    }
+}</code></pre>
+        </div>
+
+        <h2 id="consume">Consume it</h2>
+        <p>
+            Read the nearest value with <code>UseContext</code> during render. If no
+            provider is in scope, the context's default is returned.
+        </p>
+
+        <div class="code" data-label="Toolbar.cs">
+<pre><code>using Donkeh.UILab;
+using static Donkeh.UILab._;
+
+public sealed class Toolbar : Component
+{
+    public override Node Render()
+    {
+        var theme = UseContext(ThemeContext.Value);
+
+        return H("div", new Props
+        {
+            ClassName = "toolbar",
+            Attributes = new Dictionary&lt;string, string&gt;
+            {
+                ["style"] = $"background:{theme.Background};color:{theme.Accent}"
+            }
+        },
+            Text("Toolbar"));
+    }
+}</code></pre>
+        </div>
+
+        <h2 id="rules">Provider rules</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Rule</th><th>Behaviour</th></tr></thead>
+                <tbody>
+                    <tr><td>Nesting</td><td>A provider inside another provider for the same context shadows the outer value.</td></tr>
+                    <tr><td>Defaults</td><td>Consumers outside every provider receive <code>Context&lt;T&gt;.DefaultValue</code>.</td></tr>
+                    <tr><td>Scope capture</td><td>A component keeps the context scope it rendered under, so a later re-render does not silently change its view of the value.</td></tr>
+                    <tr><td>Updates</td><td>A provider is rebuilt when its parent renders. Put the state that controls the value above the provider.</td></tr>
+                    <tr><td>Layout</td><td>Providers generate no box and do not match selectors; children are spliced into the parent.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="callout note">
+            <strong>Provider is not a component</strong>
+            There is no provider instance to hold state. State belongs in a component
+            above the provider, as in the <code>App</code> example.
+        </div>
+
+        <h2 id="multiple">Multiple contexts</h2>
+        <p>
+            Nest providers when a subtree needs more than one value. Consumers read
+            each context independently:
+        </p>
+
+        <div class="code" data-label="Nested providers">
+<pre><code>return Provider(ThemeContext.Value, theme,
+    Provider(LocaleContext.Value, locale,
+        C&lt;Dashboard&gt;()));</code></pre>
+        </div>
+
+        <div class="callout tip">
+            <strong>Prefer focused contexts</strong>
+            One context per concern, such as theme, locale or a command service, keeps
+            re-renders predictable. A context value that changes on every keystroke
+            will re-render every consumer when its parent re-renders.
+        </div>
+
+        <div class="page-nav">
+            <a class="prev" href="creating-a-component.html"><span>Previous</span>Creating a component</a>
+            <a class="next" href="using-hooks.html"><span>Next</span>Using hooks</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh — CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/ignite-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Inspector hierarchy · Donkeh</title>
+    <meta name="description" content="Use the Donkeh inspector hierarchy and style editor.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/ignite-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/ignite-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Inspector <span>/</span> Hierarchy</div>
+        <h1>Using the hierarchy</h1>
+        <p class="lead">
+            The Elements tab is the inspector's live DOM and style editor. It shows the
+            same reconciled tree the renderer is drawing, including component and text
+            nodes.
+        </p>
+
+        <h2 id="enable">Open the inspector</h2>
+        <p>
+            Devtools are enabled by default for desktop. Set
+            <code>EnableDevTools = true</code> on <code>[AppRoot]</code> (or in
+            <code>WindowSettings</code>) when configuring a custom host.
+        </p>
+
+        <div class="code" data-label="Program.cs">
+<pre><code>[AppRoot(
+    Width = 1180,
+    Height = 760,
+    Title = "My app",
+    EnableDevTools = true)]
+public sealed class App : Component
+{
+    public override Node Render() =&gt; H("main");
+}</code></pre>
+        </div>
+
+        <p>Toggle the panel with:</p>
+        <ul>
+            <li><kbd>F12</kbd></li>
+            <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>I</kbd></li>
+        </ul>
+
+        <p>
+            The toolbar also has a dock button for the bottom edge, a dock button for
+            the right edge, a window mode and a close button. Docked panels shrink the
+            app viewport instead of covering it. Drag the splitter to resize.
+        </p>
+
+        <div class="callout note">
+            <strong>Browser host</strong>
+            The built-in inspector is wired into the desktop/Android renderer. In the
+            browser, use the browser's own devtools.
+        </div>
+
+        <h2 id="layout">The Elements layout</h2>
+        <p>
+            The tab is split into two panes. The left pane is the hierarchy; the right
+            pane is the style editor for the selected node.
+        </p>
+
+        <div class="code" data-label="Inspector">
+<pre><code>┌─────────────────────────────────────────────────────────────┐
+│ Elements  Performance  Animations  Deploy      ⌖  ▤  ▥  ×  │
+├──────────────────────────────┬──────────────────────────────┤
+│ DOM tree                     │ styles                       │
+│  ▾ main.app                  │ element.style                │
+│    ▾ section.card            │ .card { ... }                │
+│      ▸ h2.card-title         │ .card-action:hover { ... }   │
+│      ▸ p.card-copy           │                              │
+└──────────────────────────────┴──────────────────────────────┘</code></pre>
+        </div>
+
+        <h2 id="tree">Walking the hierarchy</h2>
+        <ul>
+            <li>Click a row to select it. The style pane updates immediately.</li>
+            <li>Use the caret to expand or collapse a node with children.</li>
+            <li>Hover a row to highlight the corresponding element in the app.</li>
+            <li>Component rows show the component type and can expand into their rendered output.</li>
+            <li>Text nodes appear as quoted, non-expandable rows.</li>
+            <li>Fragments and providers are transparent and expand in place.</li>
+        </ul>
+
+        <p>
+            The inspect button (the crosshair in the toolbar) lets you pick an element
+            directly from the app. Click the picker, then click any app element. The
+            inspector selects it and expands its path. Inspect mode is cleared after a
+            pick.
+        </p>
+
+        <h2 id="styles">Editing styles</h2>
+        <p>
+            The right pane shows an <code>element.style</code> group first for the
+            selected element, followed by matched rules. Each group lists its
+            declarations; the inspector groups rules by selector and keeps the live
+            stylesheet order.
+        </p>
+
+        <ul>
+            <li>Click a declaration value to edit it.</li>
+            <li>Use the colour swatch or picker for colour values.</li>
+            <li>Open <strong>+ Add property</strong> to add a declaration to a rule or to the element style.</li>
+            <li>Edits are queued and applied on the frame thread, so the UI stays responsive.</li>
+            <li>Element-style edits affect only the selected element; rule edits update the stylesheet.</li>
+        </ul>
+
+        <div class="callout tip">
+            <strong>Use element.style for experiments</strong>
+            Put one-off overrides in <code>element.style</code> first. Once a value is
+            right, move it into the component's CSS rule so it survives a remount.
+        </div>
+
+        <h2 id="state">Selection and refreshes</h2>
+        <p>
+            The inspector is a normal UILab tree, separate from the app tree. It
+            refreshes when the app tree changes and prunes selections or expansion
+            entries whose nodes have left the tree. If an element is removed, its
+            selection is cleared safely rather than pointing at a dead node.
+        </p>
+
+        <h2 id="keyboard">Keyboard and APIs</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Action</th><th>How</th></tr></thead>
+                <tbody>
+                    <tr><td>Toggle inspector</td><td><kbd>F12</kbd> or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd></td></tr>
+                    <tr><td>Show / hide / toggle from code</td><td><code>ShowDevTools()</code>, <code>HideDevTools()</code>, <code>ToggleDevTools()</code></td></tr>
+                    <tr><td>Dock</td><td>Toolbar buttons, or <code>DevTools.Dock</code></td></tr>
+                    <tr><td>Resize</td><td>Drag the splitter</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="page-nav">
+            <a class="prev" href="developing-hooks.html"><span>Previous</span>Developing hooks</a>
+            <a class="next" href="inspector-performance.html"><span>Next</span>Inspector performance</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh — CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/ignite-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>

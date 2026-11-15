@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Page not found · Donkeh</title>
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<header class="topbar">
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="getting-started.html">Documentation</a>
+        <a class="topbar-link" href="https://github.com/barely-sentient/ignite-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<main class="landing" id="content">
+    <section class="hero" style="min-height: calc(100vh - 64px); align-content: center;">
+        <div>
+            <span class="hero-eyebrow">404</span>
+            <h1>This page went <span class="gradient">missing.</span></h1>
+            <p class="lead">The URL does not match a documentation page. Try the overview or jump back into the guide.</p>
+            <div class="hero-actions">
+                <a class="button primary" href="index.html">Back to overview</a>
+                <a class="button" href="getting-started.html">Getting started</a>
+            </div>
+        </div>
+    </section>
+</main>
+</body>
+</html>

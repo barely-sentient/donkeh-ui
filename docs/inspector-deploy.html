@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Inspector deploy · Donkeh</title>
+    <meta name="description" content="Build desktop, Android and WebAssembly targets and download them with the Deploy tab.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/ignite-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/ignite-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Inspector <span>/</span> Deploy</div>
+        <h1>Using the deploy tab</h1>
+        <p class="lead">
+            Deploy builds the application targets into the project's
+            <code>builds</code> folder, then serves that folder over the local network
+            so a device or phone can download the result.
+        </p>
+
+        <h2 id="targets">Build targets</h2>
+        <p>
+            The tab discovers the enabled hosts from the app project and lists them as
+            build targets. The standard entries are:
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Target</th><th>Output</th><th>Result</th></tr></thead>
+                <tbody>
+                    <tr><td>Desktop</td><td><code>builds/desktop</code></td><td>Framework-dependent desktop build.</td></tr>
+                    <tr><td>Android</td><td><code>builds/android</code></td><td>Signed APK copied from the build output.</td></tr>
+                    <tr><td>WebAssembly</td><td><code>builds/wasm</code></td><td>Static site with <code>index.html</code> at the folder root.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            <strong>Build All</strong> runs the targets in order. Each row also has its
+            own build button. Builds run on a worker thread, so the app frame loop keeps
+            running while dotnet works.
+        </p>
+
+        <h2 id="output">Output layout</h2>
+        <div class="tree">MyApp/
+├── builds/
+│   ├── desktop/
+│   ├── android/
+│   │   └── MyApp-Signed.apk
+│   └── wasm/
+│       ├── index.html
+│       ├── dotnet.js
+│       └── _framework/</div>
+
+        <p>
+            The default build configuration is <strong>Release</strong>. The deploy
+            service exposes it as <code>DevTools.Builds.Configuration</code>; change it
+            before starting a build. Custom targets can be added with
+            <code>DevTools.Builds.AddTarget(...)</code>.
+        </p>
+
+        <h2 id="build">Building</h2>
+        <ol class="steps">
+            <li>Open the inspector and select <strong>Deploy</strong>.</li>
+            <li>Choose a target row, or press <strong>Build All</strong>.</li>
+            <li>Watch the per-target status and the shared build log at the bottom.</li>
+            <li>Use the produced path to inspect the artifact locally, or start the download server.</li>
+        </ol>
+
+        <div class="callout note">
+            <strong>Android signing</strong>
+            The Android target builds an APK with the project's normal signing
+            configuration. The signed APK is copied into <code>builds/android</code>
+            with a device-friendly file name.
+        </div>
+
+        <h2 id="server">Starting the download server</h2>
+        <p>
+            The server turns the <code>builds</code> folder into a small browsable HTTP
+            index. Toggle it with the download-server button in the Deploy tab. While it
+            is running, the tab lists:
+        </p>
+
+        <ul>
+            <li>The loopback URL, for example <code>http://localhost:8080/</code>.</li>
+            <li>One URL for each active IPv4 interface, so a phone on the same network can connect.</li>
+        </ul>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Setting</th><th>Default</th><th>Notes</th></tr></thead>
+                <tbody>
+                    <tr><td>Port</td><td><code>8080</code></td><td>Change while stopped; the server binds when started.</td></tr>
+                    <tr><td>Root</td><td><code>{project}/builds</code></td><td>Subfolders are browsable; files download directly.</td></tr>
+                    <tr><td>Binding</td><td>All IPv4 interfaces</td><td>Works for localhost and LAN devices.</td></tr>
+                    <tr><td>Auth</td><td>None</td><td>Use only on a trusted local network.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="device">Getting a build onto a device</h2>
+        <h3>Android</h3>
+        <ol class="steps">
+            <li>Build the Android target.</li>
+            <li>Start the download server.</li>
+            <li>Open the server URL on the phone or tablet.</li>
+            <li>Open <code>android/</code> and download the signed APK.</li>
+            <li>Install it from the browser or a file manager. The device may ask you to allow installs from the browser.</li>
+        </ol>
+
+        <h3>Desktop</h3>
+        <p>
+            Download the files from <code>desktop/</code> to the target machine. The
+            desktop output is framework-dependent, so the machine needs the matching
+            .NET runtime.
+        </p>
+
+        <h3>WebAssembly</h3>
+        <p>
+            The site is under <code>wasm/</code>. Copy that folder to any static host
+            that serves the right MIME types:
+        </p>
+
+        <div class="code" data-label="MIME types">
+<pre><code>.js     text/javascript
+.wasm   application/wasm
+.json   application/json
+.html   text/html</code></pre>
+        </div>
+
+        <div class="callout warning">
+            <strong>The download server is for downloads, not hosting the WASM app</strong>
+            Its file server is intentionally minimal and does not provide the full MIME
+            and compression behaviour a WebAssembly app expects. Use it to fetch
+            <code>builds/wasm</code>, then serve the copied site with a proper static
+            server.
+        </div>
+
+        <h2 id="network">Network checklist</h2>
+        <ul>
+            <li>Phone and computer must be on the same network.</li>
+            <li>Allow the application through the host firewall if the LAN URL is unreachable.</li>
+            <li>If port 8080 is taken, stop the server, change the port, and start it again.</li>
+            <li>The server has no authentication. Stop it when you are done.</li>
+        </ul>
+
+        <div class="callout tip">
+            <strong>Fast iteration</strong>
+            Keep the Deploy tab open while iterating. Rebuild the target, refresh the
+            browser listing, and download the new artifact; the output folder is reused
+            between builds.
+        </div>
+
+        <div class="page-nav">
+            <a class="prev" href="inspector-animations.html"><span>Previous</span>Inspector animations</a>
+            <a class="next" href="host-permissions.html"><span>Next</span>Host permissions</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh — CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/ignite-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>
