@@ -67,6 +67,9 @@ public sealed partial class DonkehWindow : IDisposable
     /// <summary>The creation options this instance was built with, copied by value.</summary>
     private readonly WindowSettings _settings;
 
+    /// <summary>Active device-to-CSS-pixel override; zero means automatic.</summary>
+    private float _dpiScale;
+
     /// <summary>Last corner radii applied to the native window region.</summary>
     private CornerRadius _windowRegionCorners;
 
@@ -122,10 +125,23 @@ public sealed partial class DonkehWindow : IDisposable
     private readonly TrueTypeTextMeasurer _measurer;
 
     /// <summary>
-    /// The Silk.NET window; <see langword="null"/> until <see cref="Run(Donkeh.UILab.Node, string)"/> creates
-    /// it.
+    /// The Silk.NET view; <see langword="null"/> until <see cref="Run(Donkeh.UILab.Node, string)"/>
+    /// creates a window or <see cref="Run(Silk.NET.Windowing.IView, Donkeh.UILab.Node, string)"/>
+    /// attaches an existing one.
     /// </summary>
-    private IWindow? _window;
+    /// <remarks>
+    /// The field is typed as <see cref="IView"/> rather than <see cref="IWindow"/>
+    /// so the same host can drive a plain surface on platforms that have no
+    /// desktop window, such as Android. Desktop-only members are reached through
+    /// <see cref="NativeWindow"/>, which is <see langword="null"/> on mobile.
+    /// </remarks>
+    private IView? _window;
+
+    /// <summary>
+    /// Gets the current view as a desktop window, or <see langword="null"/> when
+    /// the host was attached to a plain <see cref="IView"/>.
+    /// </summary>
+    private IWindow? NativeWindow => _window as IWindow;
 
     /// <summary>
     /// The Silk.NET input context; created in <see cref="OnLoad"/> and released in
@@ -564,6 +580,7 @@ public sealed partial class DonkehWindow : IDisposable
     public DonkehWindow(WindowSettings settings)
     {
         _settings = settings;
+        _dpiScale = settings.DpiScale;
         _measurer = new TrueTypeTextMeasurer(_fonts);
         _devTools.Dock = settings.DevToolsPosition;
         _devTools.StylesChanged += OnDevToolsStylesChanged;
@@ -604,12 +621,24 @@ public sealed partial class DonkehWindow : IDisposable
     /// </remarks>
     public event Action<DonkehWindow>? Closed;
 
-    /// <summary>Gets the underlying Silk.NET window.</summary>
+    /// <summary>Gets the underlying Silk.NET window, when the host is a desktop window.</summary>
     /// <value>
-    /// The native window after <see cref="Run(Donkeh.UILab.Node, string)"/> has created it, otherwise
+    /// The native window after <see cref="Run(Donkeh.UILab.Node, string)"/> has created it,
+    /// or <see langword="null"/> when the host was attached to a plain view (for
+    /// example on Android) or before <c>Run</c> has created anything.
+    /// </value>
+    public IWindow? SilkWindow => NativeWindow;
+
+    /// <summary>Gets the underlying Silk.NET view for either host style.</summary>
+    /// <value>
+    /// The window or attached view while the host is running, otherwise
     /// <see langword="null"/>.
     /// </value>
-    public IWindow? SilkWindow => _window;
+    /// <remarks>
+    /// Prefer this over <see cref="SilkWindow"/> for platform-neutral code; a
+    /// mobile host creates an <see cref="IView"/> that is not a desktop window.
+    /// </remarks>
+    public IView? SilkView => _window;
 
     /// <summary>Gets the OpenGL API surface bound to the window.</summary>
     /// <value>
@@ -620,6 +649,23 @@ public sealed partial class DonkehWindow : IDisposable
     /// Usable from <see cref="Loaded"/> onwards; <see cref="DisposeGpu"/> releases it.
     /// </remarks>
     public GL? Gl => _gl;
+
+    /// <summary>
+    /// Gets or sets the device-to-CSS-pixel ratio used by layout and pointer input.
+    /// </summary>
+    /// <value>
+    /// Zero for automatic detection, or a positive density supplied by a platform
+    /// host. Assigning a value before the first frame takes effect on that frame.
+    /// </value>
+    /// <remarks>
+    /// Mobile hosts can assign this from <see cref="Loaded"/> once the view reports
+    /// its size. See <see cref="WindowSettings.DpiScale"/> for the semantics.
+    /// </remarks>
+    public float DpiScale
+    {
+        get => _dpiScale;
+        set => _dpiScale = value;
+    }
 
     /// <summary>Gets the Silk.NET input context that feeds pointer and keyboard events.</summary>
     /// <value>
@@ -953,7 +999,7 @@ public sealed partial class DonkehWindow : IDisposable
     /// Equivalent to <see cref="Run(Node, string)"/> with no tree and no
     /// stylesheet, for hosts that mount and configure the window themselves.
     /// </remarks>
-    public void Run() => Run(null, null);
+    public void Run() => Run(root: null, stylesheet: null);
 
     /// <summary>Mounts a tree, optionally sets a stylesheet and enters the frame loop.</summary>
     /// <param name="root">
@@ -986,28 +1032,7 @@ public sealed partial class DonkehWindow : IDisposable
     /// <seealso cref="RequestScreenshot"/>
     public void Run(Node? root, string? stylesheet = null)
     {
-        // When no stylesheet is supplied explicitly, pick up every stylesheet
-        // declared through [Stylesheet(...)] and merge them into one sheet, so
-        // a developer only has to annotate the source files.
-        if (stylesheet is null)
-        {
-            stylesheet = Donkeh.UILab.Stylesheet.Load();
-        }
-
-        if (!string.IsNullOrWhiteSpace(stylesheet))
-        {
-            SetStylesheet(stylesheet);
-        }
-
-        if (root is not null)
-        {
-            Mount(root);
-        }
-
-        if (_root is null)
-        {
-            throw new InvalidOperationException("Mount a tree before calling Run().");
-        }
+        Prepare(root, stylesheet);
 
         var width = _settings.Width > 0 ? _settings.Width : 1280;
         var height = _settings.Height > 0 ? _settings.Height : 800;
@@ -1056,11 +1081,114 @@ public sealed partial class DonkehWindow : IDisposable
         };
 
         _window = Window.Create(options);
-        _window.Load += OnLoad;
-        _window.Render += OnRender;
-        _window.Resize += OnResize;
-        _window.Closing += OnClosing;
-        _window.Run();
+        RunView();
+    }
+
+    /// <summary>
+    /// Mounts a tree against an existing Silk.NET view and enters the frame loop.
+    /// </summary>
+    /// <param name="view">
+    /// The view to drive. It must already be created by the platform host and must
+    /// not be running yet. The host keeps ownership of the activity or window that
+    /// created it.
+    /// </param>
+    /// <param name="root">
+    /// The tree to mount when <see cref="Mount"/> has not been called yet;
+    /// <see langword="null"/> keeps the existing tree.
+    /// </param>
+    /// <param name="stylesheet">
+    /// An author stylesheet to install. When <see langword="null"/>, the sheets
+    /// declared through <c>[Stylesheet(...)]</c> are loaded and merged instead.
+    /// </param>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="view"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// No tree is mounted after the optional <paramref name="root"/> has been
+    /// applied.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// This is the mobile/embedded entry point. Desktop callers should use
+    /// <see cref="Run(Node, string)"/>, which creates its own window with a desktop
+    /// OpenGL context. A platform host creates the view (for example
+    /// <c>Window.GetView</c> inside a Silk.NET Android activity), configures its
+    /// graphics API, and then hands it to this method with the GL context already
+    /// current.
+    /// </para>
+    /// <para>
+    /// Window chrome settings are ignored because a plain <see cref="IView"/> has
+    /// no border, title, position or monitor. VSync and the frame cap are applied
+    /// when set. The call blocks on the view's loop; on return the GPU resources
+    /// have been released and the view is disposed.
+    /// </para>
+    /// </remarks>
+    public void Run(IView view, Node? root = null, string? stylesheet = null)
+    {
+        ArgumentNullException.ThrowIfNull(view);
+
+        Prepare(root, stylesheet);
+        _window = view;
+
+        // The view was created by the platform host, so only the properties that
+        // can change after creation are applied here.
+        if (_settings.VSync)
+        {
+            view.VSync = true;
+        }
+
+        if (_settings.TargetFramesPerSecond > 0)
+        {
+            view.FramesPerSecond = _settings.TargetFramesPerSecond;
+        }
+
+        RunView();
+    }
+
+    /// <summary>
+    /// Applies the optional tree and stylesheet and validates that a root exists.
+    /// </summary>
+    /// <param name="root">The optional tree to mount.</param>
+    /// <param name="stylesheet">The optional author stylesheet.</param>
+    /// <exception cref="InvalidOperationException">
+    /// No tree is mounted after <paramref name="root"/> has been applied.
+    /// </exception>
+    private void Prepare(Node? root, string? stylesheet)
+    {
+        // When no stylesheet is supplied explicitly, pick up every stylesheet
+        // declared through [Stylesheet(...)] and merge them into one sheet, so
+        // a developer only has to annotate the source files.
+        if (stylesheet is null)
+        {
+            stylesheet = Donkeh.UILab.Stylesheet.Load();
+        }
+
+        if (!string.IsNullOrWhiteSpace(stylesheet))
+        {
+            SetStylesheet(stylesheet);
+        }
+
+        if (root is not null)
+        {
+            Mount(root);
+        }
+
+        if (_root is null)
+        {
+            throw new InvalidOperationException("Mount a tree before calling Run().");
+        }
+    }
+
+    /// <summary>Wires the Silk event handlers, runs the loop and disposes the host.</summary>
+    private void RunView()
+    {
+        var view = _window ?? throw new InvalidOperationException("No view was created.");
+
+        view.Load += OnLoad;
+        view.Render += OnRender;
+        view.Resize += OnResize;
+        view.Closing += OnClosing;
+        view.Run();
 
         // Silk owns the native window until the loop exits; tearing it down from
         // inside Closing resets an active context. Dispose after Run returns.
@@ -1082,8 +1210,20 @@ public sealed partial class DonkehWindow : IDisposable
         _fonts.Initialize(_gl);
         _images.Initialize(_gl);
         _renderer = new GLRenderer(_gl, _fonts, _images) { Path = _settings.RenderPath };
-        _input = _window!.CreateInput();
-        ConfigureInput();
+
+        try
+        {
+            _input = _window!.CreateInput();
+            ConfigureInput();
+        }
+        catch (Exception ex)
+        {
+            // A host can run without an input backend (for example a kiosk or a
+            // device whose SDL input platform failed to load). Rendering should
+            // still work, so keep the failure visible instead of crashing.
+            _input = null;
+            Console.WriteLine($"[Donkeh] Input initialization failed: {ex.Message}");
+        }
 
         // Silk's GLFW backend rejects SetWindowIcon until the native window has
         // been initialized, which happens at the start of Run(). Applying it in
@@ -1112,7 +1252,7 @@ public sealed partial class DonkehWindow : IDisposable
         // Enforce configured minimum/maximum client size by nudging the native
         // window back into range. The guard prevents the synthetic resize that
         // follows from re-entering this handler.
-        if (!_clampingSize && _window is not null)
+        if (!_clampingSize && NativeWindow is { } window)
         {
             var clampedX = size.X;
             var clampedY = size.Y;
@@ -1124,7 +1264,7 @@ public sealed partial class DonkehWindow : IDisposable
             if (clampedX != size.X || clampedY != size.Y)
             {
                 _clampingSize = true;
-                try { _window.Size = new Vector2D<int>(clampedX, clampedY); }
+                try { window.Size = new Vector2D<int>(clampedX, clampedY); }
                 finally { _clampingSize = false; }
             }
         }
@@ -1147,7 +1287,7 @@ public sealed partial class DonkehWindow : IDisposable
     /// </remarks>
     private void ApplyWindowIcon()
     {
-        if (string.IsNullOrWhiteSpace(_settings.Icon) || _window is null)
+        if (string.IsNullOrWhiteSpace(_settings.Icon) || NativeWindow is not { } window)
         {
             return;
         }
@@ -1183,7 +1323,7 @@ public sealed partial class DonkehWindow : IDisposable
             }
 
             var raw = new Silk.NET.Core.RawImage(width, height, new Memory<byte>(pixels));
-            _window.SetWindowIcon(new[] { raw });
+            window.SetWindowIcon(new[] { raw });
         }
         catch
         {
@@ -1558,13 +1698,9 @@ public sealed partial class DonkehWindow : IDisposable
 
         var framebuffer = _window.FramebufferSize;
         var size = _window.Size;
-        var width = Math.Max(1, size.X);
-        var height = Math.Max(1, size.Y);
-        var dpi = framebuffer.X / (float)width;
-        if (dpi <= 0 || float.IsNaN(dpi))
-        {
-            dpi = 1;
-        }
+        var width = GetViewCssLength(size.X);
+        var height = GetViewCssLength(size.Y);
+        var dpi = GetViewDpi();
 
         for (var boxIndex = 0; boxIndex < _canvasBoxes.Count; boxIndex++)
         {
@@ -1633,6 +1769,49 @@ public sealed partial class DonkehWindow : IDisposable
                 stack.Push(box.Children[i]);
             }
         }
+    }
+
+    /// <summary>
+    /// Resolves the device-to-CSS-pixel ratio for the current view.
+    /// </summary>
+    /// <returns>
+    /// <see cref="WindowSettings.DpiScale"/> when it is positive, otherwise the
+    /// framebuffer-to-window width ratio. Invalid values fall back to one.
+    /// </returns>
+    /// <remarks>
+    /// Desktop backends expose the scale through a larger framebuffer than window
+    /// size. Mobile hosts report a physical-pixel surface with the ratio already
+    /// supplied through <see cref="WindowSettings.DpiScale"/>.
+    /// </remarks>
+    private float GetViewDpi()
+    {
+        var width = Math.Max(1, _window?.Size.X ?? 1);
+        var framebuffer = Math.Max(1, _window?.FramebufferSize.X ?? 1);
+        var dpi = _dpiScale > 0
+            ? _dpiScale
+            : framebuffer / (float)width;
+
+        return dpi > 0 && !float.IsNaN(dpi) && !float.IsInfinity(dpi) ? dpi : 1;
+    }
+
+    /// <summary>
+    /// Converts a window-space length to the CSS-pixel length used by layout.
+    /// </summary>
+    /// <param name="length">Window-space width or height.</param>
+    /// <returns>The CSS-pixel length, at least one.</returns>
+    /// <remarks>
+    /// When <see cref="WindowSettings.DpiScale"/> is zero the view already
+    /// reports CSS pixels and the value is only clamped. When it is positive the
+    /// view reports device pixels, so the length is divided by the ratio.
+    /// </remarks>
+    private int GetViewCssLength(int length)
+    {
+        if (_dpiScale <= 0)
+        {
+            return Math.Max(1, length);
+        }
+
+        return Math.Max(1, (int)MathF.Round(length / _dpiScale));
     }
 
     /// <summary>
@@ -1709,14 +1888,9 @@ public sealed partial class DonkehWindow : IDisposable
 
         var size = _window.Size;
         var framebuffer = _window.FramebufferSize;
-        var width = Math.Max(1, size.X);
-        var height = Math.Max(1, size.Y);
-        var dpi = framebuffer.X / (float)width;
-
-        if (dpi <= 0 || float.IsNaN(dpi))
-        {
-            dpi = 1;
-        }
+        var width = GetViewCssLength(size.X);
+        var height = GetViewCssLength(size.Y);
+        var dpi = GetViewDpi();
 
         // Docked devtools take space from the app viewport instead of covering
         // it, so the page reflows exactly as it would in a smaller window.
@@ -4115,7 +4289,7 @@ public sealed partial class DonkehWindow : IDisposable
     /// </summary>
     private bool TryBeginWindowDrag(ElementNode? element)
     {
-        if (_window is null || element is null || ResolveAppRegion(element) != AppRegion.Drag)
+        if (NativeWindow is not { } window || element is null || ResolveAppRegion(element) != AppRegion.Drag)
         {
             return false;
         }
@@ -4124,8 +4298,8 @@ public sealed partial class DonkehWindow : IDisposable
             (int)MathF.Round(_mouseX),
             (int)MathF.Round(_mouseY));
 
-        _windowDragStartScreen = _window.PointToScreen(point);
-        _windowDragStartPosition = _window.Position;
+        _windowDragStartScreen = window.PointToScreen(point);
+        _windowDragStartPosition = window.Position;
         _windowDragging = true;
         _pressed = null;
         _pointerTarget = null;
@@ -4136,7 +4310,7 @@ public sealed partial class DonkehWindow : IDisposable
     /// <summary>Moves the window by the pointer delta accumulated since the drag began.</summary>
     private void UpdateWindowDrag()
     {
-        if (_window is null || !_windowDragging)
+        if (NativeWindow is not { } window || !_windowDragging)
         {
             return;
         }
@@ -4144,11 +4318,11 @@ public sealed partial class DonkehWindow : IDisposable
         var point = new Vector2D<int>(
             (int)MathF.Round(_mouseX),
             (int)MathF.Round(_mouseY));
-        var screen = _window.PointToScreen(point);
+        var screen = window.PointToScreen(point);
         var deltaX = screen.X - _windowDragStartScreen.X;
         var deltaY = screen.Y - _windowDragStartScreen.Y;
 
-        _window.Position = new Vector2D<int>(
+        window.Position = new Vector2D<int>(
             _windowDragStartPosition.X + deltaX,
             _windowDragStartPosition.Y + deltaY);
     }
@@ -4167,7 +4341,7 @@ public sealed partial class DonkehWindow : IDisposable
     /// </remarks>
     private bool TryBeginFramelessResize()
     {
-        if (_window is null)
+        if (NativeWindow is not { } window)
         {
             return false;
         }
@@ -4183,9 +4357,9 @@ public sealed partial class DonkehWindow : IDisposable
             (int)MathF.Round(_mouseX),
             (int)MathF.Round(_mouseY));
 
-        _resizeStartScreen = _window.PointToScreen(point);
-        _resizeStartPosition = _window.Position;
-        _resizeStartSize = _window.Size;
+        _resizeStartScreen = window.PointToScreen(point);
+        _resizeStartPosition = window.Position;
+        _resizeStartSize = window.Size;
         _resizeEdges = edges;
         _windowResizing = true;
         _pressed = null;
@@ -4207,7 +4381,7 @@ public sealed partial class DonkehWindow : IDisposable
     /// </remarks>
     private void UpdateFramelessResize()
     {
-        if (_window is null || !_windowResizing)
+        if (NativeWindow is not { } window || !_windowResizing)
         {
             return;
         }
@@ -4215,7 +4389,7 @@ public sealed partial class DonkehWindow : IDisposable
         var point = new Vector2D<int>(
             (int)MathF.Round(_mouseX),
             (int)MathF.Round(_mouseY));
-        var screen = _window.PointToScreen(point);
+        var screen = window.PointToScreen(point);
         var deltaX = screen.X - _resizeStartScreen.X;
         var deltaY = screen.Y - _resizeStartScreen.Y;
 
@@ -4249,17 +4423,17 @@ public sealed partial class DonkehWindow : IDisposable
             height = Math.Clamp(_resizeStartSize.Y + deltaY, minHeight, maxHeight);
         }
 
-        var position = _window.Position;
-        var size = _window.Size;
+        var position = window.Position;
+        var size = window.Size;
 
         if (position.X != x || position.Y != y)
         {
-            _window.Position = new Vector2D<int>(x, y);
+            window.Position = new Vector2D<int>(x, y);
         }
 
         if (size.X != width || size.Y != height)
         {
-            _window.Size = new Vector2D<int>(width, height);
+            window.Size = new Vector2D<int>(width, height);
         }
     }
 
@@ -4294,16 +4468,16 @@ public sealed partial class DonkehWindow : IDisposable
     /// </remarks>
     private WindowResizeEdges HitTestFramelessResize(float x, float y)
     {
-        if (_window is null
+        if (NativeWindow is not { } window
             || !_settings.Frameless
             || !_settings.Resizable
             || _settings.FullScreen
-            || _window.WindowState != WindowState.Normal)
+            || window.WindowState != WindowState.Normal)
         {
             return WindowResizeEdges.None;
         }
 
-        var size = _window.Size;
+        var size = window.Size;
         var edges = WindowResizeEdges.None;
 
         if (x <= FramelessResizeBorder)
@@ -4688,6 +4862,15 @@ public sealed partial class DonkehWindow : IDisposable
     /// </remarks>
     private void OnMouseMove(float x, float y)
     {
+        // Android reports pointer coordinates in device pixels while layout uses
+        // CSS pixels. DpiScale is only set by hosts in that situation; desktop
+        // backends already deliver window-space coordinates.
+        if (_dpiScale > 0)
+        {
+            x /= _dpiScale;
+            y /= _dpiScale;
+        }
+
         _mouseX = x;
         _mouseY = y;
         _devTools.PointerX = x;
@@ -7296,12 +7479,12 @@ public sealed partial class DonkehWindow : IDisposable
     /// </remarks>
     private void SyncWindowRegion(CornerRadius corners, int width, int height, float dpi)
     {
-        if (!OperatingSystem.IsWindows() || _window is null)
+        if (!OperatingSystem.IsWindows() || NativeWindow is not { } window)
         {
             return;
         }
 
-        if (_window.WindowState is WindowState.Maximized or WindowState.Fullscreen)
+        if (window.WindowState is WindowState.Maximized or WindowState.Fullscreen)
         {
             corners = CornerRadius.Zero;
         }
@@ -7319,7 +7502,7 @@ public sealed partial class DonkehWindow : IDisposable
         _windowRegionHeight = height;
         _windowRegionDpi = dpi;
 
-        var hwnd = _window.Native?.Win32?.Hwnd ?? 0;
+        var hwnd = window.Native?.Win32?.Hwnd ?? 0;
 
         if (corners.IsZero)
         {
@@ -7366,6 +7549,8 @@ public sealed partial class DonkehWindow : IDisposable
         // native window itself is disposed by Run() after the loop has finished.
         _input?.Dispose();
         _input = null;
+        try { _devTools.Builds.Dispose(); }
+        catch { }
         DisposeGpu();
         try { _settings.OnClose?.Invoke(this); }
         catch { }
@@ -7418,6 +7603,7 @@ public sealed partial class DonkehWindow : IDisposable
 
         _disposed = true;
         _input?.Dispose();
+        _devTools.Builds.Dispose();
         DisposeGpu();
         _window?.Dispose();
     }

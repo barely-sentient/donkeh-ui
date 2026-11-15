@@ -125,6 +125,9 @@ public sealed unsafe class GLRenderer : IDisposable
     /// <summary>Opaque white texture bound to unused sampler slots.</summary>
     private readonly uint _whiteTexture;
 
+    /// <summary>Whether the context is OpenGL ES rather than desktop OpenGL.</summary>
+    private readonly bool _isEs;
+
     /// <summary>Whether the driver exposes <c>GL_ARB_draw_indirect</c> (or OpenGL 4.0+).</summary>
     private readonly bool _hasDrawIndirect;
 
@@ -287,12 +290,20 @@ public sealed unsafe class GLRenderer : IDisposable
 
         var (major, minor) = ParseGlVersion();
         var extensions = ReadExtensions();
-        _hasDrawIndirect = major > 4 || (major == 4) || extensions.Contains("GL_ARB_draw_indirect");
-        _hasMultiDrawIndirect = major > 4 || (major == 4 && minor >= 3) || extensions.Contains("GL_ARB_multi_draw_indirect");
-        _hasBaseInstance = major > 4 || (major == 4 && minor >= 2) || extensions.Contains("GL_ARB_base_instance");
-        _hasBufferStorage = major > 4 || (major == 4 && minor >= 4) || extensions.Contains("GL_ARB_buffer_storage");
+        _isEs = IsEsContext();
 
-        _program = new ShaderProgram(gl, InstanceVertexShader, InstanceFragmentShader);
+        if (!_isEs)
+        {
+            _hasDrawIndirect = major > 4 || (major == 4) || extensions.Contains("GL_ARB_draw_indirect");
+            _hasMultiDrawIndirect = major > 4 || (major == 4 && minor >= 3) || extensions.Contains("GL_ARB_multi_draw_indirect");
+            _hasBaseInstance = major > 4 || (major == 4 && minor >= 2) || extensions.Contains("GL_ARB_base_instance");
+            _hasBufferStorage = major > 4 || (major == 4 && minor >= 4) || extensions.Contains("GL_ARB_buffer_storage");
+        }
+
+        _program = new ShaderProgram(
+            gl,
+            _isEs ? ToEsShader(InstanceVertexShader) : InstanceVertexShader,
+            _isEs ? ToEsShader(InstanceFragmentShader) : InstanceFragmentShader);
         _shapeVao = gl.GenVertexArray();
         _quadVbo = gl.GenBuffer();
         _whiteTexture = CreateWhiteTexture();
@@ -1864,6 +1875,48 @@ public sealed unsafe class GLRenderer : IDisposable
         _gl.BindVertexArray(_shapeVao);
         _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _instanceVbo);
         SetInstanceAttributePointers(baseInstance);
+    }
+
+    /// <summary>Detects whether the current context is OpenGL ES.</summary>
+    /// <returns><see langword="true"/> for a GLES context.</returns>
+    /// <remarks>
+    /// Desktop and ES contexts share most entry points, but their shader
+    /// languages differ (<c>330 core</c> versus <c>300 es</c>) and the indirect
+    /// draw extensions are named differently, so the renderer needs to know which
+    /// family it is on.
+    /// </remarks>
+    private bool IsEsContext()
+    {
+        try
+        {
+            return _gl.GetStringS(StringName.Version)
+                .Contains("OpenGL ES", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Rewrites a desktop GLSL 3.30 shader as GLSL ES 3.00.
+    /// </summary>
+    /// <param name="source">The desktop shader source.</param>
+    /// <returns>The equivalent ES shader source.</returns>
+    /// <remarks>
+    /// The instruction set used by the shader is already ES 3.00 compatible; only
+    /// the version directive and the required default float precision differ.
+    /// Keeping one body avoids the two variants drifting apart.
+    /// </remarks>
+    private static string ToEsShader(string source)
+    {
+        const string desktop = "#version 330 core";
+        var index = source.IndexOf(desktop, StringComparison.Ordinal);
+        const string es = "#version 300 es\nprecision highp float;";
+
+        return index < 0
+            ? es + "\n" + source
+            : source[..index] + es + source[(index + desktop.Length)..];
     }
 
     /// <summary>Parses the leading major/minor pair from <c>GL_VERSION</c>.</summary>

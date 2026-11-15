@@ -308,7 +308,7 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
         var picker = state.Tab == DevToolsTab.Elements && state.ColorPickerRuleIndex >= 0
             ? BuildColorPicker(state)
             : null;
-        var bodyClass = state.Tab == DevToolsTab.Performance
+        var bodyClass = state.Tab is DevToolsTab.Performance or DevToolsTab.Deploy
             ? "dt-body dt-body-perf"
             : "dt-body";
 
@@ -413,7 +413,8 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
                 new Props { ClassName = "dt-tabs" },
                 BuildTab(state, DevToolsTab.Elements, "Elements"),
                 BuildTab(state, DevToolsTab.Performance, "Performance"),
-                BuildTab(state, DevToolsTab.Animations, "Animations")),
+                BuildTab(state, DevToolsTab.Animations, "Animations"),
+                BuildTab(state, DevToolsTab.Deploy, "Deploy")),
             _.H(
                 "div",
                 new Props
@@ -554,12 +555,242 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
             return BuildAnimations(state);
         }
 
+        if (state.Tab == DevToolsTab.Deploy)
+        {
+            return BuildDeploy(state);
+        }
+
         return _.H(
             "div",
             new Props { ClassName = "dt-elements" },
             _.H("div", new Props { ClassName = "dt-dom-pane" }, BuildDomTree(state)),
             _.H("div", new Props { ClassName = "dt-styles-pane" }, BuildStyles(state)));
     }
+
+    // ---------------------------------------------------------------- deploy
+
+    /// <summary>Builds the Deploy tab.</summary>
+    /// <param name="state">The current inspector state.</param>
+    /// <returns>
+    /// The project header, one row per target, and the active or last build log.
+    /// </returns>
+    /// <remarks>
+    /// The tab is a thin view over <see cref="DevToolsState.Builds"/>. Buttons
+    /// only enqueue work; the build service raises state changes on a worker
+    /// thread, which the host forwards to <see cref="DevToolsState.Refresh"/>.
+    /// </remarks>
+    private Node BuildDeploy(DevToolsState state)
+    {
+        var builds = state.Builds;
+        var children = new List<Node?>();
+
+        children.Add(_.H(
+            "div",
+            new Props { ClassName = "dt-deploy-head" },
+            _.H("div", new Props { ClassName = "dt-section-title" }, _.Text("BUILDS")),
+            _.H("div", new Props { ClassName = "dt-spacer" }),
+            BuildDeployButton(
+                builds.IsBuilding ? "Building..." : "Build all",
+                builds.IsBuilding || builds.Targets.Count == 0,
+                () =>
+                {
+                    builds.BuildAll();
+                    RequestUpdate();
+                },
+                "dt-deploy-btn dt-deploy-all")));
+
+        if (builds.ProjectRoot is null)
+        {
+            children.Add(_.H(
+                "div",
+                new Props { ClassName = "dt-deploy-note" },
+                _.Text(
+                    "No application project was found. Run the app from a source checkout, " +
+                    "or point DevTools.Builds.Configure at the project file.")));
+
+            return _.H("div", new Props { ClassName = "dt-deploy" }, _.F(children.ToArray()));
+        }
+
+        children.Add(_.H(
+            "div",
+            new Props { ClassName = "dt-deploy-path" },
+            _.Text(builds.ProjectFile ?? string.Empty)));
+
+        foreach (var target in builds.Targets)
+        {
+            var output = Path
+                .GetRelativePath(builds.ProjectRoot, target.OutputDirectory)
+                .Replace('\\', '/');
+
+            children.Add(_.H(
+                "div",
+                new Props
+                {
+                    ClassName = "dt-deploy-row",
+                    Title = target.LastError ?? target.ArtifactPath
+                },
+                _.H(
+                    "div",
+                    new Props { ClassName = "dt-deploy-info" },
+                    _.H("div", new Props { ClassName = "dt-deploy-name" }, _.Text(target.Name)),
+                    _.H(
+                        "div",
+                        new Props { ClassName = "dt-deploy-desc" },
+                        _.Text($"{target.Description}  \u2192  {output}"))),
+                _.H(
+                    "div",
+                    new Props { ClassName = "dt-deploy-status " + DeployStatusClass(target) },
+                    _.Text(DeployStatusText(target))),
+                BuildDeployButton(
+                    "Build",
+                    builds.IsBuilding,
+                    () =>
+                    {
+                        builds.Build(target.Id);
+                        RequestUpdate();
+                    },
+                    "dt-deploy-btn")));
+        }
+
+        var server = builds.Downloads;
+        var serverDescription = server.IsRunning
+            ? "Serving " + (builds.BuildsRoot ?? "builds")
+            : "Serve build outputs over HTTP on this machine or local network.";
+
+        children.Add(_.H(
+            "div",
+            new Props { ClassName = "dt-deploy-row" },
+            _.H(
+                "div",
+                new Props { ClassName = "dt-deploy-info" },
+                _.H("div", new Props { ClassName = "dt-deploy-name" }, _.Text("Download server")),
+                _.H("div", new Props { ClassName = "dt-deploy-desc" }, _.Text(serverDescription)),
+                server.IsRunning && server.Urls.Count > 0
+                    ? _.H(
+                        "div",
+                        new Props { ClassName = "dt-deploy-urls" },
+                        _.Text(string.Join("\n", server.Urls)))
+                    : null),
+            _.H(
+                "input",
+                new Props
+                {
+                    ClassName = "dt-deploy-port",
+                    Type = "text",
+                    Value = server.Port.ToString(CultureInfo.InvariantCulture),
+                    Disabled = server.IsRunning,
+                    Title = "Port for the local download server",
+                    OnChange = value =>
+                    {
+                        if (int.TryParse(
+                                value,
+                                NumberStyles.Integer,
+                                CultureInfo.InvariantCulture,
+                                out var port)
+                            && port is >= 1 and <= 65535)
+                        {
+                            server.Port = port;
+                            RequestUpdate();
+                        }
+                    }
+                }),
+            _.H(
+                "div",
+                new Props
+                {
+                    ClassName = "dt-deploy-status " +
+                        (server.IsRunning ? "dt-deploy-ok" : "dt-deploy-ready")
+                },
+                _.Text(server.IsRunning ? "On" : "Off")),
+            BuildDeployButton(
+                "Download server",
+                false,
+                () =>
+                {
+                    server.Toggle();
+                    RequestUpdate();
+                },
+                server.IsRunning
+                    ? "dt-deploy-btn dt-deploy-server-on"
+                    : "dt-deploy-btn")));
+
+        if (server.LastError is { Length: > 0 } serverError)
+        {
+            children.Add(_.H(
+                "div",
+                new Props { ClassName = "dt-deploy-error" },
+                _.Text(serverError)));
+        }
+
+        var logTarget = builds.Targets.FirstOrDefault(
+                target => target.State == DeployTargetState.Building)
+            ?? builds.LastTarget;
+
+        if (logTarget is not null && logTarget.Output.Length > 0)
+        {
+            children.Add(_.H(
+                "div",
+                new Props { ClassName = "dt-deploy-log-title" },
+                _.Text("OUTPUT  \u00B7  " + logTarget.Name)));
+
+            children.Add(_.H(
+                "div",
+                new Props { ClassName = "dt-deploy-log" },
+                _.Text(logTarget.Output)));
+        }
+
+        if (builds.BuildsRoot is not null)
+        {
+            children.Add(_.H(
+                "div",
+                new Props { ClassName = "dt-deploy-footer" },
+                _.Text("Output root: " + builds.BuildsRoot)));
+        }
+
+        return _.H("div", new Props { ClassName = "dt-deploy" }, _.F(children.ToArray()));
+    }
+
+    /// <summary>Builds one Deploy action button.</summary>
+    /// <param name="label">Visible button text.</param>
+    /// <param name="disabled">Whether the action is currently unavailable.</param>
+    /// <param name="action">Invoked when enabled and clicked.</param>
+    /// <param name="className">Base class names.</param>
+    /// <returns>The button node.</returns>
+    private Node BuildDeployButton(string label, bool disabled, Action action, string className)
+    {
+        return _.H(
+            "div",
+            new Props
+            {
+                ClassName = disabled ? className + " dt-deploy-btn-disabled" : className,
+                OnClick = disabled ? null : action
+            },
+            _.Text(label));
+    }
+
+    /// <summary>Returns the status colour class for a target.</summary>
+    /// <param name="target">The target to classify.</param>
+    /// <returns>A CSS class name.</returns>
+    private static string DeployStatusClass(DeployTarget target) => target.State switch
+    {
+        DeployTargetState.Building => "dt-deploy-busy",
+        DeployTargetState.Succeeded => "dt-deploy-ok",
+        DeployTargetState.Failed => "dt-deploy-fail",
+        _ => "dt-deploy-ready"
+    };
+
+    /// <summary>Returns the short status label for a target.</summary>
+    /// <param name="target">The target to describe.</param>
+    /// <returns>A compact status string.</returns>
+    private static string DeployStatusText(DeployTarget target) => target.State switch
+    {
+        DeployTargetState.Building => "Building...",
+        DeployTargetState.Succeeded when target.LastDuration.TotalSeconds >= 0.1 =>
+            $"Built {target.LastDuration.TotalSeconds:0.0}s",
+        DeployTargetState.Succeeded => "Built",
+        DeployTargetState.Failed => "Failed",
+        _ => "Ready"
+    };
 
     // --------------------------------------------------------------- dom tree
 
@@ -2503,7 +2734,13 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
     private Node BuildStatusBar(DevToolsState state)
     {
         var count = _liveNodeCount;
-        var tab = state.Tab == DevToolsTab.Elements ? "Elements" : "Performance";
+        var tab = state.Tab switch
+        {
+            DevToolsTab.Performance => "Performance",
+            DevToolsTab.Animations => "Animations",
+            DevToolsTab.Deploy => "Deploy",
+            _ => "Elements"
+        };
 
         return _.H(
             "div",

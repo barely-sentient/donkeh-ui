@@ -128,6 +128,7 @@ renderer. `Donkeh.Inspector` provides the devtools panel.
     │   └── Tests/                   ← builder and component tests
     ├── Windowing/
     │   ├── Source/                  ← Donkeh.Windowing
+    │   ├── Android/                 ← Donkeh.Windowing.Android (activity + GLES host)
     │   └── Benchmarks/              ← direct vs indirect renderer harness
     └── Inspector/
         └── Source/                  ← Donkeh.Inspector
@@ -835,8 +836,8 @@ headless GL harnesses (for example an offscreen framebuffer) would be welcome.
 ### Donkeh.Inspector
 
 **Summary.** The devtools panel and its state model. It renders a live DOM tree,
-a style editor, colour picker, animation browser and performance view, either
-inside an `DonkehWindow` or in a standalone window.
+a style editor, colour picker, animation browser, performance view and a Deploy
+tab, either inside an `DonkehWindow` or in a standalone window.
 
 **Responsibilities**
 
@@ -845,16 +846,20 @@ inside an `DonkehWindow` or in a standalone window.
 - Parse and preview colours, including alpha and contrast.
 - Sample and display frame timing, layout/paint time and GC data.
 - Render the panel using the same layout and UILab stack as application UI.
+- Discover the application project and build desktop/Android targets on demand.
+- Serve build outputs from a loopback HTTP server with a selectable port.
 
 **Key types**
 
 | Type | Purpose |
 | --- | --- |
 | `DevToolsState` | Observable state: selection, tab, dock, styles, history, performance samples. |
-| `InspectorPanel` | The panel component: DOM tree, styles, picker, animations, performance. |
+| `InspectorPanel` | The panel component: DOM tree, styles, picker, animations, performance, deploy. |
 | `InspectorStyles` | CSS and sizing constants for the panel. |
 | `ColorPreview` | Colour parsing, formatting, HSV helpers and contrast helpers. |
 | `PerformanceStats` | Frame/layout/paint timing samples and rolling history. |
+| `DeployState`, `DeployTarget` | Build discovery, per-target state, process execution and output logs. |
+| `DownloadServer` | Loopback file server for build artifacts; used by the Deploy tab. |
 | `DevToolsDock`, `DevToolsTab`, `StyleSheetRange` | Layout and navigation enums/records. |
 
 **Usage.** `DonkehWindow` hosts the inspector automatically when
@@ -873,6 +878,17 @@ or matching semantics.
   `DataTable`; host stylesheets stay untouched.
 - Performance sampling uses a bounded rolling window, so the graph cannot grow
   without limit.
+- The Deploy tab discovers the application's `.csproj` from the running
+  entry assembly, writes every build under `{projectRoot}/builds`, and can add
+  custom targets through `DevToolsState.Builds.AddTarget`. Builds run on a worker
+  thread and stream their output back into the panel.
+- The Download server toggle binds a small HTTP server to loopback on the chosen
+  port and serves `{projectRoot}/builds`. Its root page lists build artifacts
+  (APK, EXE, archives) and lets the browser browse folders; it stops when the
+  window closes.
+- `builds/` is gitignored. An app whose desktop build copies JAR or native files
+  should add `<DefaultItemExcludes>$(DefaultItemExcludes);builds/**</DefaultItemExcludes>`
+  so Android's default item globs do not pick those files up.
 - The panel is ordinary UILab UI, so it is subject to the same layout, caching
   and input rules as application content.
 
@@ -902,6 +918,9 @@ a good target for future coverage.
 - .NET SDK **10.0** (the projects target `net10.0`).
 - Windows, Linux or macOS for the non-UI engine modules.
 - A desktop with OpenGL 3.3 for `Donkeh.Windowing`.
+- The .NET **Android** workload for the `net10.0-android` target. The demo adds
+  that target automatically when the workload is installed, so a plain desktop
+  build does not need it.
 
 ### Build and test
 
@@ -923,6 +942,82 @@ tests and benchmarks):
 ```powershell
 dotnet build Donkeh.sln -c Release -p:GenerateDocumentationFile=true
 ```
+
+### Android
+
+`Demo/Program.cs` is the application for **both** targets. It implements
+`IDonkehApp`, declares itself once with:
+
+```csharp
+[assembly: DonkehApp(typeof(Donkeh.Demo.Program))]
+```
+
+and the platform host supplies the window or view. The demo project has two
+target frameworks when the Android workload is available:
+
+```text
+Demo/
+  Demo.csproj      net10.0 + net10.0-android (when the workload is installed)
+  Program.cs       desktop entry point + the shared application
+```
+
+Build both:
+
+```powershell
+dotnet build Demo\Demo.csproj -c Debug
+```
+
+Build or run only the desktop executable:
+
+```powershell
+dotnet run --project Demo\Demo.csproj -f net10.0
+```
+
+Build a standalone Android APK (assemblies embedded, debug-signed):
+
+```powershell
+dotnet build Demo\Demo.csproj -c Debug -f net10.0-android
+```
+
+The APK is written to
+`Demo\bin\Debug\net10.0-android\dev.donkeh.demo-Signed.apk`.
+
+The framework owns the mobile plumbing in `Donkeh.Windowing.Android`:
+
+- `DonkehActivity` derives from Silk.NET's SDL activity and creates an OpenGL ES
+  3.0 view. It requests 60 Hz vsync, disables MSAA and devtools, and supplies the
+  display density so CSS pixels and touch coordinates agree.
+  It also overrides `LoadLibraries`, `SetOrientationBis` and `OnDestroy` and
+  supplies the matching private JNI delegate getters. .NET Android does not emit
+  a static registration block for the abstract `SilkActivity` base, and the SDL
+  binding's handlers are private, so the concrete launcher carries its own
+  handler methods; otherwise SDL reports that `n_loadLibraries` has no
+  implementation.
+- `DonkehAppLocator` finds the application through the assembly attribute, so the
+  app never creates a window, view or graphics context.
+- `GLRenderer` detects the ES context, compiles GLSL ES 3.00 and uses the direct
+  instanced path (the ARB indirect-draw path is desktop-only).
+- `FontManager` discovers Android system fonts in `/system/fonts`.
+
+Silk.NET 2.23.0 ships 4 KB-aligned `libmain.so` and `libSDL2.so` inside its SDL
+Android AAR, and the build emits `XA0141`. Devices configured with 16 KB pages
+(some Android 16 hardware) will refuse to load them; check with
+`adb shell getconf PAGE_SIZE`. Those devices need a 16 KB-aligned SDL build or a
+Silk.NET release that ships one.
+
+The app project only carries its Android identity (`ApplicationId`, version) and
+the toolchain paths are picked up automatically from the normal per-user install
+locations when present.
+
+Android release builds discover the application through an assembly-level
+attribute. If you enable trimming in your own app, keep
+`[assembly: DonkehApp(...)]` and its app type; the demo disables trimming for
+`net10.0-android` so the Deploy tab can build a runnable Release APK.
+
+Desktop video keeps its native bundle out of the core: `Donkeh.Windowing`
+references the managed `LibVLCSharp` package only, and a desktop app adds
+`VideoLAN.LibVLC.Windows` (as the demo does for `net10.0`). Android resolves
+LibVLCSharp's Android runtime instead.
 
 ---
 

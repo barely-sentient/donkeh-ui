@@ -879,6 +879,200 @@ public static class InspectorStyles
         #ignite-devtools .dt-status-gap {
             flex: 1;
         }
+
+        #ignite-devtools .dt-deploy {
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            padding: 10px;
+            width: 100%;
+        }
+
+        #ignite-devtools .dt-deploy-head {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+
+        #ignite-devtools .dt-deploy-path {
+            color: #9aa0a6;
+            font-family: Consolas, "Courier New", monospace;
+            font-size: 11px;
+            margin-bottom: 10px;
+        }
+
+        #ignite-devtools .dt-deploy-row {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 12px;
+            background-color: #292a2d;
+            border-width: 1px;
+            border-style: solid;
+            border-color: #3c4043;
+            border-radius: 6px;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+        }
+
+        #ignite-devtools .dt-deploy-info {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            min-width: 0;
+        }
+
+        #ignite-devtools .dt-deploy-name {
+            color: #e8eaed;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        #ignite-devtools .dt-deploy-desc {
+            color: #9aa0a6;
+            font-size: 11px;
+            margin-top: 2px;
+        }
+
+        #ignite-devtools .dt-deploy-urls {
+            color: #93c5fd;
+            font-family: Consolas, "Courier New", monospace;
+            font-size: 11px;
+            line-height: 1.5;
+            margin-top: 3px;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        #ignite-devtools .dt-deploy-status {
+            width: 88px;
+            text-align: right;
+            font-size: 11px;
+            color: #9aa0a6;
+        }
+
+        #ignite-devtools .dt-deploy-ready {
+            color: #9aa0a6;
+        }
+
+        #ignite-devtools .dt-deploy-busy {
+            color: #f0b26b;
+        }
+
+        #ignite-devtools .dt-deploy-ok {
+            color: #81c995;
+        }
+
+        #ignite-devtools .dt-deploy-fail {
+            color: #f28b82;
+        }
+
+        #ignite-devtools .dt-deploy-btn {
+            background-color: #8ab4f8;
+            color: #202124;
+            border-radius: 6px;
+            padding: 7px 14px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        #ignite-devtools .dt-deploy-btn:hover {
+            background-color: #aecbfa;
+        }
+
+        #ignite-devtools .dt-deploy-all {
+            padding: 7px 16px;
+        }
+
+        #ignite-devtools .dt-deploy-btn-disabled {
+            background-color: #3c4043;
+            color: #9aa0a6;
+            cursor: default;
+        }
+
+        #ignite-devtools .dt-deploy-btn-disabled:hover {
+            background-color: #3c4043;
+        }
+
+        #ignite-devtools .dt-deploy-server-on {
+            background-color: #81c995;
+        }
+
+        #ignite-devtools .dt-deploy-server-on:hover {
+            background-color: #a5d6a7;
+        }
+
+        #ignite-devtools .dt-deploy-port {
+            width: 64px;
+            min-width: 64px;
+            height: 28px;
+            min-height: 28px;
+            background-color: #1b1c1e;
+            border-width: 1px;
+            border-style: solid;
+            border-color: #3c4043;
+            border-radius: 4px;
+            padding: 0 6px;
+            color: #e8eaed;
+            font-family: Consolas, "Courier New", monospace;
+            font-size: 12px;
+            line-height: 28px;
+            outline-width: 0;
+            outline-style: none;
+        }
+
+        #ignite-devtools .dt-deploy-port:focus {
+            outline-width: 1px;
+            outline-style: solid;
+            outline-color: #007fd4;
+        }
+
+        #ignite-devtools .dt-deploy-error {
+            color: #f28b82;
+            font-size: 11px;
+            margin-bottom: 8px;
+            white-space: pre-wrap;
+        }
+
+        #ignite-devtools .dt-deploy-note {
+            color: #9aa0a6;
+            font-size: 12px;
+            line-height: 1.5;
+            padding: 10px 0;
+        }
+
+        #ignite-devtools .dt-deploy-log-title {
+            color: #9aa0a6;
+            font-size: 11px;
+            letter-spacing: 0.5px;
+            margin-top: 6px;
+            margin-bottom: 4px;
+        }
+
+        #ignite-devtools .dt-deploy-log {
+            background-color: #1b1c1e;
+            border-width: 1px;
+            border-style: solid;
+            border-color: #3c4043;
+            border-radius: 6px;
+            padding: 8px;
+            color: #bdc1c6;
+            font-family: Consolas, "Courier New", monospace;
+            font-size: 11px;
+            line-height: 1.45;
+            white-space: pre-wrap;
+            max-height: 220px;
+            overflow: auto;
+        }
+
+        #ignite-devtools .dt-deploy-footer {
+            color: #9aa0a6;
+            font-size: 11px;
+            margin-top: 8px;
+        }
         """;
 
     /// <summary>

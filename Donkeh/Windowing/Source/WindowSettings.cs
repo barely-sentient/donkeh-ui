@@ -182,6 +182,31 @@ namespace Donkeh.Windowing
         public bool Resizable;
 
         /// <summary>
+        /// Overrides the device-to-CSS-pixel ratio reported by the native view.
+        /// </summary>
+        /// <value>
+        /// Zero (the default) derives the ratio from
+        /// <c>FramebufferSize / Size</c>. A positive value treats
+        /// <see cref="DonkehWindow"/>'s view size as device pixels and divides it by
+        /// this value to obtain the CSS layout viewport.
+        /// </value>
+        /// <remarks>
+        /// <para>
+        /// Desktop windows report the scale through their framebuffer ratio, so
+        /// this stays zero. Mobile hosts often report a surface sized in physical
+        /// pixels with no ratio, so an Android activity sets this to the display
+        /// density (for example <c>Resources.DisplayMetrics.Density</c>) to keep CSS
+        /// pixels independent of the panel resolution.
+        /// </para>
+        /// <para>
+        /// When this is positive, pointer coordinates are divided by the same
+        /// value before hit testing, so taps land on the same CSS pixel the layout
+        /// engine used.
+        /// </para>
+        /// </remarks>
+        public float DpiScale;
+
+        /// <summary>
         /// Enables the built-in inspector. Press Ctrl+Shift+I or F12 to toggle it.
         /// </summary>
         /// <remarks>
@@ -404,6 +429,7 @@ namespace Donkeh.Windowing
             DevToolsPosition = DevToolsDock.Bottom,
             TopMost = false,
             Transparent = false,
+            DpiScale = 0,
             Maximized = false
         };
     }

@@ -56,7 +56,17 @@ public enum DevToolsTab
     /// Registered <c>@keyframes</c> groups and their declarations. Numeric
     /// value 2.
     /// </summary>
-    Animations
+    Animations,
+
+    /// <summary>
+    /// Build targets and their last result. Numeric value 3.
+    /// </summary>
+    /// <remarks>
+    /// The panel lists every target from <see cref="DevToolsState.Builds"/> and
+    /// lets the user build one or all of them. Outputs are written under the
+    /// application project's <c>builds</c> directory.
+    /// </remarks>
+    Deploy
 }
 
 /// <summary>
@@ -114,6 +124,17 @@ public readonly record struct StyleSheetRange(string Name, int StartRule, int En
 /// </remarks>
 public sealed class DevToolsState
 {
+    /// <summary>Creates the shared inspector state.</summary>
+    /// <remarks>
+    /// The deploy service discovers the application project immediately and
+    /// forwards its build notifications to <see cref="Refresh"/>.
+    /// </remarks>
+    public DevToolsState()
+    {
+        Builds = new DeployState();
+        Builds.Changed += Refresh;
+    }
+
     /// <summary>
     /// Backing counter for <see cref="Version"/>, accessed through
     /// <see cref="Interlocked"/>.
@@ -217,6 +238,15 @@ public sealed class DevToolsState
     /// mounted app changes.
     /// </remarks>
     public DevToolsTab Tab { get; set; } = DevToolsTab.Elements;
+
+    /// <summary>Gets the build service used by the Deploy tab.</summary>
+    /// <value>
+    /// A live instance shared with the panel. It discovers the application project
+    /// on construction; use <see cref="DeployState.Configure"/> to point it at a
+    /// different project or output root, or <see cref="DeployState.AddTarget"/> to
+    /// add custom targets.
+    /// </value>
+    public DeployState Builds { get; }
 
     /// <summary>Gets or sets the real app root node, not a clone.</summary>
     /// <remarks>

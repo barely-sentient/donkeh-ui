@@ -20,7 +20,6 @@
       <PackageReference Include="SoundFlow" Version="1.4.2" />
       <PackageReference Include="StbImageSharp" Version="2.30.16" />
       <PackageReference Include="StbTrueTypeSharp" Version="1.26.13" />
-      <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.24" />
     </ItemGroup>
 
     <ItemGroup>

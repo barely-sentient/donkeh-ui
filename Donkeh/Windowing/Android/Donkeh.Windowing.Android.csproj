@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!--
+        Framework-owned Android host.
+
+        Apps reference this project only for the net10.0-android target; it hides
+        Silk.NET's SDL activity, GLES context creation, DPI handling and lifecycle
+        from the application code.
+    -->
+    <PropertyGroup>
+        <TargetFramework>net10.0-android</TargetFramework>
+        <SupportedOSPlatformVersion>24</SupportedOSPlatformVersion>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <RootNamespace>Donkeh.Windowing.Android</RootNamespace>
+
+        <!-- Normal per-user install locations; explicit properties still win. -->
+        <AndroidSdkDirectory Condition="'$(AndroidSdkDirectory)' == '' and Exists('$(LOCALAPPDATA)\Android\Sdk')">$(LOCALAPPDATA)\Android\Sdk</AndroidSdkDirectory>
+        <JavaSdkDirectory Condition="'$(JavaSdkDirectory)' == '' and Exists('$(LOCALAPPDATA)\Android\Jdk')">$(LOCALAPPDATA)\Android\Jdk</JavaSdkDirectory>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Silk.NET.Windowing" Version="2.23.0" />
+        <PackageReference Include="Silk.NET.Input" Version="2.23.0" />
+        <PackageReference Include="Silk.NET.OpenGL" Version="2.23.0" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\Source\Donkeh.Windowing.csproj" />
+    </ItemGroup>
+
+</Project>

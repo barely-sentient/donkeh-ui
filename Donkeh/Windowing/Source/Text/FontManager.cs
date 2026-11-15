@@ -311,6 +311,12 @@ public sealed unsafe class FontManager : IDisposable
             primary = fallbacks.Count > 0 ? fallbacks[0] : LoadFace(null);
         }
 
+        if (primary is null)
+        {
+            throw new InvalidOperationException(
+                "No usable TrueType font was found. Install a system font or make a font file available to FontManager.");
+        }
+
         var set = new FaceSet(primary!, fallbacks);
         _faces[key] = set;
         return set;
@@ -674,6 +680,13 @@ public sealed unsafe class FontManager : IDisposable
             list.Add("/System/Library/Fonts");
             list.Add("/Library/Fonts");
         }
+        else if (OperatingSystem.IsAndroid())
+        {
+            // Android keeps the system faces in /system/fonts. Newer releases
+            // ship variable Roboto builds alongside the static fallbacks, so the
+            // directory is searched rather than a single file being assumed.
+            list.Add("/system/fonts");
+        }
 
         return list.ToArray();
     }
@@ -723,6 +736,16 @@ public sealed unsafe class FontManager : IDisposable
         {
             list.Add("/System/Library/Fonts/Supplemental/Arial Unicode.ttf");
             list.Add("/System/Library/Fonts/Supplemental/Arial.ttf");
+        }
+        else if (OperatingSystem.IsAndroid())
+        {
+            // Static Roboto is present on AOSP and most OEM images; Noto and
+            // Droid are the older/generic fallbacks. Missing entries are skipped
+            // by LoadFace.
+            list.Add("/system/fonts/Roboto-Regular.ttf");
+            list.Add("/system/fonts/NotoSans-Regular.ttf");
+            list.Add("/system/fonts/DroidSans.ttf");
+            list.Add("/system/fonts/DroidSansMono.ttf");
         }
 
         var unique = new List<string>(list.Count);
