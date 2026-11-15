@@ -26,6 +26,7 @@ Build apps for desktop, Android and the browser with C# components and real CSS.
 ```powershell
 dotnet tool install --global Donkeh.CliTool
 donkeh new project MyApp
+cd MyApp
 dotnet run
 ```
 
@@ -37,6 +38,13 @@ donkeh new component FileList
 
 That creates `src/Components/FileList/FileList.cs` and `FileList.css`, already
 registered with the project.
+
+Add another platform when you need it:
+
+```powershell
+donkeh enable-target android
+donkeh enable-target web
+```
 
 ## Learn
 

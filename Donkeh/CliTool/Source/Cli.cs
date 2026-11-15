@@ -47,6 +47,11 @@ public static class Cli
             return 0;
         }
 
+        if (string.Equals(args[0], "enable-target", StringComparison.OrdinalIgnoreCase))
+        {
+            return RunEnableTarget(args[1..]);
+        }
+
         if (!string.Equals(args[0], "new", StringComparison.OrdinalIgnoreCase))
         {
             throw new CliException($"Unknown command '{args[0]}'. Run 'donkeh --help'.");
@@ -86,18 +91,28 @@ public static class Cli
 
         var target = Environment.CurrentDirectory;
         string? name = arguments.Value("name");
+        string? directoryName = null;
 
         if (arguments.Positionals.Count == 1)
         {
-            var directoryName = arguments.Positionals[0];
-            target = Path.Combine(target, directoryName);
-            name ??= directoryName;
+            directoryName = arguments.Positionals[0];
+            target = Path.GetFullPath(Path.Combine(target, directoryName));
+
+            if (directoryName is not "." and not "..")
+            {
+                name ??= directoryName;
+            }
         }
 
         var framework = FrameworkLocator.Find(arguments.Value("framework"));
         var files = ProjectGenerator.Generate(target, name, framework, arguments.Force);
 
         Console.WriteLine($"Created Donkeh project in {Path.GetFullPath(target)}");
+
+        if (framework is null)
+        {
+            Console.WriteLine("  Using published NuGet packages.");
+        }
 
         foreach (var file in files)
         {
@@ -107,12 +122,39 @@ public static class Cli
         Console.WriteLine();
         Console.WriteLine("Next:");
 
-        if (arguments.Positionals.Count == 1)
+        if (directoryName is not null and not "." and not "..")
         {
-            Console.WriteLine($"  cd {arguments.Positionals[0]}");
+            Console.WriteLine($"  cd {directoryName}");
         }
 
         Console.WriteLine("  dotnet run");
+        return 0;
+    }
+
+    private static int RunEnableTarget(string[] args)
+    {
+        var arguments = ParsedArguments.Parse(args, ["project"]);
+
+        if (arguments.Help)
+        {
+            PrintEnableTargetHelp();
+            return 0;
+        }
+
+        if (arguments.Positionals.Count != 1)
+        {
+            throw new CliException(
+                "Expected a target: desktop, android or web. " +
+                "Example: donkeh enable-target android");
+        }
+
+        var target = arguments.Positionals[0];
+        var projectFile = TargetEnabler.Enable(target, arguments.Value("project"));
+
+        Console.WriteLine($"Enabled {target} target in {projectFile}");
+        Console.WriteLine();
+        Console.WriteLine("Next:");
+        Console.WriteLine("  dotnet restore");
         return 0;
     }
 
@@ -165,11 +207,13 @@ public static class Cli
             Usage:
               donkeh new project [<directory>] [--name <name>] [--framework <path>] [--force]
               donkeh new component <name> [--project <path>] [--force]
+              donkeh enable-target <desktop|android|web> [--project <path>]
 
             Commands:
               new project       Create a minimal app that opens a blank window.
               new component     Create src/Components/<Name>/<Name>.cs and .css, embed
                                 the stylesheet, and register [assembly: Stylesheet(...)].
+              enable-target     Add desktop, Android or browser support to a project.
 
             Options:
               -h, --help        Show this help.
@@ -186,11 +230,12 @@ public static class Cli
 
             Creates a minimal Donkeh project in the current directory, or in
             <directory> when supplied. The generated app declares [AppRoot] and
-            opens a blank window.
+            opens a blank window. Outside a framework checkout, the project uses
+            the published NuGet packages automatically.
 
             Options:
               --name <name>        Project name; defaults to the directory name.
-              --framework <path>   Repository root or Donkeh directory.
+              --framework <path>   Use a local framework checkout instead of NuGet.
               --force              Overwrite existing generated files.
             """);
     }
@@ -212,6 +257,25 @@ public static class Cli
             Options:
               --project <path>     Project file or project directory.
               --force              Overwrite existing component files.
+            """);
+    }
+
+    private static void PrintEnableTargetHelp()
+    {
+        Console.WriteLine("""
+            Usage:
+              donkeh enable-target <desktop|android|web> [--project <path>]
+
+            Adds a platform target to a generated project and wires up the packages
+            or framework properties it needs. Desktop is enabled by default.
+
+            Targets:
+              desktop              Desktop window host (net10.0).
+              android              Android host (net10.0-android).
+              web                  Browser host (net10.0-browser).
+
+            Options:
+              --project <path>     Project file or project directory.
             """);
     }
 

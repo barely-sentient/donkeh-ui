@@ -109,11 +109,14 @@ dotnet run --project Donkeh/CliTool/Source/Donkeh.CliTool.csproj -- --help</code
         </div>
 
         <h2 id="create-project">Create a project</h2>
-        <p>Run one of these from the directory where the project should live:</p>
+        <p>
+            Run one of these from any directory. The CLI uses the published NuGet
+            packages, so no framework checkout is required.
+        </p>
 
         <div class="code" data-label="Terminal">
 <pre><code># current directory becomes the project root
-donkeh new project
+donkeh new project .
 
 # or create a new directory and project
 donkeh new project MyApp</code></pre>
@@ -125,11 +128,16 @@ donkeh new project MyApp</code></pre>
             to write and no platform-specific entry-point code.
         </p>
 
+        <div class="callout note">
+            <strong>Working on the framework itself?</strong>
+            Pass <code>--framework &lt;path&gt;</code> to point at a local checkout. The
+            generated project then uses project references instead of NuGet packages.
+        </div>
+
         <h2 id="structure">Directory structure</h2>
         <div class="tree">MyApp/
 ├── MyApp.csproj
 ├── Program.cs
-├── Directory.Build.targets
 ├── .gitignore
 ├── src/
 │   └── Components/
@@ -144,9 +152,10 @@ donkeh new project MyApp</code></pre>
     └── wasm/</div>
 
         <p>
-            The generated project only carries the source it needs. The
-            <code>Directory.Build.targets</code> file imports the framework's host
-            wiring; the <code>.csproj</code> imports the target-framework props.
+            A NuGet-based project carries only its own source. The framework's host
+            wiring arrives with the packages. Projects generated against a local
+            checkout also include a <code>Directory.Build.targets</code> that imports
+            that checkout's build targets.
         </p>
 
         <h2 id="app-root">The app root</h2>
@@ -189,12 +198,24 @@ public sealed class App : Component
 
         <h2 id="hosts">Choose hosts</h2>
         <p>
-            Add opt-in properties to the project file. Only the hosts you enable are
-            added to <code>$(DonkehTargetFrameworks)</code>.
+            Desktop is enabled by default. Add Android or browser support from the
+            project directory, and the CLI updates the project file for you:
+        </p>
+
+        <div class="code" data-label="Terminal">
+<pre><code>donkeh enable-target android
+donkeh enable-target web</code></pre>
+        </div>
+
+        <p>
+            Each target only adds what it needs: target frameworks, package
+            references and platform properties. Checkout-based projects use the
+            equivalent <code>Donkeh*</code> properties instead.
         </p>
 
         <div class="code" data-label="MyApp.csproj">
-<pre><code>&lt;PropertyGroup&gt;
+<pre><code>&lt;!-- Checkout-based projects only. --&gt;
+&lt;PropertyGroup&gt;
   &lt;DonkehDesktop&gt;true&lt;/DonkehDesktop&gt;
   &lt;DonkehAndroid&gt;true&lt;/DonkehAndroid&gt;
   &lt;DonkehWeb&gt;true&lt;/DonkehWeb&gt;
@@ -278,9 +299,28 @@ dotnet publish -c Release -f net10.0-browser</code></pre>
 
         <h2 id="manual">Manual project setup</h2>
         <p>
-            If you are not using the CLI, the app project needs the framework's target
-            wiring. In a checkout, import the props after the opt-in properties and
-            import the targets from a <code>Directory.Build.targets</code>:
+            If you are not using the CLI, a normal SDK project only needs a package
+            reference. The package carries the entry point and platform wiring:
+        </p>
+
+        <div class="code" data-label="MyApp.csproj">
+<pre><code>&lt;Project Sdk="Microsoft.NET.Sdk"&gt;
+  &lt;PropertyGroup&gt;
+    &lt;OutputType&gt;Exe&lt;/OutputType&gt;
+    &lt;TargetFramework&gt;net10.0&lt;/TargetFramework&gt;
+    &lt;ImplicitUsings&gt;enable&lt;/ImplicitUsings&gt;
+    &lt;Nullable&gt;enable&lt;/Nullable&gt;
+  &lt;/PropertyGroup&gt;
+
+  &lt;ItemGroup&gt;
+    &lt;PackageReference Include="Donkeh.Windowing" Version="1.0.22" /&gt;
+  &lt;/ItemGroup&gt;
+&lt;/Project&gt;</code></pre>
+        </div>
+
+        <p>
+            In a framework checkout, import the props after the opt-in properties and
+            import the targets from a <code>Directory.Build.targets</code> instead:
         </p>
 
         <div class="code" data-label="MyApp.csproj">

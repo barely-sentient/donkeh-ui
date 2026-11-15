@@ -1,0 +1,12 @@
+<Project>
+
+    <!--
+        Browser builds need the Blazor WebAssembly SDK props. The generated
+        project only sets TargetFrameworks, so the package adds the SDK pieces
+        when the browser target is enabled.
+    -->
+    <Import Sdk="Microsoft.NET.Sdk.BlazorWebAssembly"
+            Project="Sdk.props"
+            Condition="'$(TargetFramework)' == 'net10.0-browser'" />
+
+</Project>

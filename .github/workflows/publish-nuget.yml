@@ -61,8 +61,14 @@ jobs:
       - name: Test
         run: dotnet test "$SOLUTION" -c Release --no-build --no-restore -p:Version=${{ steps.version.outputs.version }}
 
-      - name: Pack
+      - name: Install Android workload
+        run: dotnet workload install android
+
+      - name: Pack desktop and browser packages
         run: dotnet pack "$SOLUTION" -c Release --no-build --no-restore -p:Version=${{ steps.version.outputs.version }} -o artifacts
+
+      - name: Pack Android host
+        run: dotnet pack Donkeh/Windowing/Android/Donkeh.Windowing.Android.csproj -c Release -p:Version=${{ steps.version.outputs.version }} -o artifacts
 
       - name: Show generated packages
         run: ls -la artifacts

@@ -23,6 +23,22 @@
     </ItemGroup>
 
     <ItemGroup>
+      <!--
+          NuGet consumers get the framework-owned entry point, browser host
+          defaults and Android permission wiring without importing the checkout.
+      -->
+      <None Include="..\..\Build\Package\Donkeh.Windowing.props"
+            Pack="true"
+            PackagePath="buildTransitive\Donkeh.Windowing.props" />
+      <None Include="..\..\Build\Package\Donkeh.Windowing.targets"
+            Pack="true"
+            PackagePath="buildTransitive\Donkeh.Windowing.targets" />
+      <None Include="..\..\Build\Package\index.html"
+            Pack="true"
+            PackagePath="buildTransitive\Donkeh.Windowing\index.html" />
+    </ItemGroup>
+
+    <ItemGroup>
       <ProjectReference Include="..\..\Hosting\Source\Donkeh.Hosting.csproj" />
       <ProjectReference Include="..\..\Data\Source\Data.csproj" />
       <ProjectReference Include="..\..\DataEngine\Source\DataEngine.csproj" />

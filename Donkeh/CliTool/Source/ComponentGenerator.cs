@@ -88,7 +88,7 @@ internal static class ComponentGenerator
     }
 
     /// <summary>Finds the project file to update.</summary>
-    private static string FindProject(string? projectPath)
+    internal static string FindProject(string? projectPath)
     {
         if (!string.IsNullOrWhiteSpace(projectPath))
         {

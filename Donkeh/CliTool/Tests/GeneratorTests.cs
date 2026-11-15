@@ -30,6 +30,73 @@ public sealed class GeneratorTests
     }
 
     [Fact]
+    public void NewProjectOutsideCheckoutUsesNuGetPackages()
+    {
+        using var directory = new TemporaryDirectory();
+
+        var files = ProjectGenerator.Generate(
+            directory.Path,
+            "SampleApp",
+            frameworkRoot: null,
+            force: false);
+
+        Assert.Equal(3, files.Count);
+        Assert.False(File.Exists(Path.Combine(directory.Path, "Directory.Build.targets")));
+
+        var project = File.ReadAllText(Path.Combine(directory.Path, "SampleApp.csproj"));
+        Assert.Contains("<TargetFramework>net10.0</TargetFramework>", project, StringComparison.Ordinal);
+        Assert.Contains("<PackageReference Include=\"Donkeh.Windowing\" Version=\"$(DonkehVersion)\" />", project, StringComparison.Ordinal);
+        Assert.Contains("<DonkehVersion", project, StringComparison.Ordinal);
+        Assert.DoesNotContain("Donkeh.props", project, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EnableTargetAddsAndroidAndBrowserPackages()
+    {
+        using var directory = new TemporaryDirectory();
+
+        ProjectGenerator.Generate(directory.Path, "SampleApp", frameworkRoot: null, force: false);
+
+        var projectFile = Path.Combine(directory.Path, "SampleApp.csproj");
+
+        TargetEnabler.Enable("android", projectFile);
+
+        var project = File.ReadAllText(projectFile);
+        Assert.Contains(
+            "<TargetFrameworks>net10.0;net10.0-android</TargetFrameworks>",
+            project,
+            StringComparison.Ordinal);
+        Assert.Contains("<SupportedOSPlatformVersion Condition=\"'$(TargetFramework)' == 'net10.0-android'\">24</SupportedOSPlatformVersion>", project, StringComparison.Ordinal);
+        Assert.Contains("Include=\"Donkeh.Windowing.Android\"", project, StringComparison.Ordinal);
+
+        TargetEnabler.Enable("web", projectFile);
+
+        project = File.ReadAllText(projectFile);
+        Assert.Contains("net10.0-browser", project, StringComparison.Ordinal);
+        Assert.Contains("<RuntimeIdentifiers Condition=\"'$(TargetFramework)' == ''\">browser-wasm</RuntimeIdentifiers>", project, StringComparison.Ordinal);
+        Assert.Contains("Include=\"Donkeh.Windowing.Browser\"", project, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EnableTargetUpdatesCheckoutProjectProperties()
+    {
+        using var directory = new TemporaryDirectory();
+
+        ProjectGenerator.Generate(
+            directory.Path,
+            "SampleApp",
+            FrameworkLocator.Find(null),
+            force: false);
+
+        var projectFile = Path.Combine(directory.Path, "SampleApp.csproj");
+        TargetEnabler.Enable("android", projectFile);
+
+        var project = File.ReadAllText(projectFile);
+        Assert.Contains("<DonkehAndroid>true</DonkehAndroid>", project, StringComparison.Ordinal);
+        Assert.DoesNotContain("Donkeh.Windowing.Android", project, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void NewComponentCreatesFilesAndUpdatesProject()
     {
         using var directory = new TemporaryDirectory();

@@ -8,6 +8,9 @@
     <PropertyGroup>
         <PackageId>Donkeh.$(MSBuildProjectName.Replace('Donkeh.', ''))</PackageId>
 
+        <!-- Tests and benchmarks are not part of the published package set. -->
+        <IsPackable Condition="'$(MSBuildProjectName)' == 'Tests' or $(MSBuildProjectName.EndsWith('.Tests')) or $(MSBuildProjectName.Contains('Benchmark'))">false</IsPackable>
+
         <Authors>barely-sentient</Authors>
         <Company>barely-sentient</Company>
         <Description>$(PackageId) module for Donkeh, a CSS-driven UI engine for .NET.</Description>

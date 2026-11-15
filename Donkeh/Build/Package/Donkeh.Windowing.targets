@@ -1,0 +1,156 @@
+<Project>
+
+    <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0-browser'">
+        <DefineConstants>$(DefineConstants);BROWSER</DefineConstants>
+        <RuntimeIdentifier>browser-wasm</RuntimeIdentifier>
+        <!-- Keep the published host stable and self-contained. -->
+        <OverrideHtmlAssetPlaceholders>false</OverrideHtmlAssetPlaceholders>
+        <WasmFingerprintAssets>false</WasmFingerprintAssets>
+        <WasmFingerprintDotnetJs>false</WasmFingerprintDotnetJs>
+        <PublishTrimmed>false</PublishTrimmed>
+    </PropertyGroup>
+
+    <!--
+        Framework-owned entry point. The app only declares [AppRoot]; desktop and
+        browser builds compile this generated Main and set it as the startup
+        object. Android uses DonkehActivity instead.
+    -->
+    <Target Name="DonkehGenerateEntryPoint"
+            BeforeTargets="CoreCompile"
+            Condition="('$(TargetFramework)' == 'net10.0' or '$(TargetFramework)' == 'net10.0-browser') and '$(OutputType)' == 'Exe' and '$(DonkehGenerateEntryPoint)' != 'false'">
+        <PropertyGroup>
+            <_DonkehGeneratedEntryPoint>$(IntermediateOutputPath)Donkeh.EntryPoint.g.cs</_DonkehGeneratedEntryPoint>
+        </PropertyGroup>
+
+        <ItemGroup>
+            <_DonkehEntryPointLine Include="// &lt;auto-generated /&gt;" />
+            <_DonkehEntryPointLine Include="namespace Donkeh.Generated" />
+            <_DonkehEntryPointLine Include="{" />
+            <_DonkehEntryPointLine Include="    internal static class DonkehEntryPoint" />
+            <_DonkehEntryPointLine Include="    {" />
+            <_DonkehEntryPointLine Include="#if BROWSER" />
+            <_DonkehEntryPointLine Include="        public static global::System.Threading.Tasks.Task Main(string[] args)" />
+            <_DonkehEntryPointLine Include="            =&gt; global::Donkeh.Windowing.Browser.DonkehBrowser.RunAsync(args)%3B" />
+            <_DonkehEntryPointLine Include="#else" />
+            <_DonkehEntryPointLine Include="        public static void Main(string[] args)" />
+            <_DonkehEntryPointLine Include="            =&gt; global::Donkeh.Windowing.AppRootHost.RunDesktop(args)%3B" />
+            <_DonkehEntryPointLine Include="#endif" />
+            <_DonkehEntryPointLine Include="    }" />
+            <_DonkehEntryPointLine Include="}" />
+        </ItemGroup>
+
+        <WriteLinesToFile File="$(_DonkehGeneratedEntryPoint)"
+                          Lines="@(_DonkehEntryPointLine)"
+                          Overwrite="true"
+                          Encoding="UTF-8" />
+
+        <ItemGroup>
+            <Compile Include="$(_DonkehGeneratedEntryPoint)" />
+            <FileWrites Include="$(_DonkehGeneratedEntryPoint)" />
+        </ItemGroup>
+
+        <PropertyGroup>
+            <StartupObject>Donkeh.Generated.DonkehEntryPoint</StartupObject>
+        </PropertyGroup>
+    </Target>
+
+    <!--
+        The browser host supplies a default page when the app does not provide
+        one. Apps can customise the shell with wwwroot/index.html.
+    -->
+    <Target Name="DonkehEnsureBrowserHostPage"
+            BeforeTargets="AssignTargetPaths;ResolveCurrentProjectStaticWebAssetsInputs"
+            Condition="'$(TargetFramework)' == 'net10.0-browser' and !Exists('$(MSBuildProjectDirectory)\wwwroot\index.html')">
+        <PropertyGroup>
+            <_DonkehDefaultHostPage>$(MSBuildThisFileDirectory)Donkeh.Windowing\index.html</_DonkehDefaultHostPage>
+            <_DonkehGeneratedHostPage>$(IntermediateOutputPath)donkeh\index.html</_DonkehGeneratedHostPage>
+        </PropertyGroup>
+
+        <MakeDir Directories="$(IntermediateOutputPath)donkeh" />
+        <Copy SourceFiles="$(_DonkehDefaultHostPage)"
+              DestinationFiles="$(_DonkehGeneratedHostPage)"
+              SkipUnchangedFiles="true" />
+
+        <ItemGroup>
+            <Content Include="$(_DonkehGeneratedHostPage)"
+                     Link="wwwroot\index.html"
+                     CopyToOutputDirectory="PreserveNewest"
+                     CopyToPublishDirectory="PreserveNewest" />
+        </ItemGroup>
+    </Target>
+
+    <!--
+        Publish browser output to the project's deploy folder so the Deploy tab
+        and a plain `dotnet publish -f net10.0-browser` land in the same place.
+    -->
+    <Target Name="DonkehSetBrowserPublishDir"
+            BeforeTargets="PrepareForPublish"
+            Condition="'$(TargetFramework)' == 'net10.0-browser'">
+        <PropertyGroup>
+            <PublishDir>$(MSBuildProjectDirectory)\builds\wasm\</PublishDir>
+        </PropertyGroup>
+    </Target>
+
+    <!--
+        Blazor publishes the site under a nested wwwroot folder. Flatten it so
+        builds/wasm is directly servable.
+    -->
+    <Target Name="DonkehFlattenBrowserPublish"
+            AfterTargets="Publish"
+            Condition="'$(TargetFramework)' == 'net10.0-browser' and Exists('$(PublishDir)wwwroot')">
+        <ItemGroup>
+            <_DonkehPublishedWebFiles Include="$(PublishDir)wwwroot\**\*" />
+        </ItemGroup>
+
+        <Copy SourceFiles="@(_DonkehPublishedWebFiles)"
+              DestinationFiles="@(_DonkehPublishedWebFiles->'$(PublishDir)%(RecursiveDir)%(Filename)%(Extension)')"
+              SkipUnchangedFiles="true" />
+
+        <RemoveDir Directories="$(PublishDir)wwwroot" />
+    </Target>
+
+    <!--
+        Generates an Android manifest overlay from the opt-in permission list, so
+        an app does not have to hand-write uses-permission entries that the
+        Host.Permissions API already knows about.
+    -->
+    <Target Name="DonkehGenerateAndroidPermissions"
+            BeforeTargets="_ManifestMerger;ProcessAndroidManifest"
+            Condition="'$(TargetFramework)' == 'net10.0-android' and '$(DonkehAndroidPermissions)' != ''">
+        <PropertyGroup>
+            <_DonkehAndroidPermissionOverlay>$(IntermediateOutputPath)donkeh.android.permissions.xml</_DonkehAndroidPermissionOverlay>
+            <_DonkehPermissions>$(DonkehAndroidPermissions)</_DonkehPermissions>
+        </PropertyGroup>
+
+        <ItemGroup>
+            <_DonkehAndroidPermissionLine Include="&lt;?xml version=&quot;1.0&quot; encoding=&quot;utf-8&quot;?&gt;" />
+            <_DonkehAndroidPermissionLine Include="&lt;manifest xmlns:android=&quot;http://schemas.android.com/apk/res/android&quot;&gt;" />
+            <_DonkehAndroidPermissionLine Include="  &lt;uses-permission android:name=&quot;android.permission.CAMERA&quot; /&gt;" Condition="$([System.String]::Copy('$(_DonkehPermissions)').Contains('Camera'))" />
+            <_DonkehAndroidPermissionLine Include="  &lt;uses-permission android:name=&quot;android.permission.RECORD_AUDIO&quot; /&gt;" Condition="$([System.String]::Copy('$(_DonkehPermissions)').Contains('Microphone'))" />
+            <_DonkehAndroidPermissionLine Include="  &lt;uses-permission android:name=&quot;android.permission.ACCESS_FINE_LOCATION&quot; /&gt;" Condition="$([System.String]::Copy('$(_DonkehPermissions)').Contains('Location'))" />
+            <_DonkehAndroidPermissionLine Include="  &lt;uses-permission android:name=&quot;android.permission.ACCESS_COARSE_LOCATION&quot; /&gt;" Condition="$([System.String]::Copy('$(_DonkehPermissions)').Contains('Location'))" />
+            <_DonkehAndroidPermissionLine Include="  &lt;uses-permission android:name=&quot;android.permission.POST_NOTIFICATIONS&quot; /&gt;" Condition="$([System.String]::Copy('$(_DonkehPermissions)').Contains('Notifications'))" />
+            <_DonkehAndroidPermissionLine Include="  &lt;uses-permission android:name=&quot;android.permission.READ_MEDIA_IMAGES&quot; /&gt;" Condition="$([System.String]::Copy('$(_DonkehPermissions)').Contains('Photos')) Or $([System.String]::Copy('$(_DonkehPermissions)').Contains('Storage'))" />
+            <_DonkehAndroidPermissionLine Include="  &lt;uses-permission android:name=&quot;android.permission.READ_EXTERNAL_STORAGE&quot; /&gt;" Condition="$([System.String]::Copy('$(_DonkehPermissions)').Contains('Photos')) Or $([System.String]::Copy('$(_DonkehPermissions)').Contains('Storage'))" />
+            <_DonkehAndroidPermissionLine Include="  &lt;uses-permission android:name=&quot;android.permission.READ_CONTACTS&quot; /&gt;" Condition="$([System.String]::Copy('$(_DonkehPermissions)').Contains('Contacts'))" />
+            <_DonkehAndroidPermissionLine Include="  &lt;uses-permission android:name=&quot;android.permission.READ_CALENDAR&quot; /&gt;" Condition="$([System.String]::Copy('$(_DonkehPermissions)').Contains('Calendar'))" />
+            <_DonkehAndroidPermissionLine Include="  &lt;uses-permission android:name=&quot;android.permission.BLUETOOTH_CONNECT&quot; /&gt;" Condition="$([System.String]::Copy('$(_DonkehPermissions)').Contains('Bluetooth'))" />
+            <_DonkehAndroidPermissionLine Include="  &lt;uses-permission android:name=&quot;android.permission.ACTIVITY_RECOGNITION&quot; /&gt;" Condition="$([System.String]::Copy('$(_DonkehPermissions)').Contains('Motion'))" />
+            <_DonkehAndroidPermissionLine Include="&lt;/manifest&gt;" />
+        </ItemGroup>
+
+        <WriteLinesToFile File="$(_DonkehAndroidPermissionOverlay)"
+                          Lines="@(_DonkehAndroidPermissionLine)"
+                          Overwrite="true"
+                          Encoding="UTF-8" />
+
+        <ItemGroup>
+            <AndroidManifestOverlay Include="$(_DonkehAndroidPermissionOverlay)" />
+        </ItemGroup>
+    </Target>
+
+    <Import Sdk="Microsoft.NET.Sdk.BlazorWebAssembly"
+            Project="Sdk.targets"
+            Condition="'$(TargetFramework)' == 'net10.0-browser'" />
+
+</Project>

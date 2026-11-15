@@ -1,13 +1,16 @@
 namespace Donkeh.Cli;
 
-/// <summary>Finds the Donkeh framework checkout used by generated projects.</summary>
+/// <summary>Finds a local Donkeh framework checkout, when one is available.</summary>
 internal static class FrameworkLocator
 {
     /// <summary>Finds the framework root directory.</summary>
     /// <param name="explicitPath">Optional user-supplied framework or repository path.</param>
-    /// <returns>The absolute path to the <c>Donkeh</c> directory.</returns>
-    /// <exception cref="CliException">No framework checkout was found.</exception>
-    public static string Find(string? explicitPath)
+    /// <returns>
+    /// The absolute path to the <c>Donkeh</c> directory, or <see langword="null"/>
+    /// when no checkout is present and the CLI should use NuGet packages.
+    /// </returns>
+    /// <exception cref="CliException">An explicit path does not contain a framework.</exception>
+    public static string? Find(string? explicitPath)
     {
         if (!string.IsNullOrWhiteSpace(explicitPath))
         {
@@ -40,9 +43,7 @@ internal static class FrameworkLocator
             }
         }
 
-        throw new CliException(
-            "Could not find the Donkeh framework checkout. " +
-            "Run the command inside the repository or pass --framework <path>.");
+        return null;
     }
 
     /// <summary>Resolves a framework or repository path to the framework directory.</summary>
