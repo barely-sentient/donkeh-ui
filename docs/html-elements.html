@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>HTML elements — Donkeh</title>
+    <meta name="description" content="Every HTML element exposed by HtmlHelper, how unknown tags behave, and which elements have host-specific behaviour.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/donkeh-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+                <a href="routing.html">Routing and setPage</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Reference</span>
+                <a href="html-elements.html">HTML elements</a>
+                <a href="css-support.html">CSS support</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Primitives</span>
+                <a href="image.html">Image</a>
+                <a href="video.html">Video</a>
+                <a href="canvas.html">Canvas</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/donkeh-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Reference <span>/</span> HTML elements</div>
+        <h1>HTML elements</h1>
+        <p class="lead">
+            <code>HtmlHelper</code> exposes 138 typed factories covering the common
+            HTML elements, from the HTML5 structural set to legacy tags. All of them
+            produce the same element nodes as the generic
+            <code>H(tag, props, children)</code> helper, so the two styles mix freely.
+        </p>
+
+        <div class="code" data-label="Typed helpers">
+<pre><code>using Donkeh.UILab;
+using static Donkeh.UILab.HtmlHelper;
+using static Donkeh.UILab._;
+
+Div(new() { ClassName = "card" },
+    H2(new() { ClassName = "card-title" }, Text("Files")),
+    P(new() { ClassName = "card-copy" }, Text("12 items")),
+    A(new() { Href = "/files" }, Text("Open")));</code></pre>
+        </div>
+
+        <h2 id="props">Props and attributes</h2>
+        <p>
+            Every helper takes a <code>Props</code> instance. Common attributes are
+            first-class properties; anything else goes through the
+            <code>Attributes</code> dictionary.
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Group</th><th>Properties</th></tr></thead>
+                <tbody>
+                    <tr><td>Identity</td><td><code>Id</code>, <code>ClassName</code>, <code>Title</code>, <code>Role</code>, <code>Key</code></td></tr>
+                    <tr><td>Links and media</td><td><code>Href</code>, <code>Src</code>, <code>Alt</code>, <code>Target</code>, <code>Rel</code></td></tr>
+                    <tr><td>Forms</td><td><code>Type</code>, <code>Value</code>, <code>Placeholder</code>, <code>Name</code>, <code>Disabled</code>, <code>Checked</code>, <code>TabIndex</code></td></tr>
+                    <tr><td>Anything else</td><td><code>Attributes = new Dictionary&lt;string, string&gt; { ["data-id"] = "42" }</code></td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            Boolean properties emit an empty presence attribute when true and disappear
+            when false or null. Entries in <code>Attributes</code> are applied after the
+            dedicated properties. A <code>class</code> entry adds tokens to
+            <code>ClassName</code>; an <code>id</code> entry replaces <code>Id</code>.
+        </p>
+
+        <div class="code" data-label="Attributes">
+<pre><code>Button(new()
+{
+    ClassName = "primary",
+    Disabled = isBusy,
+    Attributes = new Dictionary&lt;string, string&gt;
+    {
+        ["data-command"] = "save",
+        ["aria-label"] = "Save changes"
+    }
+}, Text("Save"));</code></pre>
+        </div>
+
+        <h2 id="elements">Element reference</h2>
+        <p>
+            The factories below are available from
+            <code>using static Donkeh.UILab.HtmlHelper;</code>. Block elements default
+            to <code>display: block</code>, phrasing content to
+            <code>display: inline</code>, replaced and form content to
+            <code>inline-block</code>, and unknown tags to <code>inline-block</code>.
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Group</th><th>Helpers</th></tr></thead>
+                <tbody>
+                    <tr><td>Document and roots</td><td><code>Html</code>, <code>Head</code>, <code>Body</code>, <code>Title</code>, <code>Meta</code>, <code>Link</code>, <code>Base</code>, <code>Style</code>, <code>Script</code>, <code>Template</code>, <code>Noscript</code></td></tr>
+                    <tr><td>Sectioning and flow</td><td><code>Div</code>, <code>Main</code>, <code>Section</code>, <code>Article</code>, <code>Aside</code>, <code>Header</code>, <code>Footer</code>, <code>Nav</code>, <code>Figure</code>, <code>Figcaption</code>, <code>Blockquote</code>, <code>Address</code>, <code>Details</code>, <code>Summary</code>, <code>Dialog</code>, <code>Center</code>, <code>Hr</code>, <code>Pre</code>, <code>Br</code>, <code>Search</code>, <code>Menu</code>, <code>Dir</code>, <code>Hgroup</code></td></tr>
+                    <tr><td>Text and inline</td><td><code>Span</code>, <code>A</code>, <code>Strong</code>, <code>Em</code>, <code>B</code>, <code>I</code>, <code>U</code>, <code>S</code>, <code>Small</code>, <code>Sub</code>, <code>Sup</code>, <code>Code</code>, <code>Kbd</code>, <code>Samp</code>, <code>Var</code>, <code>Mark</code>, <code>Abbr</code>, <code>Cite</code>, <code>Q</code>, <code>Time</code>, <code>Label</code>, <code>Output</code>, <code>Ruby</code>, <code>Rt</code>, <code>Rp</code>, <code>Rb</code>, <code>Rtc</code>, <code>Bdi</code>, <code>Bdo</code>, <code>Wbr</code>, <code>Del</code>, <code>Ins</code></td></tr>
+                    <tr><td>Headings, text and lists</td><td><code>H1</code>–<code>H6</code>, <code>P</code>, <code>Ul</code>, <code>Ol</code>, <code>Li</code>, <code>Dl</code>, <code>Dt</code>, <code>Dd</code></td></tr>
+                    <tr><td>Forms</td><td><code>Form</code>, <code>Fieldset</code>, <code>Legend</code>, <code>Input</code>, <code>Textarea</code>, <code>Select</code>, <code>Option</code>, <code>Optgroup</code>, <code>Button</code>, <code>Datalist</code>, <code>Progress</code>, <code>Meter</code>, <code>Keygen</code>, <code>Isindex</code></td></tr>
+                    <tr><td>Tables</td><td><code>Table</code>, <code>Caption</code>, <code>Colgroup</code>, <code>Col</code>, <code>Thead</code>, <code>Tbody</code>, <code>Tfoot</code>, <code>Tr</code>, <code>Th</code>, <code>Td</code></td></tr>
+                    <tr><td>Media and embedded</td><td><code>Img</code>, <code>Picture</code>, <code>Source</code>, <code>Video</code>, <code>Audio</code>, <code>Canvas</code>, <code>Iframe</code>, <code>Object</code>, <code>Embed</code>, <code>Applet</code>, <code>Map</code>, <code>Area</code>, <code>Param</code>, <code>Track</code></td></tr>
+                    <tr><td>Legacy and misc</td><td><code>Acronym</code>, <code>Basefont</code>, <code>Bgsound</code>, <code>Big</code>, <code>Blink</code>, <code>Font</code>, <code>Frame</code>, <code>Frameset</code>, <code>Marquee</code>, <code>Menuitem</code>, <code>Nobr</code>, <code>Noembed</code>, <code>Noframes</code>, <code>Plaintext</code>, <code>Spacer</code>, <code>Strike</code>, <code>Tt</code>, <code>Xmp</code>, <code>Slot</code>, <code>Data</code></td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="custom">Custom and unknown tags</h2>
+        <p>
+            Any tag name is accepted. Use <code>H</code> when there is no typed helper;
+            the element participates in CSS like any other box and defaults to
+            <code>inline-block</code> until a rule changes its display.
+        </p>
+
+        <div class="code" data-label="Custom element">
+<pre><code>H("my-badge", new()
+{
+    ClassName = "badge",
+    Attributes = new Dictionary&lt;string, string&gt;
+    {
+        ["data-count"] = "3"
+    }
+}, Text("New"));</code></pre>
+        </div>
+
+        <h2 id="behaviour">Behaviour by element</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Element</th><th>Notes</th></tr></thead>
+                <tbody>
+                    <tr><td><code>img</code></td><td>Replaced content with intrinsic sizing, source resolution, object-fit and a shared texture cache. See <a href="image.html">Image</a>.</td></tr>
+                    <tr><td><code>video</code></td><td>Desktop and Android use a LibVLC player whose frames become textures. See <a href="video.html">Video</a>.</td></tr>
+                    <tr><td><code>canvas</code></td><td>Desktop uses batched Silk.NET drawing or raw OpenGL; browser drawing is not wired yet. See <a href="canvas.html">Canvas</a>.</td></tr>
+                    <tr><td><code>audio</code></td><td>Desktop and Android use the window-side audio player and paint transport controls. It has no visual box when <code>controls</code> is absent.</td></tr>
+                    <tr><td><code>input</code></td><td>Text-like types are editable. Checkbox, radio, range, colour and file inputs are host-painted and interactive. Other types still render as controls.</td></tr>
+                    <tr><td><code>select</code>, <code>option</code></td><td>The selected option is painted by the host. Option elements are hidden in the user-agent sheet.</td></tr>
+                    <tr><td><code>textarea</code></td><td>Editable multi-line text with selection, caret and placeholder support.</td></tr>
+                    <tr><td><code>table</code> family</td><td>Table layout, collapse and spacing are supported. Use normal table structure; anonymous table boxes are not synthesised for arbitrary children.</td></tr>
+                    <tr><td><code>picture</code>, <code>source</code></td><td>Parsed as elements, but responsive source selection is not implemented. <code>img</code> uses its own <code>src</code>.</td></tr>
+                    <tr><td><code>iframe</code>, <code>object</code>, <code>embed</code></td><td>Render a stable 300 × 150 placeholder box. They do not load or embed external documents.</td></tr>
+                    <tr><td><code>script</code>, <code>style</code>, <code>link</code>, <code>meta</code></td><td>Hidden by the user-agent sheet. Scripts are never executed and <code>link</code> stylesheets are never fetched; load CSS through <code>[Stylesheet]</code>.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="callout note">
+            <strong>Browser host</strong>
+            On WebAssembly the tree is mirrored to real DOM elements, so native browser
+            behaviour applies. Desktop and Android use the CSS engine, layout and paint
+            pipeline instead. Elements with host-specific behaviour are called out
+            above.
+        </div>
+
+        <div class="page-nav">
+            <a class="prev" href="routing.html"><span>Previous</span>Routing and setPage</a>
+            <a class="next" href="css-support.html"><span>Next</span>CSS support</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh — CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/donkeh-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>

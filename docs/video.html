@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Video — Donkeh</title>
+    <meta name="description" content="How the video element works in Donkeh: LibVLC decoding, texture frames, player controls and browser-host differences.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/donkeh-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+                <a href="routing.html">Routing and setPage</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Reference</span>
+                <a href="html-elements.html">HTML elements</a>
+                <a href="css-support.html">CSS support</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Primitives</span>
+                <a href="image.html">Image</a>
+                <a href="video.html">Video</a>
+                <a href="canvas.html">Canvas</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/donkeh-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Primitives <span>/</span> Video</div>
+        <h1>Video</h1>
+        <p class="lead">
+            <code>video</code> is a host primitive, not an element the renderer can
+            paint by walking children. On desktop and Android a native player decodes
+            the stream off the UI thread and publishes frames as textures; layout treats
+            the element as replaced content and the host paints the transport controls.
+        </p>
+
+        <h2 id="why">Why it is special</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Concern</th><th>How Donkeh handles it</th></tr></thead>
+                <tbody>
+                    <tr><td>Decoding</td><td>Uses LibVLCSharp. Initialisation, demuxing, decoding and I/O run on worker threads.</td></tr>
+                    <tr><td>Presentation</td><td>Decoded frames are copied into the window's image cache as a dynamic texture, then drawn through the normal image path. The most recent frame is reused until the next one arrives.</td></tr>
+                    <tr><td>Layout</td><td>The element is replaced content with a default 300 × 150 box. CSS width, height, aspect ratio and <code>object-fit</code> apply to the frame.</td></tr>
+                    <tr><td>Chrome</td><td>When <code>controls</code> is present, the host paints and hit-tests its own play/pause, scrubber, time and volume controls. They are not DOM elements and cannot be styled individually.</td></tr>
+                    <tr><td>Lifecycle</td><td>One player per element. Players are created asynchronously, updated when attributes change, and pruned when the element leaves the tree.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            This is why <code>video</code> needs a typed props object and a native
+            dependency. A plain <code>H("video", ...)</code> still works because
+            <code>VideoProps</code> derives from <code>Props</code>, but the typed
+            <code>OnReady</code> callback is only available through it.
+        </p>
+
+        <h2 id="usage">Basic playback</h2>
+        <div class="code" data-label="Video.cs">
+<pre><code>using Donkeh.UILab;
+using Donkeh.Windowing;
+using static Donkeh.UILab.HtmlHelper;
+using static Donkeh.UILab._;
+
+public sealed class Clip : Component
+{
+    public override Node Render() =&gt;
+        H("video", new VideoProps
+        {
+            Src = "media/intro.mp4",
+            Controls = true,
+            AutoPlay = true,
+            Loop = true,
+            Muted = true,
+            Volume = 0.8f,
+            OnReady = player =&gt;
+            {
+                // Save the player, or seek to a chapter once it exists.
+                player.Seek(12.5f);
+            },
+            OnTimeUpdate = seconds =&gt;
+                Console.WriteLine($"position: {seconds:0.0}s"),
+            OnEnded = () =&gt; Console.WriteLine("finished")
+        });</code></pre>
+        </div>
+
+        <div class="callout note">
+            <strong>Native runtime required</strong>
+            The managed <code>LibVLCSharp</code> package does not replace the native
+            LibVLC runtime. Install VLC or ship the matching native libraries with the
+            app. If LibVLC cannot be initialised, the element still lays out but no
+            frames or controls become available.
+        </div>
+
+        <h2 id="props">Playback props</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Prop</th><th>Attribute</th><th>Effect</th></tr></thead>
+                <tbody>
+                    <tr><td><code>Src</code></td><td><code>src</code></td><td>Media URL or file path. Changing it replaces the player.</td></tr>
+                    <tr><td><code>Controls</code></td><td><code>controls</code></td><td>Paints the host transport controls.</td></tr>
+                    <tr><td><code>AutoPlay</code> / <code>Autoplay</code></td><td><code>autoplay</code></td><td>Starts playback as soon as the player exists.</td></tr>
+                    <tr><td><code>Loop</code></td><td><code>loop</code></td><td>Restarts at the end instead of stopping.</td></tr>
+                    <tr><td><code>Muted</code></td><td><code>muted</code></td><td>Starts with audio muted.</td></tr>
+                    <tr><td><code>Volume</code></td><td><code>volume</code></td><td>Initial volume in the 0–1 range.</td></tr>
+                    <tr><td><code>PlaybackRate</code></td><td><code>playbackrate</code></td><td>Initial speed multiplier. One is normal.</td></tr>
+                    <tr><td><code>OnPlay</code>, <code>OnPause</code>, <code>OnEnded</code></td><td>—</td><td>Lifecycle callbacks driven by the host.</td></tr>
+                    <tr><td><code>OnTimeUpdate</code></td><td>—</td><td>Receives the current position in seconds.</td></tr>
+                    <tr><td><code>OnReady</code></td><td>—</td><td>Receives a <code>VideoPlayer</code> once creation succeeds.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="player">Driving the player</h2>
+        <p>
+            <code>OnReady</code> gives you the window-side control surface. Keep it in a
+            field or ref if an event handler needs it later.
+        </p>
+
+        <div class="code" data-label="VideoPlayer">
+<pre><code>public sealed class PlayerControls : Component
+{
+    private VideoPlayer? _player;
+
+    public override Node Render()
+    {
+        var playing = _player?.IsPlaying == true;
+
+        return Div(new() { ClassName = "transport" },
+            H("video", new VideoProps
+            {
+                Src = "media/demo.mp4",
+                OnReady = player =&gt; _player = player
+            }),
+            Button(new()
+            {
+                OnClick = () =&gt; _player?.Play()
+            }, Text("Play")),
+            Button(new()
+            {
+                OnClick = () =&gt; _player?.Pause()
+            }, Text("Pause")));
+    }
+}</code></pre>
+        </div>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Member</th><th>Purpose</th></tr></thead>
+                <tbody>
+                    <tr><td><code>Play()</code>, <code>Pause()</code>, <code>Stop()</code></td><td>Transport control.</td></tr>
+                    <tr><td><code>Seek(float seconds)</code>, <code>Seek(TimeSpan)</code></td><td>Seek to an absolute position. Returns whether the seek was accepted.</td></tr>
+                    <tr><td><code>IsPlaying</code>, <code>Time</code>, <code>Duration</code></td><td>Current transport state, in seconds where applicable.</td></tr>
+                    <tr><td><code>Volume</code>, <code>IsMuted</code>, <code>PlaybackRate</code></td><td>Audio and rate control.</td></tr>
+                    <tr><td><code>IsLooping</code></td><td>Reads the loop state of the underlying player.</td></tr>
+                    <tr><td><code>PlaybackEnded</code></td><td>Event raised when playback reaches the end without looping.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="browser">Browser host</h2>
+        <p>
+            On WebAssembly the element is a native HTML <code>video</code> element. The
+            browser owns decoding, controls and the media APIs, so
+            <code>OnReady</code>, <code>VideoPlayer</code> and the host-painted transport
+            controls are desktop/Android features. Use standard attributes such as
+            <code>src</code>, <code>controls</code>, <code>autoplay</code>,
+            <code>loop</code> and <code>muted</code>; the browser applies its own policy
+            for autoplay and audio.
+        </p>
+
+        <div class="callout tip">
+            <strong>Keep the frame small</strong>
+            Video frames are uploaded as a fixed-size dynamic texture. Avoid several
+            large videos on one screen; the decode threads are independent, but every
+            visible frame still costs an upload per update.
+        </div>
+
+        <div class="page-nav">
+            <a class="prev" href="image.html"><span>Previous</span>Image</a>
+            <a class="next" href="canvas.html"><span>Next</span>Canvas</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh — CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/donkeh-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>

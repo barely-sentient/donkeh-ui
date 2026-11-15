@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>CSS support — Donkeh</title>
+    <meta name="description" content="Registered CSS properties, selector coverage and how to report a CSS engine bug with a complete reproduction.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/donkeh-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+                <a href="routing.html">Routing and setPage</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Reference</span>
+                <a href="html-elements.html">HTML elements</a>
+                <a href="css-support.html">CSS support</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Primitives</span>
+                <a href="image.html">Image</a>
+                <a href="video.html">Video</a>
+                <a href="canvas.html">Canvas</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/donkeh-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Reference <span>/</span> CSS support</div>
+        <h1>CSS support</h1>
+        <p class="lead">
+            Donkeh parses real stylesheets with a CSS engine rather than translating a
+            subset at build time. This page tracks the 168 property names the resolver
+            recognises, the selector features that participate in matching, and the
+            fastest way to get a CSS bug fixed.
+        </p>
+
+        <div class="callout note">
+            <strong>Revision column</strong>
+            Each property currently points at the previous framework commit,
+            <a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a>.
+            That is a deliberate placeholder until per-property history is backfilled:
+            it identifies the support snapshot, not the exact commit that first added
+            each property.
+        </div>
+
+        <h2 id="selectors">Selectors and at-rules</h2>
+        <p>
+            The engine supports type, class, id, universal and attribute selectors,
+            plus descendant, child, adjacent-sibling and general-sibling combinators.
+            Specificity, source order and cascade layers decide the winner.
+        </p>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Feature</th><th>Status</th></tr></thead>
+                <tbody>
+                    <tr><td>Interaction and state pseudo-classes</td><td><code>:hover</code>, <code>:focus</code>, <code>:active</code>, <code>:focus-visible</code>, <code>:checked</code>, <code>:disabled</code>, <code>:enabled</code>, <code>:required</code>, <code>:read-only</code> and structural selectors.</td></tr>
+                    <tr><td>Logical pseudo-classes</td><td><code>:not()</code>, <code>:is()</code>, <code>:where()</code> and <code>:has()</code> are recognised but currently flagged as unsupported instead of being matched incorrectly.</td></tr>
+                    <tr><td>Pseudo-elements</td><td><code>::before</code> and <code>::after</code> have resolver plumbing, but are not part of the supported selector surface yet. Other pseudo-elements are ignored.</td></tr>
+                    <tr><td>Conditional at-rules</td><td><code>@media</code>, <code>@supports</code> and <code>@container</code> gate matching. <code>@layer</code> participates in the cascade.</td></tr>
+                    <tr><td>Animations</td><td><code>@keyframes</code> and <code>@-webkit-keyframes</code> are parsed; transitions and animations run through the style resolver.</td></tr>
+                    <tr><td>Imports</td><td><code>@import</code> is recorded but never fetched. Add each stylesheet explicitly through <code>[Stylesheet]</code> or <code>Stylesheet.Load()</code>.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="properties">Registered properties</h2>
+        <p>
+            The table lists every property name currently mapped to a
+            <code>CssProperty</code>. A registered name can still have partial value
+            support, so include the exact value in a bug report.
+        </p>
+
+        <input class="table-filter" id="css-filter" type="search" placeholder="Filter properties, for example flex, border, animation…" aria-label="Filter CSS properties">
+
+        <div class="table-wrap">
+            <table id="css-properties">
+                <thead><tr><th>Property</th><th>Support revision</th><th>Report</th></tr></thead>
+                <tbody>
+                    <tr><td><code>all</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20all">Report</a></td></tr>
+                    <tr><td><code>display</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20display">Report</a></td></tr>
+                    <tr><td><code>position</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20position">Report</a></td></tr>
+                    <tr><td><code>float</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20float">Report</a></td></tr>
+                    <tr><td><code>clear</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20clear">Report</a></td></tr>
+                    <tr><td><code>box-sizing</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20box-sizing">Report</a></td></tr>
+                    <tr><td><code>visibility</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20visibility">Report</a></td></tr>
+                    <tr><td><code>opacity</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20opacity">Report</a></td></tr>
+                    <tr><td><code>z-index</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20z-index">Report</a></td></tr>
+                    <tr><td><code>width</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20width">Report</a></td></tr>
+                    <tr><td><code>height</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20height">Report</a></td></tr>
+                    <tr><td><code>min-width</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20min-width">Report</a></td></tr>
+                    <tr><td><code>min-height</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20min-height">Report</a></td></tr>
+                    <tr><td><code>max-width</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20max-width">Report</a></td></tr>
+                    <tr><td><code>max-height</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20max-height">Report</a></td></tr>
+                    <tr><td><code>aspect-ratio</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20aspect-ratio">Report</a></td></tr>
+                    <tr><td><code>top</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20top">Report</a></td></tr>
+                    <tr><td><code>right</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20right">Report</a></td></tr>
+                    <tr><td><code>bottom</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20bottom">Report</a></td></tr>
+                    <tr><td><code>left</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20left">Report</a></td></tr>
+                    <tr><td><code>inset</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20inset">Report</a></td></tr>
+                    <tr><td><code>margin</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20margin">Report</a></td></tr>
+                    <tr><td><code>margin-top</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20margin-top">Report</a></td></tr>
+                    <tr><td><code>margin-right</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20margin-right">Report</a></td></tr>
+                    <tr><td><code>margin-bottom</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20margin-bottom">Report</a></td></tr>
+                    <tr><td><code>margin-left</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20margin-left">Report</a></td></tr>
+                    <tr><td><code>padding</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20padding">Report</a></td></tr>
+                    <tr><td><code>padding-top</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20padding-top">Report</a></td></tr>
+                    <tr><td><code>padding-right</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20padding-right">Report</a></td></tr>
+                    <tr><td><code>padding-bottom</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20padding-bottom">Report</a></td></tr>
+                    <tr><td><code>padding-left</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20padding-left">Report</a></td></tr>
+                    <tr><td><code>border</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20border">Report</a></td></tr>
+                    <tr><td><code>border-width</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20border-width">Report</a></td></tr>
+                    <tr><td><code>border-style</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20border-style">Report</a></td></tr>
+                    <tr><td><code>border-color</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20border-color">Report</a></td></tr>
+                    <tr><td><code>border-top</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20border-top">Report</a></td></tr>
+                    <tr><td><code>border-right</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20border-right">Report</a></td></tr>
+                    <tr><td><code>border-bottom</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20border-bottom">Report</a></td></tr>
+                    <tr><td><code>border-left</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20border-left">Report</a></td></tr>
+                    <tr><td><code>border-top-width</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20border-top-width">Report</a></td></tr>
+                    <tr><td><code>border-right-width</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20border-right-width">Report</a></td></tr>
+                    <tr><td><code>border-bottom-width</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20border-bottom-width">Report</a></td></tr>
+                    <tr><td><code>border-left-width</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20border-left-width">Report</a></td></tr>
+                    <tr><td><code>border-top-style</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20border-top-style">Report</a></td></tr>
+                    <tr><td><code>border-right-style</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20border-right-style">Report</a></td></tr>
+                    <tr><td><code>border-bottom-style</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20border-bottom-style">Report</a></td></tr>
+                    <tr><td><code>border-left-style</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20border-left-style">Report</a></td></tr>
+                    <tr><td><code>border-top-color</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20border-top-color">Report</a></td></tr>
+                    <tr><td><code>border-right-color</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20border-right-color">Report</a></td></tr>
+                    <tr><td><code>border-bottom-color</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20border-bottom-color">Report</a></td></tr>
+                    <tr><td><code>border-left-color</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20border-left-color">Report</a></td></tr>
+                    <tr><td><code>border-radius</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20border-radius">Report</a></td></tr>
+                    <tr><td><code>border-top-left-radius</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20border-top-left-radius">Report</a></td></tr>
+                    <tr><td><code>border-top-right-radius</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20border-top-right-radius">Report</a></td></tr>
+                    <tr><td><code>border-bottom-right-radius</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20border-bottom-right-radius">Report</a></td></tr>
+                    <tr><td><code>border-bottom-left-radius</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20border-bottom-left-radius">Report</a></td></tr>
+                    <tr><td><code>background</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20background">Report</a></td></tr>
+                    <tr><td><code>background-color</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20background-color">Report</a></td></tr>
+                    <tr><td><code>background-image</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20background-image">Report</a></td></tr>
+                    <tr><td><code>background-size</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20background-size">Report</a></td></tr>
+                    <tr><td><code>background-position</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20background-position">Report</a></td></tr>
+                    <tr><td><code>background-repeat</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20background-repeat">Report</a></td></tr>
+                    <tr><td><code>background-clip</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20background-clip">Report</a></td></tr>
+                    <tr><td><code>background-origin</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20background-origin">Report</a></td></tr>
+                    <tr><td><code>background-attachment</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20background-attachment">Report</a></td></tr>
+                    <tr><td><code>color</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20color">Report</a></td></tr>
+                    <tr><td><code>font</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20font">Report</a></td></tr>
+                    <tr><td><code>font-family</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20font-family">Report</a></td></tr>
+                    <tr><td><code>font-size</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20font-size">Report</a></td></tr>
+                    <tr><td><code>font-weight</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20font-weight">Report</a></td></tr>
+                    <tr><td><code>font-style</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20font-style">Report</a></td></tr>
+                    <tr><td><code>line-height</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20line-height">Report</a></td></tr>
+                    <tr><td><code>letter-spacing</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20letter-spacing">Report</a></td></tr>
+                    <tr><td><code>text-align</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20text-align">Report</a></td></tr>
+                    <tr><td><code>text-indent</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20text-indent">Report</a></td></tr>
+                    <tr><td><code>vertical-align</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20vertical-align">Report</a></td></tr>
+                    <tr><td><code>text-decoration</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20text-decoration">Report</a></td></tr>
+                    <tr><td><code>text-decoration-line</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20text-decoration-line">Report</a></td></tr>
+                    <tr><td><code>text-transform</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20text-transform">Report</a></td></tr>
+                    <tr><td><code>white-space</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20white-space">Report</a></td></tr>
+                    <tr><td><code>word-break</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20word-break">Report</a></td></tr>
+                    <tr><td><code>overflow-wrap</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20overflow-wrap">Report</a></td></tr>
+                    <tr><td><code>text-overflow</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20text-overflow">Report</a></td></tr>
+                    <tr><td><code>direction</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20direction">Report</a></td></tr>
+                    <tr><td><code>writing-mode</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20writing-mode">Report</a></td></tr>
+                    <tr><td><code>-webkit-line-clamp</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20-webkit-line-clamp">Report</a></td></tr>
+                    <tr><td><code>flex</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20flex">Report</a></td></tr>
+                    <tr><td><code>flex-direction</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20flex-direction">Report</a></td></tr>
+                    <tr><td><code>flex-wrap</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20flex-wrap">Report</a></td></tr>
+                    <tr><td><code>flex-flow</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20flex-flow">Report</a></td></tr>
+                    <tr><td><code>justify-content</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20justify-content">Report</a></td></tr>
+                    <tr><td><code>align-items</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20align-items">Report</a></td></tr>
+                    <tr><td><code>align-content</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20align-content">Report</a></td></tr>
+                    <tr><td><code>align-self</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20align-self">Report</a></td></tr>
+                    <tr><td><code>flex-grow</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20flex-grow">Report</a></td></tr>
+                    <tr><td><code>flex-shrink</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20flex-shrink">Report</a></td></tr>
+                    <tr><td><code>flex-basis</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20flex-basis">Report</a></td></tr>
+                    <tr><td><code>gap</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20gap">Report</a></td></tr>
+                    <tr><td><code>row-gap</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20row-gap">Report</a></td></tr>
+                    <tr><td><code>column-gap</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20column-gap">Report</a></td></tr>
+                    <tr><td><code>order</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20order">Report</a></td></tr>
+                    <tr><td><code>grid</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20grid">Report</a></td></tr>
+                    <tr><td><code>grid-template</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20grid-template">Report</a></td></tr>
+                    <tr><td><code>grid-template-columns</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20grid-template-columns">Report</a></td></tr>
+                    <tr><td><code>grid-template-rows</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20grid-template-rows">Report</a></td></tr>
+                    <tr><td><code>grid-template-areas</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20grid-template-areas">Report</a></td></tr>
+                    <tr><td><code>grid-auto-columns</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20grid-auto-columns">Report</a></td></tr>
+                    <tr><td><code>grid-auto-rows</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20grid-auto-rows">Report</a></td></tr>
+                    <tr><td><code>grid-auto-flow</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20grid-auto-flow">Report</a></td></tr>
+                    <tr><td><code>grid-column</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20grid-column">Report</a></td></tr>
+                    <tr><td><code>grid-column-start</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20grid-column-start">Report</a></td></tr>
+                    <tr><td><code>grid-column-end</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20grid-column-end">Report</a></td></tr>
+                    <tr><td><code>grid-row</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20grid-row">Report</a></td></tr>
+                    <tr><td><code>grid-row-start</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20grid-row-start">Report</a></td></tr>
+                    <tr><td><code>grid-row-end</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20grid-row-end">Report</a></td></tr>
+                    <tr><td><code>grid-area</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20grid-area">Report</a></td></tr>
+                    <tr><td><code>justify-items</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20justify-items">Report</a></td></tr>
+                    <tr><td><code>justify-self</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20justify-self">Report</a></td></tr>
+                    <tr><td><code>place-items</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20place-items">Report</a></td></tr>
+                    <tr><td><code>place-content</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20place-content">Report</a></td></tr>
+                    <tr><td><code>overflow</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20overflow">Report</a></td></tr>
+                    <tr><td><code>overflow-x</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20overflow-x">Report</a></td></tr>
+                    <tr><td><code>overflow-y</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20overflow-y">Report</a></td></tr>
+                    <tr><td><code>transform</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20transform">Report</a></td></tr>
+                    <tr><td><code>transform-origin</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20transform-origin">Report</a></td></tr>
+                    <tr><td><code>box-shadow</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20box-shadow">Report</a></td></tr>
+                    <tr><td><code>outline</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20outline">Report</a></td></tr>
+                    <tr><td><code>outline-width</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20outline-width">Report</a></td></tr>
+                    <tr><td><code>outline-style</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20outline-style">Report</a></td></tr>
+                    <tr><td><code>outline-color</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20outline-color">Report</a></td></tr>
+                    <tr><td><code>outline-offset</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20outline-offset">Report</a></td></tr>
+                    <tr><td><code>filter</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20filter">Report</a></td></tr>
+                    <tr><td><code>backdrop-filter</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20backdrop-filter">Report</a></td></tr>
+                    <tr><td><code>object-fit</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20object-fit">Report</a></td></tr>
+                    <tr><td><code>object-position</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20object-position">Report</a></td></tr>
+                    <tr><td><code>table-layout</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20table-layout">Report</a></td></tr>
+                    <tr><td><code>border-collapse</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20border-collapse">Report</a></td></tr>
+                    <tr><td><code>border-spacing</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20border-spacing">Report</a></td></tr>
+                    <tr><td><code>column-count</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20column-count">Report</a></td></tr>
+                    <tr><td><code>scrollbar-color</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20scrollbar-color">Report</a></td></tr>
+                    <tr><td><code>scrollbar-width</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20scrollbar-width">Report</a></td></tr>
+                    <tr><td><code>scroll-behavior</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20scroll-behavior">Report</a></td></tr>
+                    <tr><td><code>content</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20content">Report</a></td></tr>
+                    <tr><td><code>clip-path</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20clip-path">Report</a></td></tr>
+                    <tr><td><code>mask</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20mask">Report</a></td></tr>
+                    <tr><td><code>mix-blend-mode</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20mix-blend-mode">Report</a></td></tr>
+                    <tr><td><code>isolation</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20isolation">Report</a></td></tr>
+                    <tr><td><code>pointer-events</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20pointer-events">Report</a></td></tr>
+                    <tr><td><code>cursor</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20cursor">Report</a></td></tr>
+                    <tr><td><code>user-select</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20user-select">Report</a></td></tr>
+                    <tr><td><code>app-region</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20app-region">Report</a></td></tr>
+                    <tr><td><code>-webkit-app-region</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20-webkit-app-region">Report</a></td></tr>
+                    <tr><td><code>will-change</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20will-change">Report</a></td></tr>
+                    <tr><td><code>contain</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20contain">Report</a></td></tr>
+                    <tr><td><code>animation</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20animation">Report</a></td></tr>
+                    <tr><td><code>animation-name</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20animation-name">Report</a></td></tr>
+                    <tr><td><code>animation-duration</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20animation-duration">Report</a></td></tr>
+                    <tr><td><code>animation-timing-function</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20animation-timing-function">Report</a></td></tr>
+                    <tr><td><code>animation-delay</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20animation-delay">Report</a></td></tr>
+                    <tr><td><code>animation-iteration-count</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20animation-iteration-count">Report</a></td></tr>
+                    <tr><td><code>animation-direction</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20animation-direction">Report</a></td></tr>
+                    <tr><td><code>animation-fill-mode</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20animation-fill-mode">Report</a></td></tr>
+                    <tr><td><code>animation-play-state</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20animation-play-state">Report</a></td></tr>
+                    <tr><td><code>transition</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20transition">Report</a></td></tr>
+                    <tr><td><code>transition-property</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20transition-property">Report</a></td></tr>
+                    <tr><td><code>transition-duration</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20transition-duration">Report</a></td></tr>
+                    <tr><td><code>transition-timing-function</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20transition-timing-function">Report</a></td></tr>
+                    <tr><td><code>transition-delay</code></td><td><a href="https://github.com/barely-sentient/donkeh-ui/commit/a68256d"><code>a68256d</code></a></td><td><a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml&amp;title=CSS%3A%20transition-delay">Report</a></td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="report">Reporting a CSS bug</h2>
+        <p>
+            Use the <a href="https://github.com/barely-sentient/donkeh-ui/issues/new?template=css_bug.yml">CSS bug report form</a>.
+            It asks for the property and revision, host, pipeline stage, minimal UI
+            tree, minimal CSS, expected and actual rendering, and reproduction steps.
+            That context is usually enough to turn a visual complaint into a failing
+            layout or paint test.
+        </p>
+
+        <div class="callout tip">
+            <strong>Make the reproduction small</strong>
+            One component, one stylesheet, no unrelated framework code. If the bug only
+            appears with other rules present, include the smallest set that still
+            triggers it. A screenshot plus a computed-style or layout dump is worth
+            more than a long description.
+        </div>
+
+        <h3>Reproduction skeleton</h3>
+        <div class="code" data-label="Repro.cs">
+<pre><code>using Donkeh.Hosting;
+using Donkeh.UILab;
+using static Donkeh.UILab.HtmlHelper;
+using static Donkeh.UILab._;
+
+[AppRoot(Width = 800, Height = 600, Title = "CSS repro")]
+public sealed class App : Component
+{
+    public override Node Render() =&gt;
+        Div(new() { ClassName = "box" },
+            Span(new() { ClassName = "label" }, Text("Hello")));
+}</code></pre>
+        </div>
+
+        <div class="code" data-label="box.css">
+<pre><code>.box {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+}
+
+.label {
+    color: rebeccapurple;
+}</code></pre>
+        </div>
+
+        <p>
+            Replace the smallest relevant rule and attach the actual result. If the
+            problem needs a specific font, image, viewport or platform, say so in the
+            environment and notes fields.
+        </p>
+
+        <h3>Issue template fields</h3>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Field</th><th>What to include</th></tr></thead>
+                <tbody>
+                    <tr><td>Property or feature</td><td>The exact CSS name, selector, at-rule or function involved.</td></tr>
+                    <tr><td>Support revision</td><td>The short revision from this page, for example <code>a68256d</code>.</td></tr>
+                    <tr><td>Host and stage</td><td>Desktop, Android or browser, and whether the problem is parsing, matching, computed values, layout, paint or animation.</td></tr>
+                    <tr><td>Minimal UI tree and CSS</td><td>The smallest component and stylesheet that still show the difference.</td></tr>
+                    <tr><td>Expected and actual</td><td>Describe browser-equivalent behaviour and what Donkeh produced. Include measurements for layout bugs.</td></tr>
+                    <tr><td>Screenshots or dumps</td><td>Frame capture, inspector style dump, or the layout tree. Drag images straight into the form.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="page-nav">
+            <a class="prev" href="html-elements.html"><span>Previous</span>HTML elements</a>
+            <a class="next" href="image.html"><span>Next</span>Image</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh — CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/donkeh-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+
+<script>
+    (() => {
+        const filter = document.getElementById("css-filter");
+        const table = document.getElementById("css-properties");
+
+        if (!filter || !table) {
+            return;
+        }
+
+        filter.addEventListener("input", () => {
+            const value = filter.value.trim().toLowerCase();
+            const rows = table.tBodies[0].rows;
+
+            for (let index = 0; index < rows.length; index++) {
+                const row = rows[index];
+                row.hidden = value.length > 0 && !row.cells[0].textContent.toLowerCase().includes(value);
+            }
+        });
+    })();
+</script>
+</body>
+</html>

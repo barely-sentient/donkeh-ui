@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Routing and setPage — Donkeh</title>
+    <meta name="description" content="Use AppRouter, route tables, Links and Router.SetPage to navigate between pages without a browser URL.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/donkeh-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+                <a href="routing.html">Routing and setPage</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Reference</span>
+                <a href="html-elements.html">HTML elements</a>
+                <a href="css-support.html">CSS support</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Primitives</span>
+                <a href="image.html">Image</a>
+                <a href="video.html">Video</a>
+                <a href="canvas.html">Canvas</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/donkeh-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Components <span>/</span> Routing</div>
+        <h1>Routing and setPage</h1>
+        <p class="lead">
+            The router is a small, host-agnostic path store. It decides which route
+            content is rendered and exposes the current path plus a
+            <code>setPage</code> action through context. It does not touch a URL bar,
+            browser history or the network.
+        </p>
+
+        <h2 id="quick-start">A route table</h2>
+        <p>
+            Import <code>Donkeh.UILab.Routing</code> for the factories and wrap the app
+            in <code>AppRouter</code>. <code>AppRoutes</code> renders the first
+            matching <code>Route</code>.
+        </p>
+
+        <div class="code" data-label="App.cs">
+<pre><code>using Donkeh.Hosting;
+using Donkeh.UILab;
+using static Donkeh.UILab.HtmlHelper;
+using static Donkeh.UILab.Routing;
+
+[AppRoot(Width = 1000, Height = 700, Title = "My app")]
+public sealed class App : Component
+{
+    public override Node Render() =&gt;
+        AppRouter("/",
+            AppRoutes(
+                Route("/", () =&gt; Home()),
+                Route("/settings", () =&gt; Settings()),
+                Route("/docs/*", () =&gt; Docs())));
+}
+
+private static Node Home() =&gt;
+    Div(new() { ClassName = "page" },
+        H1(new(), Text("Home")),
+        Link("/settings", Text("Open settings")));
+
+private static Node Settings() =&gt;
+    Div(new() { ClassName = "page" }, H1(new(), Text("Settings")));
+
+private static Node Docs() =&gt;
+    Div(new() { ClassName = "page" }, H1(new(), Text("Docs")));</code></pre>
+        </div>
+
+        <p>
+            A factory overload such as <code>Route("/settings", () =&gt; Settings())</code>
+            builds the page only when it matches. The children overload is fine for
+            cheap pages:
+        </p>
+
+        <div class="code" data-label="Route children">
+<pre><code>AppRoutes(
+    Route("/", Text("Home")),
+    Route("/about", Text("About")));</code></pre>
+        </div>
+
+        <h2 id="paths">Paths and matching</h2>
+        <p>
+            Routes and pages are compared after normalisation: the path gets a leading
+            slash, duplicate slashes collapse, a trailing slash is removed, and a query
+            string or fragment is dropped. Paths are case-sensitive.
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Route</th><th>Matches</th></tr></thead>
+                <tbody>
+                    <tr><td><code>/</code></td><td>Only the root path.</td></tr>
+                    <tr><td><code>/settings</code></td><td>Exactly <code>/settings</code>.</td></tr>
+                    <tr><td><code>/docs/*</code></td><td><code>/docs</code> and every descendant such as <code>/docs/intro</code>.</td></tr>
+                    <tr><td><code>*</code></td><td>Every path. Put it last if you use it as a catch-all.</td></tr>
+                    <tr><td><code>about</code></td><td>Normalised to <code>/about</code>.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            <code>AppRoutes</code> takes the first match in declaration order. For a
+            not-found page, construct the props directly so the fallback is available:
+        </p>
+
+        <div class="code" data-label="Fallback">
+<pre><code>using static Donkeh.UILab._;
+
+C&lt;AppRoutes, AppRoutesProps&gt;(new AppRoutesProps
+{
+    Children =
+    [
+        Route("/", Text("Home")),
+        Route("/settings", Text("Settings"))
+    ],
+    Fallback = Text("Not found")
+});</code></pre>
+        </div>
+
+        <h2 id="setpage">Reading the path and calling setPage</h2>
+        <p>
+            <code>AppRouter</code> publishes two context values:
+        </p>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Context</th><th>Value</th></tr></thead>
+                <tbody>
+                    <tr><td><code>Router.Path</code></td><td>The current normalised path as a <code>string</code>.</td></tr>
+                    <tr><td><code>Router.SetPage</code></td><td>An <code>Action&lt;string&gt;</code> that navigates to a new path.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="code" data-label="SaveButton.cs">
+<pre><code>using Donkeh.UILab;
+using static Donkeh.UILab.HtmlHelper;
+using static Donkeh.UILab._;
+
+public sealed class SaveButton : Component
+{
+    public override Node Render()
+    {
+        var setPage = UseContext(Router.SetPage);
+
+        return Button(new()
+        {
+            ClassName = "primary",
+            OnClick = () =&gt; setPage("/done")
+        }, Text("Finish"));
+    }
+}</code></pre>
+        </div>
+
+        <p>
+            A component can also read the current path. It re-renders when the router
+            publishes a new value, because the component sits under the provider:
+        </p>
+
+        <div class="code" data-label="PathLabel.cs">
+<pre><code>public sealed class PathLabel : Component
+{
+    public override Node Render() =&gt;
+        Span(new() { ClassName = "path" },
+            Text(UseContext(Router.Path)));
+}</code></pre>
+        </div>
+
+        <div class="callout note">
+            <strong>setPage is not browser navigation</strong>
+            The router stores a string. It does not update the URL, push history or
+            intercept the back and forward buttons. A host can persist the current path
+            or feed it into <code>AppRouter</code> through <code>InitialPath</code>.
+            Calling <code>UseContext(Router.SetPage)</code> outside an
+            <code>AppRouter</code> gets the default no-op action.
+        </div>
+
+        <h2 id="links">Links and active state</h2>
+        <p>
+            <code>Link</code> renders an anchor and calls <code>setPage</code> on click
+            instead of relying on browser navigation. It adds the <code>active</code>
+            class while the target is the current path or an ancestor of it:
+        </p>
+
+        <div class="code" data-label="Navigation">
+<pre><code>Nav(new() { ClassName = "nav" },
+    Link("/", Text("Home")),
+    Link("/settings", Text("Settings")),
+    Link("/docs", Text("Docs")));
+
+// A link is active on /docs and /docs/intro,
+// but the root link is only active on /.</code></pre>
+        </div>
+
+        <p>
+            Pass <code>ActiveClassName</code> to change the class, or an empty string to
+            disable it:
+        </p>
+
+        <div class="code" data-label="Custom active class">
+<pre><code>C&lt;Link, LinkProps&gt;(new LinkProps
+{
+    To = "/settings",
+    ActiveClassName = "is-current",
+    Children = [Text("Settings")]
+});</code></pre>
+        </div>
+
+        <h2 id="patterns">Useful patterns</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Pattern</th><th>Approach</th></tr></thead>
+                <tbody>
+                    <tr><td>Lazy pages</td><td>Use the <code>Route(path, Func&lt;Node?&gt;)</code> overload so page trees are built only when matched.</td></tr>
+                    <tr><td>Section layout</td><td>Return a layout component from a wildcard route, then render <code>AppRoutes</code> again inside it for child pages.</td></tr>
+                    <tr><td>Current page in a header</td><td>Read <code>Router.Path</code> in any component under <code>AppRouter</code>.</td></tr>
+                    <tr><td>Programmatic navigation</td><td>Read <code>Router.SetPage</code> in an event handler or effect; do not call setters during render.</td></tr>
+                    <tr><td>Not found</td><td>Set <code>AppRoutesProps.Fallback</code>, or add a final <code>Route("*", ...)</code>.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="page-nav">
+            <a class="prev" href="developing-hooks.html"><span>Previous</span>Developing hooks</a>
+            <a class="next" href="html-elements.html"><span>Next</span>HTML elements</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh — CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/donkeh-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>

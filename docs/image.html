@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Image — Donkeh</title>
+    <meta name="description" content="How img behaves in Donkeh: packed assets, intrinsic sizing, object-fit and the shared image cache.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/donkeh-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+                <a href="routing.html">Routing and setPage</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Reference</span>
+                <a href="html-elements.html">HTML elements</a>
+                <a href="css-support.html">CSS support</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Primitives</span>
+                <a href="image.html">Image</a>
+                <a href="video.html">Video</a>
+                <a href="canvas.html">Canvas</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/donkeh-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Primitives <span>/</span> Image</div>
+        <h1>Image</h1>
+        <p class="lead">
+            <code>img</code> is not a normal box. It is replaced content: layout must
+            know the image's intrinsic size before it can place anything, and paint must
+            upload, cache and fit the decoded bitmap. Donkeh treats it as a first-class
+            primitive rather than an empty element with a background.
+        </p>
+
+        <h2 id="why">Why it is special</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Pipeline stage</th><th>What the image primitive does</th></tr></thead>
+                <tbody>
+                    <tr><td>Source resolution</td><td>Resolves a file path, a <code>data:</code> URI or an embedded asset declared with <code>[Image]</code>. A plain path probes disk first, then packed assets; the <code>packed:</code>, <code>embedded:</code> and <code>asset:</code> prefixes force the embedded lookup.</td></tr>
+                    <tr><td>Intrinsic sizing</td><td>Reads the encoded header, or rasterises an SVG, to get pixel dimensions. Layout uses those dimensions to preserve aspect ratio before CSS constraints apply.</td></tr>
+                    <tr><td>Decoding and upload</td><td>Decodes RGBA pixels and uploads one OpenGL texture per source. Encoded bytes, decoded dimensions and textures are cached separately.</td></tr>
+                    <tr><td>Painting</td><td>Draws the bitmap through the same instanced renderer as shapes and text, applying <code>object-fit</code> and <code>object-position</code>.</td></tr>
+                    <tr><td>CSS backgrounds</td><td><code>background-image: url(...)</code> shares the same encoded-byte and texture cache, so an image used both as a layer and as <code>img</code> is decoded once.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            Decoding on the layout thread would stall every frame, and letting an
+            <code>img</code> collapse to zero height would break flex and grid layouts.
+            That is why the host owns the cache and reports intrinsic dimensions back to
+            layout.
+        </p>
+
+        <h2 id="declare">Declare an embedded image</h2>
+        <p>
+            Add the file as an <code>EmbeddedResource</code>, then declare it with
+            <code>[Image]</code>. The attribute is metadata only; the file still has to
+            be embedded in the same assembly.
+        </p>
+
+        <div class="code" data-label="MyApp.csproj">
+<pre><code>&lt;ItemGroup&gt;
+  &lt;EmbeddedResource Include="Assets/logo.png" /&gt;
+&lt;/ItemGroup&gt;</code></pre>
+        </div>
+
+        <div class="code" data-label="Program.cs">
+<pre><code>using Donkeh.UILab;
+using static Donkeh.UILab.HtmlHelper;
+
+[assembly: Image("Assets/logo.png")]
+
+[AppRoot(Width = 1000, Height = 700, Title = "My app")]
+public sealed class App : Component
+{
+    public override Node Render() =&gt;
+        Img(new()
+        {
+            Src = "packed:Assets/logo.png",
+            Alt = "Donkeh logo",
+            Attributes = new Dictionary&lt;string, string&gt;
+            {
+                ["width"] = "160",
+                ["height"] = "160"
+            }
+        });
+}</code></pre>
+        </div>
+
+        <div class="callout note">
+            <strong>Path matching</strong>
+            A declaration may be matched by full path, a suffix or its bare file name.
+            Case is ignored, and folder-aware matching prevents
+            <code>Other/logo.png</code> from resolving to <code>Assets/logo.png</code>.
+            When two declarations match, the result is treated as unavailable instead of
+            picking one arbitrarily.
+        </div>
+
+        <h2 id="sources">Supported sources</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Source</th><th>Example</th><th>Notes</th></tr></thead>
+                <tbody>
+                    <tr><td>Relative or absolute file</td><td><code>Assets/logo.png</code></td><td>Probed on disk first. Relative paths resolve against the process working directory at first use.</td></tr>
+                    <tr><td>Embedded asset</td><td><code>packed:Assets/logo.png</code></td><td>Uses the <code>[Image]</code> declaration and manifest resource in a loaded assembly.</td></tr>
+                    <tr><td>Data URI</td><td><code>data:image/png;base64,...</code></td><td>Decoded directly, with no disk access.</td></tr>
+                    <tr><td>SVG</td><td><code>Assets/icon.svg</code></td><td>Rasterised on first use, whether it comes from disk, a data URI or an embedded resource.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="layout">Sizing and fitting</h2>
+        <p>
+            The intrinsic size comes from the decoded pixels, not CSS pixels. If the
+            header cannot be read, the <code>width</code> and <code>height</code>
+            attributes are used. The user-agent sheet gives images
+            <code>max-width: 100%</code>, so a large image shrinks with its container
+            while preserving aspect ratio.
+        </p>
+
+        <div class="code" data-label="Image CSS">
+<pre><code>.hero-image {
+    width: 100%;
+    height: 240px;
+    object-fit: cover;
+    object-position: center 35%;
+    border-radius: 18px;
+}</code></pre>
+        </div>
+
+        <p>
+            <code>object-fit</code> accepts <code>fill</code>, <code>contain</code>,
+            <code>cover</code>, <code>none</code> and <code>scale-down</code>.
+            <code>cover</code> crops by shrinking the UV rectangle rather than clipping
+            the quad; <code>contain</code> and <code>scale-down</code> centre the image
+            in the box.
+        </p>
+
+        <h2 id="cache">Cache behaviour</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Behaviour</th><th>Detail</th></tr></thead>
+                <tbody>
+                    <tr><td>No eviction</td><td>Every successfully used source stays in memory until the window is disposed.</td></tr>
+                    <tr><td>No file watching</td><td>Replacing a file on disk does not refresh the image. Restart the window, or use a new source string.</td></tr>
+                    <tr><td>Failures are cached</td><td>A missing or corrupt source resolves to a zero texture and is not retried every frame.</td></tr>
+                    <tr><td>Frame-thread upload</td><td>Textures are created and deleted on the render thread. Intrinsic-size queries can happen earlier.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="browser">Browser host</h2>
+        <p>
+            On WebAssembly the tree is mirrored to a native <code>img</code>, and the
+            browser owns loading, decoding and layout. Use a URL or <code>data:</code>
+            URI there. The <code>packed:</code> and <code>embedded:</code> source forms
+            are for the desktop and Android GL hosts, which implement the packed-asset
+            resolver.
+        </p>
+
+        <div class="callout tip">
+            <strong>Need the bytes?</strong>
+            Use <code>Image.Load("Assets/logo.png")</code> or
+            <code>Image.TryGetBytes(...)</code> when you need the encoded file for an
+            upload, a custom cache or a non-<code>img</code> path. The element pipeline
+            uses the same declarations internally.
+        </div>
+
+        <div class="page-nav">
+            <a class="prev" href="css-support.html"><span>Previous</span>CSS support</a>
+            <a class="next" href="video.html"><span>Next</span>Video</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh — CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/donkeh-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>

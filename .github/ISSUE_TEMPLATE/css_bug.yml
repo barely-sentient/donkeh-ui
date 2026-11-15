@@ -1,0 +1,164 @@
+name: CSS bug report
+description: Report a CSS property, selector, cascade, layout or paint problem.
+title: "css: "
+labels: ["bug", "css"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve the CSS engine. A small, self-contained
+        reproduction is the single most useful thing you can include.
+
+        - Check the [CSS support reference](https://barely-sentient.github.io/donkeh-ui/css-support.html)
+          first. Every registered property is listed with its current revision.
+        - If possible, reduce the problem to one HTML tree and one stylesheet.
+        - Screenshots, frame captures and layout dumps are welcome.
+
+  - type: input
+    id: property
+    attributes:
+      label: CSS property or feature
+      description: The property, selector, at-rule or feature involved.
+      placeholder: "e.g. grid-template-columns, :has(), background-size"
+    validations:
+      required: true
+
+  - type: input
+    id: revision
+    attributes:
+      label: Support revision
+      description: The revision shown for this property on the CSS support page.
+      placeholder: "e.g. a68256d"
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: Donkeh version / commit
+      description: NuGet version, release tag or commit SHA.
+      placeholder: "e.g. 1.0.22 or a68256d"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: host
+    attributes:
+      label: Host
+      description: Where does the problem occur?
+      options:
+        - Desktop (OpenGL)
+        - Android (OpenGL ES)
+        - Browser (WebAssembly / DOM)
+        - All hosts
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Affected stage
+      description: Pick the closest match if you know the pipeline.
+      options:
+        - Not sure
+        - Parsing / tokenizing
+        - Selector matching
+        - Cascade / inheritance / custom properties
+        - Computed values
+        - Layout
+        - Painting / compositing
+        - Animation / transition
+        - Browser DOM bridge
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, .NET SDK, GPU and OpenGL version, browser version if relevant.
+      placeholder: "Windows 11, .NET 10.0.10, OpenGL 3.3"
+    validations:
+      required: true
+
+  - type: textarea
+    id: markup
+    attributes:
+      label: Minimal UI tree
+      description: The smallest C# component or HTML tree that shows the problem.
+      render: csharp
+      placeholder: |
+        Div(new() { ClassName = "box" },
+            Span(new() { ClassName = "label" }, Text("Hello")));
+    validations:
+      required: true
+
+  - type: textarea
+    id: css
+    attributes:
+      label: Minimal CSS
+      description: Only the rules needed to reproduce the problem.
+      render: css
+      placeholder: |
+        .box {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+        }
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected rendering
+      description: What should the browser-equivalent result be, and why?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual rendering
+      description: What Donkeh does instead. Include measurements when layout is involved.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Commands, project template and any state needed to trigger the issue.
+      placeholder: |
+        1. donkeh new project CssRepro
+        2. Replace Program.cs with the tree above
+        3. Add the CSS to src/Components/...
+        4. dotnet run
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots, recordings or layout dumps
+      description: Drag files here, or paste a computed-style / layout tree dump.
+    validations:
+      required: false
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional context
+      description: Related issues, workarounds, regression range, benchmark output, etc.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I reduced the case to the smallest UI tree and stylesheet I could.
+          required: true
+        - label: I checked the CSS support reference for the current status.
+          required: true

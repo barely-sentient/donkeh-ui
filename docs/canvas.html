@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Canvas — Donkeh</title>
+    <meta name="description" content="Draw into a canvas with batched CanvasContext primitives or raw Silk.NET OpenGL, and understand the current browser limitation.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/donkeh-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+                <a href="routing.html">Routing and setPage</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Reference</span>
+                <a href="html-elements.html">HTML elements</a>
+                <a href="css-support.html">CSS support</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Primitives</span>
+                <a href="image.html">Image</a>
+                <a href="video.html">Video</a>
+                <a href="canvas.html">Canvas</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/donkeh-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Primitives <span>/</span> Canvas</div>
+        <h1>Canvas</h1>
+        <p class="lead">
+            A canvas is an immediate drawing surface. It has no meaningful children and
+            no CSS-painted content of its own; the host gives your callback a GPU context
+            or a recorder scoped to the element's box on every frame.
+        </p>
+
+        <h2 id="why">Why it is special</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Concern</th><th>How Donkeh handles it</th></tr></thead>
+                <tbody>
+                    <tr><td>Layout</td><td>Replaced content with a default 300 × 150 box, or the <code>width</code>/<code>height</code> attributes. CSS positions and sizes the box like any other element.</td></tr>
+                    <tr><td>Clipping</td><td>The host clips drawing to the canvas border box and establishes a canvas-local coordinate system before invoking the callback.</td></tr>
+                    <tr><td>Batching</td><td><code>OnDraw</code> records rectangles, ellipses, paths, text and images into the same indirect GPU batch as the rest of the UI.</td></tr>
+                    <tr><td>Raw access</td><td><code>OnContext</code> hands you Silk.NET's <code>GL</code> after the batch is submitted, for effects the recorder does not model.</td></tr>
+                    <tr><td>Browser</td><td>Not wired yet. The DOM host mirrors a native <code>canvas</code> element, but the OpenGL/WebGL interop needed to run these callbacks has not been built.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            Outside a browser, canvas drawing runs through Silk.NET against the same
+            OpenGL 3.3 context as the window on desktop, and the matching GLES context on
+            Android. That is why it is a real drawing primitive on those hosts rather than
+            a styled rectangle.
+        </p>
+
+        <h2 id="usage">Batched drawing</h2>
+        <p>
+            Prefer <code>OnDraw</code>. It records into the frame's indirect batch, so a
+            canvas does not force a viewport switch, a separate upload or one draw call
+            per shape.
+        </p>
+
+        <div class="code" data-label="Sparkline.cs">
+<pre><code>using Donkeh.LayoutLab;
+using Donkeh.UILab;
+using Donkeh.Windowing;
+using static Donkeh.UILab.HtmlHelper;
+using static Donkeh.UILab._;
+
+public sealed class Sparkline : Component
+{
+    public override Node Render() =&gt;
+        H("canvas", new CanvasProps
+        {
+            Attributes = new Dictionary&lt;string, string&gt;
+            {
+                ["width"] = "320",
+                ["height"] = "120"
+            },
+            OnDraw = context =&gt;
+            {
+                context.Clear(0xFF111827);
+
+                var bar = new Rect(16, 48, 28, 56);
+                context.FillRoundedRect(bar, 0xFF5957D9, new CornerRadius(6, 6, 6, 6));
+                context.FillRect(bar.X + 44, 24, 28, 80, 0xFF43D3E8);
+                context.FillEllipse(new Rect(120, 20, 64, 64), 0xFF86EFAC);
+                context.StrokeRect(new Rect(200, 28, 96, 64), 0xFFE5E7EB, 2);
+            }
+        });</code></pre>
+        </div>
+
+        <h2 id="context">CanvasContext API</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Member</th><th>Purpose</th></tr></thead>
+                <tbody>
+                    <tr><td><code>Clear(uint color)</code></td><td>Fill the whole canvas with a packed <code>0xAARRGGBB</code> colour.</td></tr>
+                    <tr><td><code>FillRect</code>, <code>FillRoundedRect</code></td><td>Axis-aligned fills with optional per-corner radii.</td></tr>
+                    <tr><td><code>FillEllipse</code>, <code>StrokeRect</code></td><td>Ellipse fill and a rectangular outline.</td></tr>
+                    <tr><td><code>DrawText</code></td><td>Draw a text run with a resolved <code>TextStyle</code>.</td></tr>
+                    <tr><td><code>DrawImage</code></td><td>Draw a cached image with <code>object-fit</code>, tint and opacity.</td></tr>
+                    <tr><td><code>PushClip</code> / <code>PopClip</code></td><td>Rectangular canvas-local clipping.</td></tr>
+                    <tr><td><code>PushTransform</code> / <code>PopTransform</code></td><td>Nested <code>Matrix3x2</code> transforms.</td></tr>
+                    <tr><td><code>PushOpacity</code> / <code>PopOpacity</code></td><td>Opacity multiplier for subsequent primitives.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>
+            Coordinates are canvas-local CSS pixels with the origin at the top-left of the
+            element's border box. The same <code>CanvasContext</code> instance is reused
+            between frames and is only valid inside the callback; storing it and drawing
+            later throws.
+        </p>
+
+        <div class="callout note">
+            <strong>Balance your pushes</strong>
+            The host cleans up any clip, transform or opacity push you leave open, but
+            explicit <code>Pop*</code> calls keep sibling drawing deterministic.
+        </div>
+
+        <h2 id="raw">Raw OpenGL</h2>
+        <p>
+            <code>OnContext</code> receives a Silk.NET <code>GL</code> instance bound to the
+            window context. The host has already set the viewport and scissor to the canvas
+            bounds, so draw inside the element's box. These commands are immediate-mode and
+            paint after batched <code>OnDraw</code> content.
+        </p>
+
+        <div class="code" data-label="OnContext">
+<pre><code>using Silk.NET.OpenGL;
+
+H("canvas", new CanvasProps
+{
+    OnDraw = context =&gt; context.Clear(0xFF0B1018),
+    OnContext = gl =&gt;
+    {
+        gl.Enable(EnableCap.ScissorTest);
+        gl.ClearColor(0.05f, 0.08f, 0.12f, 1f);
+        gl.Clear(ClearBufferMask.ColorBufferBit);
+        gl.Disable(EnableCap.ScissorTest);
+    }
+});</code></pre>
+        </div>
+
+        <p>
+            Use this sparingly. State changes made here are yours to restore, and raw
+            commands are not batched with the rest of the frame.
+        </p>
+
+        <h2 id="browser">Browser limitation</h2>
+        <div class="callout warning">
+            <strong>Canvas callbacks do not run in the browser</strong>
+            WebAssembly renders through the DOM host. There is no OpenGL-to-WebGL bridge
+            yet, so <code>OnDraw</code> and <code>OnContext</code> are not invoked on
+            <code>net10.0-browser</code>. Wiring a GL context through browser WebGL is a
+            large, complex piece of interop work, so it is not enabled rather than
+            emulated badly. The element exists in the DOM, but drawing from C# is a
+            desktop and Android feature.
+        </div>
+
+        <p>
+            For browser-only graphics today, use ordinary HTML, CSS, images and DOM
+            effects. If a canvas is optional, gate the drawing callback on
+            <code>OperatingSystem.IsBrowser()</code> or provide a CSS/DOM fallback so the
+            page still communicates the same information.
+        </p>
+
+        <div class="page-nav">
+            <a class="prev" href="video.html"><span>Previous</span>Video</a>
+            <a class="next" href="host-permissions.html"><span>Next</span>Host permissions</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh — CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/donkeh-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>

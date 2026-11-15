@@ -50,6 +50,9 @@ donkeh enable-target web
 
 - [Getting started](https://barely-sentient.github.io/donkeh-ui/getting-started.html)
 - [Creating a component](https://barely-sentient.github.io/donkeh-ui/creating-a-component.html)
+- [Routing and setPage](https://barely-sentient.github.io/donkeh-ui/routing.html)
+- [HTML elements](https://barely-sentient.github.io/donkeh-ui/html-elements.html)
+- [CSS support](https://barely-sentient.github.io/donkeh-ui/css-support.html)
 - [Using hooks](https://barely-sentient.github.io/donkeh-ui/using-hooks.html)
 - [Inspector overview](https://barely-sentient.github.io/donkeh-ui/inspector.html)
 - [Host permissions](https://barely-sentient.github.io/donkeh-ui/host-permissions.html)
