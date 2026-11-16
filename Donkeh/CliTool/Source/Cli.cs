@@ -52,6 +52,16 @@ public static class Cli
             return RunUpgrade(args[1..]);
         }
 
+        if (string.Equals(args[0], "enable-feature", StringComparison.OrdinalIgnoreCase))
+        {
+            return RunEnableFeature(args[1..]);
+        }
+
+        if (string.Equals(args[0], "watch", StringComparison.OrdinalIgnoreCase))
+        {
+            return RunWatch(args[1..]);
+        }
+
         if (string.Equals(args[0], "enable-target", StringComparison.OrdinalIgnoreCase))
         {
             return RunEnableTarget(args[1..]);
@@ -206,6 +216,54 @@ public static class Cli
         return 0;
     }
 
+    private static int RunEnableFeature(string[] args)
+    {
+        var arguments = ParsedArguments.Parse(args, ["project"]);
+
+        if (arguments.Help)
+        {
+            PrintEnableFeatureHelp();
+            return 0;
+        }
+
+        if (arguments.Positionals.Count != 1)
+        {
+            throw new CliException(
+                "Expected a feature name. Example: donkeh enable-feature hot-reload");
+        }
+
+        var feature = arguments.Positionals[0];
+        var projectFile = FeatureEnabler.Enable(feature, arguments.Value("project"));
+
+        Console.WriteLine($"Enabled {feature} in {projectFile}");
+        Console.WriteLine("  The reference is Debug-only; Release builds do not include it.");
+        Console.WriteLine();
+        Console.WriteLine("Next:");
+        Console.WriteLine("  donkeh watch");
+        return 0;
+    }
+
+    private static int RunWatch(string[] args)
+    {
+        var separator = Array.IndexOf(args, "--");
+        var commandArgs = separator < 0 ? args : args[..separator];
+        var appArguments = separator < 0 ? [] : args[(separator + 1)..];
+        var arguments = ParsedArguments.Parse(commandArgs, ["project"]);
+
+        if (arguments.Help)
+        {
+            PrintWatchHelp();
+            return 0;
+        }
+
+        if (arguments.Positionals.Count != 0)
+        {
+            throw new CliException("Expected no positional arguments. Run 'donkeh watch --help'.");
+        }
+
+        return WatchService.Run(arguments.Value("project"), appArguments);
+    }
+
     private static int RunNewComponent(string[] args)
     {
         var arguments = ParsedArguments.Parse(args, ["project"]);
@@ -256,6 +314,8 @@ public static class Cli
               donkeh new project [<directory>] [--name <name>] [--type application|framework] [--framework <path>] [--force]
               donkeh new component <name> [--project <path>] [--force]
               donkeh enable-target <desktop|android|web> [--project <path>]
+              donkeh enable-feature <hot-reload> [--project <path>]
+              donkeh watch [--project <path>] [-- <app args>]
               donkeh upgrade project [--version <version>] [--project <path>]
 
             Commands:
@@ -264,6 +324,8 @@ public static class Cli
               new component     Create src/Components/<Name>/<Name>.cs and .css, embed
                                 the stylesheet, and register [assembly: Stylesheet(...)].
               enable-target     Add desktop, Android or browser support to a project.
+              enable-feature    Add an opt-in development feature to a project.
+              watch             Run a project with CSS hot reload in Debug.
               upgrade project   Clear NuGet caches, update package versions, restore
                                 and update the global donkeh tool.
 
@@ -332,6 +394,48 @@ public static class Cli
 
             Options:
               --project <path>     Project file or project directory.
+            """);
+    }
+
+    private static void PrintEnableFeatureHelp()
+    {
+        Console.WriteLine("""
+            Usage:
+              donkeh enable-feature <hot-reload> [--project <path>]
+
+            Adds an opt-in development feature to a project. The generated reference
+            is conditional on the Debug configuration, so Release builds and
+            published applications do not restore or copy it.
+
+            Features:
+              hot-reload           Watch declared stylesheets and rebuild the CSS
+                                   table and layout while the app runs.
+
+            Options:
+              --project <path>     Project file, project directory or framework root.
+                                   A framework root selects its test-container.
+            """);
+    }
+
+    private static void PrintWatchHelp()
+    {
+        Console.WriteLine("""
+            Usage:
+              donkeh watch [--project <path>] [-- <app args>]
+
+            Runs the project in the Debug configuration with CSS hot reload enabled.
+            Edit a declared stylesheet and the running window rebuilds its cascade in
+            place; no rebuild or restart is needed. Code changes still require the app
+            to be restarted.
+
+            Hot reload must be enabled first:
+              donkeh enable-feature hot-reload
+
+            A framework root selects its test-container project.
+
+            Options:
+              --project <path>     Project file, project directory or framework root.
+              -- <app args>        Arguments forwarded to the application.
             """);
     }
 

@@ -443,6 +443,62 @@ return H("div", new Props { ClassName = "list" }, rows);</code></pre>
             transitions. The built-in inspector can edit the matched rules live.
         </p>
 
+        <h2 id="hot-reload">CSS hot reload</h2>
+        <p>
+            Hot reload is opt-in. Enable it once for the executable project:
+        </p>
+
+        <div class="code" data-label="Terminal">
+<pre><code>donkeh enable-feature hot-reload
+donkeh watch</code></pre>
+        </div>
+
+        <p>
+            The first command adds a reference that exists only in the Debug
+            configuration. The second starts the project with hot reload enabled and
+            keeps it running. The desktop host discovers the development package at
+            start-up and watches the source file behind every
+            <code>[Stylesheet]</code> declaration. Edit a CSS file while the app runs
+            and the window rebuilds the entire cascade: user-agent rules, author
+            sheets, style caches and layout engines. The next frame reflects the
+            change; no restart or rebuild is needed. C# edits still require a restart.
+        </p>
+
+        <p>
+            The build still embeds every stylesheet. At runtime the reloader prefers
+            the file on disk and falls back to the embedded copy when a file cannot be
+            found. Declared paths are resolved relative to the project that wrote
+            them, so both <code>src/Components/Card/Card.css</code> and
+            <code>test-container/Styles/gallery.css</code> are found from a test
+            container. Files are polled on the frame thread and read only after they
+            have been stable for one interval, which avoids loading a half-written
+            file.
+        </p>
+
+        <p>
+            Release builds do not reference the hot reload package, so neither its
+            assembly nor the file watcher is copied to the final application. The
+            feature is development-only by construction, not removed by a publish
+            step.
+        </p>
+
+        <div class="code" data-label="Custom host">
+<pre><code>var window = new DonkehWindow(settings);
+
+#if DEBUG
+Donkeh.HotReload.HotReloadHost.Attach(window);
+#endif
+
+window.Run(root);</code></pre>
+        </div>
+
+        <p>
+            Set <code>DONKEH_HOT_RELOAD=0</code>, <code>false</code> or
+            <code>off</code> to disable it. Only declared stylesheets are watched;
+            external <code>@import</code> targets and embedded images are resolved by
+            the normal loader and cached for the session.
+        </p>
+
         <h2 id="images">Embedded images</h2>
         <p>
             Images use the same pattern: declare them with <code>[Image]</code> and

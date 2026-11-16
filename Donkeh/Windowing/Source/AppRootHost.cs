@@ -23,6 +23,7 @@ public static class AppRootHost
     {
         var app = AppRootLocator.Find();
         var window = new DonkehWindow(app.Settings);
+        DevelopmentFeatures.Attach(window);
 
         var screenshotIndex = Array.IndexOf(args, "--screenshot");
 

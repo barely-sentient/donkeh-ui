@@ -23,6 +23,7 @@
     <ItemGroup>
         <EmbeddedResource Include="Assets\sample.png" />
         <EmbeddedResource Include="Assets\type-level.png" />
+        <EmbeddedResource Include="Assets\stylesheet.css" />
     </ItemGroup>
 
     <ItemGroup>

@@ -253,6 +253,17 @@ window.Run(root, styles);</code></pre>
             as <code>\f0c9</code>, so icon codepoints resolve to real glyphs.
         </p>
 
+        <p>
+            <code>donkeh enable-feature hot-reload</code> adds the separate
+            <code>Donkeh.HotReload</code> package to the Debug configuration. It maps
+            embedded declarations back to source files and polls them from the window's
+            frame loop. A change calls <code>SetStylesheet</code>, so the complete
+            table, both layout engines, style caches and the inspector's sheet ranges
+            are rebuilt exactly as a programmatic stylesheet change would. Release
+            builds never reference the package, so the watcher is not part of the
+            application output.
+        </p>
+
         <h2 id="media">Images, audio, video and canvas</h2>
         <p>
             These primitives all live at the host boundary because they need platform

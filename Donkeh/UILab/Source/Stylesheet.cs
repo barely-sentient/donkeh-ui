@@ -95,9 +95,62 @@ namespace Donkeh.UILab
         /// </remarks>
         public static string Load(params Assembly[] assemblies)
         {
+            return string.Join(
+                "\n",
+                Sources(assemblies).Select(source => source.Css));
+        }
+
+        /// <summary>
+        /// Collects every stylesheet declaration in the currently loaded assemblies.
+        /// </summary>
+        /// <returns>
+        /// The declarations in discovery order, each with its declaring assembly,
+        /// path and embedded CSS text.
+        /// </returns>
+        /// <remarks>
+        /// Development tooling uses this to map embedded stylesheets back to source
+        /// files. Application code normally calls <see cref="Load()"/> instead.
+        /// </remarks>
+        public static IReadOnlyList<StylesheetSource> Sources() =>
+            Sources(AppDomain.CurrentDomain.GetAssemblies());
+
+        /// <summary>
+        /// Collects every stylesheet declaration in one assembly.
+        /// </summary>
+        /// <param name="assembly">The assembly to scan.</param>
+        /// <returns>The declarations in discovery order.</returns>
+        /// <exception cref="ArgumentNullException">
+        /// Thrown when <paramref name="assembly"/> is <see langword="null"/>.
+        /// </exception>
+        public static IReadOnlyList<StylesheetSource> Sources(Assembly assembly)
+        {
+            ArgumentNullException.ThrowIfNull(assembly);
+            return Sources(new[] { assembly });
+        }
+
+        /// <summary>
+        /// Collects every stylesheet declaration in the supplied assemblies.
+        /// </summary>
+        /// <param name="assemblies">
+        /// The assemblies to scan, in order. Duplicates are ignored; every element
+        /// must be non-null.
+        /// </param>
+        /// <returns>
+        /// The declarations in assembly order, with each embedded stylesheet read
+        /// once per declaration.
+        /// </returns>
+        /// <exception cref="ArgumentNullException">
+        /// Thrown when <paramref name="assemblies"/> is <see langword="null"/>.
+        /// </exception>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown when a declared path matches no embedded resource, matches more
+        /// than one, or cannot be opened.
+        /// </exception>
+        public static IReadOnlyList<StylesheetSource> Sources(params Assembly[] assemblies)
+        {
             ArgumentNullException.ThrowIfNull(assemblies);
 
-            var parts = new List<string>();
+            var sources = new List<StylesheetSource>();
             var seen = new HashSet<Assembly>();
 
             foreach (var assembly in assemblies)
@@ -109,11 +162,11 @@ namespace Donkeh.UILab
 
                 foreach (var path in CollectPaths(assembly))
                 {
-                    parts.Add(ReadResource(assembly, path));
+                    sources.Add(new StylesheetSource(assembly, path, ReadResource(assembly, path)));
                 }
             }
 
-            return string.Join("\n", parts);
+            return sources;
         }
 
         /// <summary>

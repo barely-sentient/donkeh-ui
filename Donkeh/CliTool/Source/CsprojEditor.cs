@@ -74,6 +74,37 @@ internal static class CsprojEditor
                 : match.Groups["start"].Value + version + match.Groups["end"].Value);
     }
 
+    /// <summary>
+    /// Inserts a preformatted item group immediately before the closing
+    /// <c>&lt;/Project&gt;</c> element.
+    /// </summary>
+    /// <param name="projectText">Current project file text.</param>
+    /// <param name="newLine">Line ending used by the project file.</param>
+    /// <param name="block">The complete item group, including its line ending.</param>
+    /// <returns>The updated project text.</returns>
+    /// <exception cref="CliException">
+    /// The project file does not contain a closing <c>&lt;/Project&gt;</c> element.
+    /// </exception>
+    public static string AddItemGroup(string projectText, string newLine, string block)
+    {
+        const string closingTag = "</Project>";
+        var index = projectText.LastIndexOf(closingTag, StringComparison.OrdinalIgnoreCase);
+
+        if (index < 0)
+        {
+            throw new CliException("The project file does not contain a closing </Project> element.");
+        }
+
+        var prefix = projectText[..index];
+
+        if (!prefix.EndsWith(newLine, StringComparison.Ordinal))
+        {
+            prefix += newLine;
+        }
+
+        return prefix + block + projectText[index..];
+    }
+
     /// <summary>Adds an EmbeddedResource item when it is not already present.</summary>
     /// <param name="projectText">Current project file text.</param>
     /// <param name="newLine">Line ending used by the project file.</param>

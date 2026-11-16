@@ -415,11 +415,13 @@ internal static class ProjectGenerator
             ## Preview
 
             ```powershell
-            dotnet watch --project test-container run
+            donkeh enable-feature hot-reload
+            donkeh watch
             ```
 
             The container discovers every public component in `src/` and renders it
-            in a gallery. Editing a component or its stylesheet updates the preview.
+            in a gallery. CSS edits update the running preview; C# edits require a
+            restart.
 
             ## Publish
 
@@ -605,7 +607,7 @@ internal static class ProjectGenerator
         """;
 
     /// <summary>Gets the CLI version used to reference matching NuGet packages.</summary>
-    private static string ToolVersion()
+    internal static string ToolVersion()
     {
         var version = typeof(ProjectGenerator).Assembly.GetName().Version;
 

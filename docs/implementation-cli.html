@@ -114,6 +114,8 @@
 <pre><code>donkeh new project [&lt;directory&gt;] [--name &lt;name&gt;] [--type application|framework] [--framework &lt;path&gt;] [--force]
 donkeh new component &lt;name&gt; [--project &lt;path&gt;] [--force]
 donkeh enable-target &lt;desktop|android|web&gt; [--project &lt;path&gt;]
+donkeh enable-feature &lt;hot-reload&gt; [--project &lt;path&gt;]
+donkeh watch [--project &lt;path&gt;] [-- &lt;app args&gt;]
 donkeh upgrade project [--version &lt;version&gt;] [--project &lt;path&gt;]
 donkeh --help
 donkeh --version</code></pre>
@@ -257,7 +259,8 @@ public sealed class App : Component
         <div class="code" data-label="Terminal">
 <pre><code>donkeh new project Acme.Components --type framework
 cd Acme.Components
-dotnet watch --project test-container run
+donkeh enable-feature hot-reload
+donkeh watch
 
 # publish when ready
 dotnet pack src/Acme.Components.csproj -c Release</code></pre>
@@ -374,6 +377,37 @@ public sealed class FileList : Component
             case boundaries, including acronym-to-word transitions.
         </p>
 
+        <h2 id="features">Development features and watch</h2>
+        <p>
+            <code>enable-feature hot-reload</code> adds the optional CSS watcher to the
+            executable project:
+        </p>
+
+        <div class="code" data-label="Terminal">
+<pre><code>donkeh enable-feature hot-reload
+donkeh watch</code></pre>
+        </div>
+
+        <p>
+            A framework root resolves to its <code>test-container</code> project. A
+            framework checkout receives a conditional <code>ProjectReference</code>;
+            a NuGet project receives a conditional <code>PackageReference</code>. Both
+            carry <code>'$(Configuration)' == 'Debug'</code>, so Release builds and
+            published applications do not reference or copy the watcher. The command
+            is idempotent.
+        </p>
+
+        <p>
+            <code>donkeh watch</code> refuses to start until the feature is enabled,
+            then runs <code>dotnet run -c Debug -f net10.0</code> with
+            <code>DONKEH_HOT_RELOAD=1</code>. Arguments after <code>--</code> are
+            forwarded to the application. The command deliberately does not use
+            <code>dotnet watch</code>: stylesheets are embedded resources, so a build
+            watcher would restart the process for every CSS edit. The runtime watcher
+            instead polls the source files and rebuilds the whole cascade in place.
+            C# edits still require the app to be restarted.
+        </p>
+
         <h2 id="upgrade">Upgrading a project</h2>
         <p>
             <code>donkeh upgrade project</code> moves a NuGet-based project to a newer
@@ -405,9 +439,10 @@ donkeh upgrade project</code></pre>
         <p>
             The CLI tests call the generators directly against temporary directories rather
             than spawning processes. They cover checkout and NuGet project shapes,
-            component folder creation and stylesheet registration, target editing, force
-            protection and identifier normalisation. That keeps the feedback loop fast and
-            makes the generated file content part of the tested contract.
+            component folder creation and stylesheet registration, target editing,
+            feature reference selection, force protection and identifier normalisation.
+            That keeps the feedback loop fast and makes the generated file content part
+            of the tested contract.
         </p>
 
         <h2 id="trade-offs">Trade-offs and sharp edges</h2>
@@ -432,12 +467,14 @@ donkeh upgrade project</code></pre>
                 <thead><tr><th>File</th><th>Read it for…</th></tr></thead>
                 <tbody>
                     <tr><td><code>Program.cs</code></td><td>The one-line process entry point.</td></tr>
-                    <tr><td><code>Cli.cs</code></td><td>Command dispatch, help, project/component/target flows and error handling.</td></tr>
+                    <tr><td><code>Cli.cs</code></td><td>Command dispatch, help, project/component/target/feature flows and error handling.</td></tr>
                     <tr><td><code>FrameworkLocator.cs</code></td><td>Checkout detection and the NuGet fallback decision.</td></tr>
                     <tr><td><code>ProjectGenerator.cs</code></td><td>Checkout and NuGet project templates, names and versioning.</td></tr>
                     <tr><td><code>ComponentGenerator.cs</code></td><td>Folder layout, component template, namespace and stylesheet registration.</td></tr>
                     <tr><td><code>TargetEnabler.cs</code></td><td>Property/TFM/package edits for Android and browser targets.</td></tr>
-                    <tr><td><code>CsprojEditor.cs</code></td><td>Minimal formatting-preserving embedded-resource edits.</td></tr>
+                    <tr><td><code>FeatureEnabler.cs</code></td><td>Debug-only hot reload references and executable-project selection.</td></tr>
+                    <tr><td><code>WatchService.cs</code></td><td>Runs the project with <code>DONKEH_HOT_RELOAD=1</code> and forwards app arguments.</td></tr>
+                    <tr><td><code>CsprojEditor.cs</code></td><td>Minimal formatting-preserving resource, version and item-group edits.</td></tr>
                     <tr><td><code>Identifiers.cs</code></td><td>PascalCase, namespace and kebab-case policy.</td></tr>
                     <tr><td><code>Tests/GeneratorTests.cs</code></td><td>The generated-file contract and target-edit expectations.</td></tr>
                 </tbody>

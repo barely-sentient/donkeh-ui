@@ -27,6 +27,7 @@ public sealed class GeneratorTests
         Assert.Contains("[AppRoot", program, StringComparison.Ordinal);
         Assert.Contains("class App : Component", program, StringComparison.Ordinal);
         Assert.Contains("Div(new()", program, StringComparison.Ordinal);
+        Assert.DoesNotContain("Donkeh.HotReload", project, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -46,6 +47,7 @@ public sealed class GeneratorTests
         var project = File.ReadAllText(Path.Combine(directory.Path, "SampleApp.csproj"));
         Assert.Contains("<TargetFramework>net10.0</TargetFramework>", project, StringComparison.Ordinal);
         Assert.Contains("<PackageReference Include=\"Donkeh.Windowing\" Version=\"$(DonkehVersion)\" />", project, StringComparison.Ordinal);
+        Assert.DoesNotContain("Donkeh.HotReload", project, StringComparison.Ordinal);
         Assert.Contains("<DonkehVersion", project, StringComparison.Ordinal);
         Assert.DoesNotContain("Donkeh.props", project, StringComparison.Ordinal);
     }
@@ -97,6 +99,68 @@ public sealed class GeneratorTests
     }
 
     [Fact]
+    public void EnableFeatureAddsDebugOnlyPackageReference()
+    {
+        using var directory = new TemporaryDirectory();
+
+        ProjectGenerator.Generate(directory.Path, "SampleApp", frameworkRoot: null, force: false);
+
+        var projectFile = Path.Combine(directory.Path, "SampleApp.csproj");
+        FeatureEnabler.Enable("hot-reload", projectFile);
+        FeatureEnabler.Enable("hot-reload", projectFile);
+
+        var project = File.ReadAllText(projectFile);
+
+        Assert.Contains("<PackageReference Include=\"Donkeh.HotReload\" Version=\"$(DonkehVersion)\" />", project, StringComparison.Ordinal);
+        Assert.Contains("'Debug'", project, StringComparison.Ordinal);
+        Assert.Equal(1, CountOccurrences(project, "Include=\"Donkeh.HotReload\""));
+    }
+
+    [Fact]
+    public void EnableFeatureAddsCheckoutProjectReference()
+    {
+        using var directory = new TemporaryDirectory();
+
+        ProjectGenerator.Generate(
+            directory.Path,
+            "SampleApp",
+            FrameworkLocator.Find(null),
+            force: false);
+
+        var projectFile = Path.Combine(directory.Path, "SampleApp.csproj");
+        FeatureEnabler.Enable("hot-reload", projectFile);
+
+        var project = File.ReadAllText(projectFile);
+
+        Assert.Contains("Donkeh.HotReload.csproj", project, StringComparison.Ordinal);
+        Assert.Contains("'Debug'", project, StringComparison.Ordinal);
+        Assert.Contains("<ProjectReference Include=", project, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EnableFeatureSelectsTestContainerFromFrameworkRoot()
+    {
+        using var directory = new TemporaryDirectory();
+
+        ProjectGenerator.Generate(
+            directory.Path,
+            "Acme.Components",
+            frameworkRoot: null,
+            force: false,
+            kind: ProjectKind.Framework);
+
+        var projectFile = FeatureEnabler.Enable("hot-reload", directory.Path);
+        var container = File.ReadAllText(Path.Combine(directory.Path, "test-container", "TestContainer.csproj"));
+        var library = File.ReadAllText(Path.Combine(directory.Path, "src", "Acme.Components.csproj"));
+
+        Assert.Equal(
+            Path.Combine(directory.Path, "test-container", "TestContainer.csproj"),
+            projectFile);
+        Assert.Contains("Donkeh.HotReload", container, StringComparison.Ordinal);
+        Assert.DoesNotContain("Donkeh.HotReload", library, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void NewFrameworkProjectCreatesLibraryAndTestContainer()
     {
         using var directory = new TemporaryDirectory();
@@ -136,6 +200,7 @@ public sealed class GeneratorTests
         Assert.Contains("Each(ComponentTypes()", program, StringComparison.Ordinal);
         Assert.Contains("C(type)", program, StringComparison.Ordinal);
         Assert.Contains("[ModuleInitializer]", program, StringComparison.Ordinal);
+        Assert.DoesNotContain("Donkeh.HotReload", container, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -279,6 +344,20 @@ public sealed class GeneratorTests
         Assert.Equal("my-widget", Identifiers.KebabCase("MyWidget"));
         Assert.Equal("my-http-client", Identifiers.KebabCase("MyHTTPClient"));
         Assert.Equal("Acme.App", Identifiers.Namespace("Acme.App"));
+    }
+
+    private static int CountOccurrences(string text, string value)
+    {
+        var count = 0;
+        var index = 0;
+
+        while ((index = text.IndexOf(value, index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += value.Length;
+        }
+
+        return count;
     }
 
     private sealed class TemporaryDirectory : IDisposable

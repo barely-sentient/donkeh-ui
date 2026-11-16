@@ -175,12 +175,15 @@ donkeh new project MyApp</code></pre>
         <div class="code" data-label="Terminal">
 <pre><code>donkeh new project Acme.Components --type framework
 cd Acme.Components
-dotnet watch --project test-container run</code></pre>
+donkeh enable-feature hot-reload
+donkeh watch</code></pre>
         </div>
 
         <p>
-            The test container references the library directly, so edits to a component
-            or its CSS appear when the watcher rebuilds. When the library is ready:
+            The test container references the library directly.
+            <code>enable-feature</code> adds the development-only CSS watcher and
+            <code>watch</code> runs the gallery in Debug. CSS edits update the live
+            preview; C# edits require a restart. When the library is ready:
         </p>
 
         <div class="code" data-label="Terminal">

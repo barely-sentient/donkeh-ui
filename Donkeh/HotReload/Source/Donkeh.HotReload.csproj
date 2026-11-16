@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!--
+        Development-only CSS hot reload.
+
+        This package is referenced with Condition="'$(Configuration)' == 'Debug'"
+        by generated projects, so neither the assembly nor its dependency is part
+        of a Release build or a published application. The desktop host discovers
+        it by reflection when it is present.
+    -->
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+        <RootNamespace>Donkeh.HotReload</RootNamespace>
+        <AssemblyName>Donkeh.HotReload</AssemblyName>
+        <LangVersion>latest</LangVersion>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\Windowing\Source\Donkeh.Windowing.csproj" />
+        <ProjectReference Include="..\..\UILab\Source\Donkeh.UILab.csproj" />
+    </ItemGroup>
+
+</Project>
