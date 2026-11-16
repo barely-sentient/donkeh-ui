@@ -43,7 +43,9 @@ namespace Donkeh.Windowing
             _looping = loop;
 
             var isNetworked = Uri.TryCreate(source, UriKind.Absolute, out var uri)
-                && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+                && (uri.Scheme == Uri.UriSchemeHttp
+                    || uri.Scheme == Uri.UriSchemeHttps
+                    || source.Contains("://", StringComparison.Ordinal));
 
             _media = isNetworked
                 ? new Media(libVlc, uri!)
