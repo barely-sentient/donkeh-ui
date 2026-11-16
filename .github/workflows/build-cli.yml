@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+      - 'V*'
       - '[0-9]*'
   release:
     types:
@@ -87,7 +88,13 @@ jobs:
         shell: bash
         run: |
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            version="${GITHUB_REF_NAME#v}"
+            tag="${GITHUB_REF_NAME}"
+            version="${tag#[vV]}"
+
+            if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+              echo "::error::Tag '${tag}' is not a valid version. Use a tag like v1.2.3 or 1.2.3-beta.1."
+              exit 1
+            fi
           else
             version="0.1.0"
           fi

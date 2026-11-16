@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+      - 'V*'
       - '[0-9]*'
 
 permissions:
@@ -42,7 +43,7 @@ jobs:
         shell: bash
         run: |
           tag="${GITHUB_REF_NAME}"
-          version="${tag#v}"
+          version="${tag#[vV]}"
 
           if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
             echo "::error::Tag '${tag}' is not a valid NuGet version. Use a tag like v1.2.3 or v1.2.3-beta.1."
