@@ -121,6 +121,23 @@ namespace Donkeh.UILab
         public bool? Checked { get; init; }
 
         /// <summary>
+        /// Gets or sets whether the element can start an HTML-style drag.
+        /// </summary>
+        /// <value>
+        /// <see langword="true"/> emits <c>draggable="true"</c>; false or
+        /// <see langword="null"/> leaves the element non-draggable.
+        /// </value>
+        /// <remarks>
+        /// A drag starts on the nearest draggable ancestor of the pressed element
+        /// once the pointer moves past a small threshold. The host then dispatches
+        /// <see cref="OnDragStart"/>, <see cref="OnDrag"/>,
+        /// <see cref="OnDragEnter"/>, <see cref="OnDragOver"/>,
+        /// <see cref="OnDragLeave"/>, <see cref="OnDrop"/> and
+        /// <see cref="OnDragEnd"/> with a shared <see cref="DataTransfer"/>.
+        /// </remarks>
+        public bool? Draggable { get; init; }
+
+        /// <summary>
         /// Gets or sets arbitrary attributes that do not have a dedicated property.
         /// The key is the attribute name, the value is its string value.
         /// </summary>
@@ -216,6 +233,48 @@ namespace Donkeh.UILab
         /// Coordinates are relative to the element's painted border box.
         /// </summary>
         public Action<float, float>? OnContextMenu { get; init; }
+
+        /// <summary>
+        /// Gets or sets the handler for <c>dragstart</c>, dispatched on the
+        /// draggable source once a press moves past the drag threshold.
+        /// </summary>
+        public Action<DragEvent>? OnDragStart { get; init; }
+
+        /// <summary>
+        /// Gets or sets the handler for <c>drag</c>, dispatched on the source as
+        /// the pointer moves during an active drag.
+        /// </summary>
+        public Action<DragEvent>? OnDrag { get; init; }
+
+        /// <summary>
+        /// Gets or sets the handler for <c>dragend</c>, dispatched on the source
+        /// when the drag finishes, whether or not a drop was accepted.
+        /// </summary>
+        public Action<DragEvent>? OnDragEnd { get; init; }
+
+        /// <summary>
+        /// Gets or sets the handler for <c>dragenter</c>, dispatched when the
+        /// pointer first enters a potential drop target.
+        /// </summary>
+        public Action<DragEvent>? OnDragEnter { get; init; }
+
+        /// <summary>
+        /// Gets or sets the handler for <c>dragover</c>, dispatched as the pointer
+        /// moves within a potential drop target.
+        /// </summary>
+        public Action<DragEvent>? OnDragOver { get; init; }
+
+        /// <summary>
+        /// Gets or sets the handler for <c>dragleave</c>, dispatched when the
+        /// pointer leaves a potential drop target.
+        /// </summary>
+        public Action<DragEvent>? OnDragLeave { get; init; }
+
+        /// <summary>
+        /// Gets or sets the handler for <c>drop</c>, dispatched on release over a
+        /// target that handles the drag.
+        /// </summary>
+        public Action<DragEvent>? OnDrop { get; init; }
 
         /// <summary>
         /// Gets or sets the handler for the <c>input</c> event. The handler receives

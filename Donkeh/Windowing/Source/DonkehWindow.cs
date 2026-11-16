@@ -453,6 +453,27 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// </summary>
     private ElementNode? _pointerTarget;
 
+    /// <summary>The nearest <c>draggable</c> element under the current press.</summary>
+    private ElementNode? _dragSource;
+
+    /// <summary>Payload shared by every event in the active drag.</summary>
+    private DataTransfer? _dragData;
+
+    /// <summary>Pointer X where the current press started, for the drag threshold.</summary>
+    private float _dragStartX;
+
+    /// <summary>Pointer Y where the current press started, for the drag threshold.</summary>
+    private float _dragStartY;
+
+    /// <summary>True when a press is on a draggable element but has not moved yet.</summary>
+    private bool _dragPending;
+
+    /// <summary>True once <c>dragstart</c> has run and the drag is live.</summary>
+    private bool _dragActive;
+
+    /// <summary>The element currently receiving <c>dragover</c> and <c>drop</c>.</summary>
+    private ElementNode? _dragOver;
+
     /// <summary>True while an inspect-mode press is pending, awaiting its release.</summary>
     private bool _inspectPressed;
 
@@ -3429,6 +3450,19 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             _pointerTarget = null;
         }
 
+        if (_dragSource is not null && !IsLiveNode(_dragSource))
+        {
+            _dragSource = null;
+            _dragData = null;
+            _dragPending = false;
+            _dragActive = false;
+        }
+
+        if (_dragOver is not null && !IsLiveNode(_dragOver))
+        {
+            _dragOver = null;
+        }
+
         if (_scrollAnimations.Count > 0)
         {
             _staleScrollAnimations.Clear();
@@ -4830,7 +4864,15 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         var trackY = rect.Y + (rect.Height - trackHeight) * 0.5f;
         var track = new Rect(rect.X, trackY, rect.Width, trackHeight);
         var radius = constants.AddRadius(CornerRadius.All(track.Height * 0.5f));
-        instructions.AddDrawRoundedRect(track, 0xFFD0D7DE, checked((ushort)radius));
+
+        // Host-painted sliders read their palette from CSS custom properties so
+        // themes can restyle tracks, fills, thumbs and rims without a rebuild.
+        var trackColor = ReadRangeColor(box, "--range-track", 0xFFD0D7DE);
+        var fillColor = ReadRangeColor(box, "--range-fill", 0xFF0969DA);
+        var thumbColor = ReadRangeColor(box, "--range-thumb", 0xFF0969DA);
+        var rimColor = ReadRangeColor(box, "--range-rim", 0xFFFFFFFF);
+
+        instructions.AddDrawRoundedRect(track, trackColor, checked((ushort)radius));
 
         var fillWidth = track.Width * ratio;
 
@@ -4838,7 +4880,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         {
             instructions.AddDrawRoundedRect(
                 track.WithSize(MathF.Max(track.Height, fillWidth), track.Height),
-                0xFF0969DA,
+                fillColor,
                 checked((ushort)radius));
         }
 
@@ -4856,14 +4898,33 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             rim.Y,
             rim.Width,
             rim.Height,
-            unchecked((int)0xFFFFFFFF)));
+            unchecked((int)rimColor)));
         instructions.Add(new Instruction(
             InstructionOpCode.DrawEllipse,
             thumbX,
             thumbY,
             thumbSize,
             thumbSize,
-            unchecked((int)0xFF0969DA)));
+            unchecked((int)thumbColor)));
+    }
+
+    /// <summary>
+    /// Resolves a theme colour for a host-painted range slider.
+    /// </summary>
+    /// <param name="box">The slider's layout box, used to read inherited custom properties.</param>
+    /// <param name="name">Custom property name, including the leading <c>--</c>.</param>
+    /// <param name="fallback">Colour used when the property is absent or unparseable.</param>
+    /// <returns>The parsed packed ARGB colour, or <paramref name="fallback"/>.</returns>
+    /// <remarks>
+    /// Custom properties are returned unsubstituted by the style engine, so the
+    /// declared value must already be a concrete colour (a <c>var()</c> chain is
+    /// not followed here). Unparseable values fall back silently.
+    /// </remarks>
+    private static uint ReadRangeColor(LayoutBox box, string name, uint fallback)
+    {
+        return box.Style.TryGetCustomProperty(name, out var value)
+            ? CssColor.ParseOr(value, fallback)
+            : fallback;
     }
 
     /// <summary>
@@ -5122,6 +5183,36 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         var x = _pendingMouseX;
         var y = _pendingMouseY;
 
+        if (_dragActive)
+        {
+            if (!IsLeftMouseButtonDown())
+            {
+                EndDrag(cancel: true);
+                return;
+            }
+
+            UpdateDrag(x, y);
+            return;
+        }
+
+        if (_dragPending)
+        {
+            if (!IsLeftMouseButtonDown())
+            {
+                ClearDragState();
+            }
+            else if (MathF.Abs(x - _dragStartX) >= 4 || MathF.Abs(y - _dragStartY) >= 4)
+            {
+                BeginDrag(x, y);
+
+                if (_dragActive)
+                {
+                    UpdateDrag(x, y);
+                    return;
+                }
+            }
+        }
+
         if (_rangeDragElement is not null)
         {
             if (!IsLeftMouseButtonDown())
@@ -5347,6 +5438,31 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             return;
         }
 
+        if (button == MouseButton.Left)
+        {
+            if (_dragActive)
+            {
+                EndDrag(cancel: true);
+            }
+
+            var dragSource = FindDraggable(HitTest(_mouseX, _mouseY));
+
+            if (dragSource is not null)
+            {
+                _dragSource = dragSource;
+                _dragData = new DataTransfer();
+                _dragStartX = _mouseX;
+                _dragStartY = _mouseY;
+                _dragPending = true;
+                _dragActive = false;
+                _dragOver = null;
+            }
+            else
+            {
+                ClearDragState();
+            }
+        }
+
         if (!IsShiftPressed())
         {
             ClearSelection();
@@ -5531,6 +5647,17 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         if (button == MouseButton.Right)
         {
             return;
+        }
+
+        if (_dragActive)
+        {
+            EndDrag(cancel: false);
+            return;
+        }
+
+        if (_dragPending)
+        {
+            ClearDragState();
         }
 
         if (_windowResizing)
@@ -7342,6 +7469,232 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
 
         var painted = PaintedBorderBox(box);
         action(x - painted.X, y - painted.Y);
+    }
+
+    /// <summary>Finds the nearest ancestor marked as draggable.</summary>
+    /// <param name="element">The hit element, or <see langword="null"/>.</param>
+    /// <returns>The draggable element, or <see langword="null"/>.</returns>
+    private static ElementNode? FindDraggable(ElementNode? element)
+    {
+        for (var node = (IgniteSupportedDomNode?)element; node is not null; node = node.Parent)
+        {
+            if (node is ElementNode current
+                && current.TryGetAttribute("draggable", out var value)
+                && string.Equals(value, "true", StringComparison.OrdinalIgnoreCase))
+            {
+                return current;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Finds the nearest ancestor that handles a drag event.</summary>
+    /// <param name="element">The hit element, or <see langword="null"/>.</param>
+    /// <param name="eventName">The handler key, such as <c>dragover</c>.</param>
+    /// <returns>The handling element, or <see langword="null"/>.</returns>
+    private static ElementNode? FindDragTarget(ElementNode? element, string eventName)
+    {
+        for (var node = (IgniteSupportedDomNode?)element; node is not null; node = node.Parent)
+        {
+            if (node is ElementNode current
+                && current.TryGetEventHandler(eventName, out var handler)
+                && handler is Action<DragEvent>)
+            {
+                return current;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Dispatches a drag event to the nearest handler at or above an element.
+    /// </summary>
+    /// <param name="element">The starting element, or <see langword="null"/>.</param>
+    /// <param name="eventName">The handler key, such as <c>drop</c>.</param>
+    /// <param name="dragEvent">The event payload to fill in and dispatch.</param>
+    /// <remarks>
+    /// Bubbling stops at the first handler, matching the host's other DOM-style
+    /// events. Exceptions are swallowed so a bad handler cannot tear down the frame
+    /// loop. Local coordinates are recomputed for the handled element.
+    /// </remarks>
+    private void InvokeDrag(ElementNode? element, string eventName, DragEvent dragEvent)
+    {
+        for (var node = (IgniteSupportedDomNode?)element; node is not null; node = node.Parent)
+        {
+            if (node is not ElementNode current
+                || !current.TryGetEventHandler(eventName, out var handler)
+                || handler is not Action<DragEvent> action)
+            {
+                continue;
+            }
+
+            dragEvent.Target = current;
+            var layout = LayoutFor(current);
+
+            if (layout is not null && layout.TryGetBox(current, out var box))
+            {
+                var painted = PaintedBorderBox(box);
+                dragEvent.LocalX = dragEvent.ClientX - painted.X;
+                dragEvent.LocalY = dragEvent.ClientY - painted.Y;
+            }
+            else
+            {
+                dragEvent.LocalX = 0;
+                dragEvent.LocalY = 0;
+            }
+
+            try
+            {
+                action(dragEvent);
+            }
+            catch
+            {
+                // A host event must not tear down the frame loop.
+            }
+
+            return;
+        }
+    }
+
+    /// <summary>
+    /// Starts a drag after the press has moved past the threshold.
+    /// </summary>
+    /// <param name="x">Pointer X in window CSS pixels.</param>
+    /// <param name="y">Pointer Y in window CSS pixels.</param>
+    private void BeginDrag(float x, float y)
+    {
+        _dragPending = false;
+        var source = _dragSource;
+
+        if (source is null || _dragData is null || !IsLiveNode(source))
+        {
+            ClearDragState();
+            return;
+        }
+
+        var start = new DragEvent("dragstart", _dragData, x, y, source)
+        {
+            Target = source
+        };
+        InvokeDrag(source, "dragstart", start);
+
+        if (start.Cancel)
+        {
+            ClearDragState();
+            return;
+        }
+
+        _dragActive = true;
+        _pointerTarget = null;
+        _pressed = null;
+        _selectionDragging = false;
+        _selectionDragged = false;
+        SetActive(null);
+    }
+
+    /// <summary>
+    /// Dispatches <c>drag</c> on the source and the enter/over/leave events on the
+    /// element under the pointer.
+    /// </summary>
+    /// <param name="x">Pointer X in window CSS pixels.</param>
+    /// <param name="y">Pointer Y in window CSS pixels.</param>
+    private void UpdateDrag(float x, float y)
+    {
+        var source = _dragSource;
+        var data = _dragData;
+
+        if (source is null || data is null)
+        {
+            ClearDragState();
+            return;
+        }
+
+        var hit = HitTest(x, y);
+        var over = FindDragTarget(hit, "dragover")
+            ?? FindDragTarget(hit, "drop")
+            ?? FindDragTarget(hit, "dragenter");
+
+        if (!ReferenceEquals(over, _dragOver))
+        {
+            if (_dragOver is not null)
+            {
+                InvokeDrag(_dragOver, "dragleave", new DragEvent("dragleave", data, x, y, source)
+                {
+                    Target = _dragOver
+                });
+            }
+
+            _dragOver = over;
+
+            if (_dragOver is not null)
+            {
+                data.DropEffect = "move";
+                InvokeDrag(_dragOver, "dragenter", new DragEvent("dragenter", data, x, y, source)
+                {
+                    Target = _dragOver
+                });
+            }
+        }
+
+        if (_dragOver is not null)
+        {
+            // Each target sees the browser default, then may set copy/move/none.
+            data.DropEffect = "move";
+            InvokeDrag(_dragOver, "dragover", new DragEvent("dragover", data, x, y, source)
+            {
+                Target = _dragOver
+            });
+        }
+
+        InvokeDrag(source, "drag", new DragEvent("drag", data, x, y, source)
+        {
+            Target = source
+        });
+    }
+
+    /// <summary>
+    /// Finishes a drag, optionally dispatching <c>drop</c>, then always
+    /// <c>dragend</c> on the source.
+    /// </summary>
+    /// <param name="cancel">True to skip the drop, for example on a missed release.</param>
+    private void EndDrag(bool cancel)
+    {
+        var source = _dragSource;
+        var data = _dragData ?? new DataTransfer();
+
+        if (!cancel
+            && source is not null
+            && _dragData is not null
+            && _dragOver is not null
+            && IsLiveNode(_dragOver))
+        {
+            InvokeDrag(_dragOver, "drop", new DragEvent("drop", data, _mouseX, _mouseY, source)
+            {
+                Target = _dragOver
+            });
+        }
+
+        if (source is not null && IsLiveNode(source))
+        {
+            InvokeDrag(source, "dragend", new DragEvent("dragend", data, _mouseX, _mouseY, source)
+            {
+                Target = source
+            });
+        }
+
+        ClearDragState();
+    }
+
+    /// <summary>Clears every field owned by the drag interaction.</summary>
+    private void ClearDragState()
+    {
+        _dragSource = null;
+        _dragData = null;
+        _dragPending = false;
+        _dragActive = false;
+        _dragOver = null;
     }
 
     /// <summary>

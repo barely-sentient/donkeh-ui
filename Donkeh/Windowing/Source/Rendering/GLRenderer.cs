@@ -721,7 +721,7 @@ public sealed unsafe class GLRenderer : IDisposable
         Append(Build(
             new Vector4(rect.X, rect.Y, rect.Width, rect.Height),
             ColorOf(color, _opacity),
-            ToRadii(radius),
+            ToRadii(ClampRadii(rect, radius)),
             new Vector4(1, 0, 0, 0),
             new Vector4(rect.X, rect.Y, rect.Width, rect.Height),
             Vector4.Zero));
@@ -780,7 +780,7 @@ public sealed unsafe class GLRenderer : IDisposable
             Append(Build(
                 new Vector4(rect.X, rect.Y, rect.Width, rect.Height),
                 ColorOf(top.Color, _opacity),
-                ToRadii(border.Radius),
+                ToRadii(ClampRadii(rect, border.Radius)),
                 new Vector4(2, 0, MathF.Max(1, topWidth), GpuInstance.AllBorderSides),
                 new Vector4(rect.X, rect.Y, rect.Width, rect.Height),
                 Vector4.Zero));
@@ -845,7 +845,7 @@ public sealed unsafe class GLRenderer : IDisposable
         Append(Build(
             new Vector4(rect.X, rect.Y, rect.Width, rect.Height),
             ColorOf(side.Color, _opacity),
-            ToRadii(border.Radius),
+            ToRadii(ClampRadii(rect, border.Radius)),
             new Vector4(2, 0, width, sector),
             new Vector4(rect.X, rect.Y, rect.Width, rect.Height),
             Vector4.Zero));
@@ -877,7 +877,7 @@ public sealed unsafe class GLRenderer : IDisposable
         Append(Build(
             new Vector4(quad.X, quad.Y, quad.Width, quad.Height),
             ColorOf(shadow.Color, _opacity),
-            ToRadii(radius),
+            ToRadii(ClampRadii(shapeRect, radius)),
             new Vector4(inset ? 4 : 3, blur, spread, 0),
             new Vector4(shapeRect.X, shapeRect.Y, shapeRect.Width, shapeRect.Height),
             Vector4.Zero));
@@ -1579,6 +1579,28 @@ public sealed unsafe class GLRenderer : IDisposable
         radius.TopLeft,
         radius.BottomLeft);
 
+    /// <summary>
+    /// Clamps corner radii to half the smaller box dimension, matching CSS.
+    /// </summary>
+    /// <param name="rect">Box the radii apply to.</param>
+    /// <param name="radius">Declared radii in CSS pixels.</param>
+    /// <returns>Radii that cannot exceed half the box size.</returns>
+    /// <remarks>
+    /// The SDF rounded-box test expects <c>radius &lt;= min(width, height) / 2</c>.
+    /// A larger value (common with <c>border-radius: 999px</c> pills) makes the
+    /// distance field positive over the whole box, so the fill or border
+    /// disappears entirely instead of being clamped as CSS requires.
+    /// </remarks>
+    private static CornerRadius ClampRadii(in Rect rect, CornerRadius radius)
+    {
+        var limit = MathF.Max(0, MathF.Min(rect.Width, rect.Height) * 0.5f);
+        return new CornerRadius(
+            MathF.Min(radius.TopLeft, limit),
+            MathF.Min(radius.TopRight, limit),
+            MathF.Min(radius.BottomRight, limit),
+            MathF.Min(radius.BottomLeft, limit));
+    }
+
     /// <summary>Binds a texture and writes its wrap mode for both axes.</summary>
     /// <param name="texture">The GL texture name to modify.</param>
     /// <param name="repeat">Whether to use <c>GL_REPEAT</c> instead of clamp-to-edge.</param>
@@ -1935,8 +1957,9 @@ public sealed unsafe class GLRenderer : IDisposable
         _clips.Push(_clip);
         var next = _clip.Rect.Intersect(rect);
         var useRounded = rounded || _clip.Rounded;
+        var limit = MathF.Max(0, MathF.Min(next.Width, next.Height) * 0.5f);
         var effectiveRadii = rounded
-            ? radii
+            ? Vector4.Min(radii, new Vector4(limit))
             : (useRounded ? _clip.Radii : Vector4.Zero);
         _clip = new ClipState(next, effectiveRadii, true, useRounded);
     }

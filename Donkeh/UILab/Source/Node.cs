@@ -414,6 +414,11 @@ namespace Donkeh.UILab
                 AddStringAttribute("checked", string.Empty);
             }
 
+            if (props.Draggable is true)
+            {
+                AddStringAttribute("draggable", "true");
+            }
+
             if (props.Key is { } key)
             {
                 Key = key;
@@ -470,6 +475,41 @@ namespace Donkeh.UILab
             if (props.OnContextMenu is { } onContextMenu)
             {
                 On("contextmenu", onContextMenu);
+            }
+
+            if (props.OnDragStart is { } onDragStart)
+            {
+                On("dragstart", onDragStart);
+            }
+
+            if (props.OnDrag is { } onDrag)
+            {
+                On("drag", onDrag);
+            }
+
+            if (props.OnDragEnd is { } onDragEnd)
+            {
+                On("dragend", onDragEnd);
+            }
+
+            if (props.OnDragEnter is { } onDragEnter)
+            {
+                On("dragenter", onDragEnter);
+            }
+
+            if (props.OnDragOver is { } onDragOver)
+            {
+                On("dragover", onDragOver);
+            }
+
+            if (props.OnDragLeave is { } onDragLeave)
+            {
+                On("dragleave", onDragLeave);
+            }
+
+            if (props.OnDrop is { } onDrop)
+            {
+                On("drop", onDrop);
             }
 
             if (props.OnInput is { } onInput)
