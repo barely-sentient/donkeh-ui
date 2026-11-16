@@ -136,6 +136,43 @@ public sealed class ComponentTests
 
         Assert.Equal("value: 2", root.TextContent);
     }
+
+    [Fact]
+    public void PropsWithChildrenRendersSuppliedChildren()
+    {
+        var renderer = new Renderer();
+        var root = (ElementNode)renderer.Mount(
+            C<ChildrenPanel, PropsWithChildren>(new PropsWithChildren
+            {
+                Children =
+                [
+                    Text("first"),
+                    H("span", new Props(), Text("second"))
+                ]
+            }));
+
+        Assert.Equal(2, root.Children.Length);
+        Assert.Equal("first", root.Children[0].TextContent);
+        Assert.Equal("second", root.Children[1].TextContent);
+    }
+
+    [Fact]
+    public void CustomPropsCanExtendPropsWithChildren()
+    {
+        var renderer = new Renderer();
+        var root = (ElementNode)renderer.Mount(
+            C<TitledPanel, TitledPanelProps>(new TitledPanelProps
+            {
+                Title = "Files",
+                Children = [Text("No files yet.")]
+            }));
+
+        Assert.Equal(2, root.Children.Length);
+        Assert.Equal("Files", root.Children[0].TextContent);
+        Assert.Equal(
+            "No files yet.",
+            Assert.IsType<FragmentNode>(root.Children[1]).Children[0].TextContent);
+    }
 }
 
 public sealed class Counter : Component
@@ -222,6 +259,25 @@ public sealed class Updater : Component
         return H("div", Text($"value: {value}"))
             .OnClick(() => update(current => current + 1));
     }
+}
+
+public sealed class ChildrenPanel : Component<PropsWithChildren>
+{
+    public override Node Render() =>
+        H("div", new Props { ClassName = "panel" }, Props.Children ?? []);
+}
+
+public sealed class TitledPanelProps : PropsWithChildren
+{
+    public string Title { get; init; } = "";
+}
+
+public sealed class TitledPanel : Component<TitledPanelProps>
+{
+    public override Node Render() =>
+        H("section", new Props { ClassName = "titled" },
+            H("h2", new Props(), Text(Props.Title)),
+            F(Props.Children ?? []));
 }
 
 public sealed class UnkeyedList : Component

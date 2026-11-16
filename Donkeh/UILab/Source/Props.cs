@@ -321,4 +321,56 @@ namespace Donkeh.UILab
         /// </summary>
         public Delegate? OnVideoReady { get; init; }
     }
+
+    /// <summary>
+    /// A minimal props payload for a component that only needs the child nodes
+    /// supplied by its parent.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This class deliberately does not derive from <see cref="Props"/>. A component
+    /// that accepts children is usually interested in those children, not in element
+    /// attributes. Derive from this class when the component also needs its own
+    /// values; derive from <see cref="Props"/> instead when it needs the HTML
+    /// attribute surface.
+    /// </para>
+    /// <para>
+    /// Children are ordinary virtual nodes. The component decides where they appear
+    /// and what surrounds them. Pass them to a helper, or wrap them in a fragment with
+    /// <c>F(Props.Children ?? [])</c> when they should sit directly inside the
+    /// component's root element.
+    /// </para>
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// public sealed class CardProps : PropsWithChildren
+    /// {
+    ///     public string Title { get; init; } = "";
+    /// }
+    ///
+    /// public sealed class Card : Component&lt;CardProps&gt;
+    /// {
+    ///     public override Node Render() =&gt;
+    ///         H("section", new Props { ClassName = "card" },
+    ///             H("h2", new Props(), Text(Props.Title)),
+    ///             H("div", new Props { ClassName = "card-body" },
+    ///                 F(Props.Children ?? [])));
+    /// }
+    ///
+    /// C&lt;Card, CardProps&gt;(new CardProps
+    /// {
+    ///     Title = "Files",
+    ///     Children = [Text("No files yet.")]
+    /// });
+    /// </code>
+    /// </example>
+    /// <seealso cref="Component{TProps}"/>
+    public class PropsWithChildren
+    {
+        /// <summary>
+        /// Gets the child nodes supplied by the parent, or <see langword="null"/>
+        /// when the component was created without children.
+        /// </summary>
+        public Node?[]? Children { get; init; }
+    }
 }

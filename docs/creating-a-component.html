@@ -241,19 +241,27 @@ public override Node Render() =&gt;
 
         <h2 id="props">Props and typed components</h2>
         <p>
-            Derive a props class from <code>Props</code> and use
-            <code>Component&lt;TProps&gt;</code> when a component needs values from its
-            parent. Use <code>C&lt;TComponent, TProps&gt;</code> to create it.
+            A component receives values from its parent through a props object.
+            Define a props class, then derive the component from
+            <code>Component&lt;TProps&gt;</code>. Inside the component, the current
+            payload is available as the <code>Props</code> property.
+        </p>
+
+        <h3 id="custom-props">Defining custom props</h3>
+        <p>
+            Props are plain classes. Properties are usually <code>init</code>-only
+            with sensible defaults, so callers set only the values they need:
         </p>
 
         <div class="code" data-label="Badge.cs">
 <pre><code>using Donkeh.UILab;
 using static Donkeh.UILab._;
 
-public sealed class BadgeProps : Props
+public sealed class BadgeProps
 {
     public string Label { get; init; } = "";
     public bool Strong { get; init; }
+    public string? Tooltip { get; init; }
 }
 
 public sealed class Badge : Component&lt;BadgeProps&gt;
@@ -261,16 +269,119 @@ public sealed class Badge : Component&lt;BadgeProps&gt;
     public override Node Render() =>
         H("span", new Props
         {
-            ClassName = Props.Strong ? "badge badge-strong" : "badge"
+            ClassName = Props.Strong ? "badge badge-strong" : "badge",
+            Title = Props.Tooltip
         }, Text(Props.Label));
 }</code></pre>
+        </div>
+
+        <p>
+            A props class does not have to derive from anything. Derive from
+            <code>Props</code> instead when you want its ready-made HTML attribute
+            surface, such as <code>ClassName</code>, <code>Id</code> or event
+            handlers, to be available on your props object.
+        </p>
+
+        <div class="callout note">
+            <strong><code>Props</code> is both a type and a property</strong>
+            In <code>Component&lt;TProps&gt;</code>, <code>Props</code> names the
+            current payload. When a local variable or parameter is also called
+            <code>props</code>, write <code>this.Props</code> to reach the payload.
+            The type keeps its full name <code>Props</code>.
         </div>
 
         <div class="code" data-label="Usage">
 <pre><code>H("div", new Props { ClassName = "toolbar" },
     C&lt;Badge, BadgeProps&gt;(new BadgeProps { Label = "New" }),
-    C&lt;Badge, BadgeProps&gt;(new BadgeProps { Label = "Urgent", Strong = true }));</code></pre>
+    C&lt;Badge, BadgeProps&gt;(new BadgeProps
+    {
+        Label = "Urgent",
+        Strong = true,
+        Tooltip = "Needs attention"
+    }));</code></pre>
         </div>
+
+        <p>
+            Use the typed <code>C&lt;TComponent, TProps&gt;</code> overload so the
+            compiler checks the payload type. The untyped
+            <code>C&lt;TComponent&gt;(object?)</code> overload also works when the
+            payload is built dynamically.
+        </p>
+
+        <h3 id="children">Accepting children</h3>
+        <p>
+            When a component should wrap content supplied by its parent, derive its
+            props from <code>PropsWithChildren</code>. That class contains a single
+            <code>Children</code> property and nothing else, so components that only
+            want children do not have to inherit the whole HTML attribute surface.
+        </p>
+
+        <div class="code" data-label="Panel.cs">
+<pre><code>using Donkeh.UILab;
+using static Donkeh.UILab.HtmlHelper;
+using static Donkeh.UILab._;
+
+public sealed class PanelProps : PropsWithChildren
+{
+    public string Heading { get; init; } = "";
+}
+
+public sealed class Panel : Component&lt;PanelProps&gt;
+{
+    public override Node Render() =&gt;
+        Section(new() { ClassName = "panel" },
+            H2(new() { ClassName = "panel-heading" }, Text(Props.Heading)),
+            Div(new() { ClassName = "panel-body" },
+                F(Props.Children ?? [])));
+}</code></pre>
+        </div>
+
+        <div class="code" data-label="Passing children">
+<pre><code>C&lt;Panel, PanelProps&gt;(new PanelProps
+{
+    Heading = "Files",
+    Children =
+    [
+        P(new() { ClassName = "empty" }, Text("No files yet.")),
+        Button(new() { ClassName = "primary" }, Text("Upload"))
+    ]
+});</code></pre>
+        </div>
+
+        <p>
+            <code>Children</code> is a <code>Node?[]?</code>. The parent builds the
+            nodes and the component decides where they appear. It is
+            <code>null</code> when the caller passes none, so use
+            <code>Props.Children ?? []</code>. <code>F</code> groups the nodes without
+            adding an element, which is what lets them sit directly inside an element
+            that also has its own children.
+        </p>
+
+        <p>
+            A component that needs nothing but children can use
+            <code>Component&lt;PropsWithChildren&gt;</code> directly:
+        </p>
+
+        <div class="code" data-label="Panel without extra props">
+<pre><code>public sealed class Panel : Component&lt;PropsWithChildren&gt;
+{
+    public override Node Render() =&gt;
+        Div(new() { ClassName = "panel" }, F(Props.Children ?? []));
+}
+
+// Usage
+C&lt;Panel, PropsWithChildren&gt;(new PropsWithChildren
+{
+    Children = [Text("Everything passed here is rendered inside the panel.")]
+});</code></pre>
+        </div>
+
+        <p>
+            If a component needs its own values <em>and</em> children, derive the
+            props class from <code>PropsWithChildren</code> and add the extra
+            properties, as <code>PanelProps</code> does above. Children are always
+            passed through the props object, not as extra arguments to <code>C</code>.
+        </p>
 
         <h2 id="composition">Composition helpers</h2>
         <div class="table-wrap">
