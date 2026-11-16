@@ -303,6 +303,24 @@ public class GridLayoutTests
         Assert.Equal(650, TestSupport.Box(result, b).BorderBox.X, 3);
     }
 
+    [Fact]
+    public void MinMaxZeroFrTracksIgnoreTheMinContentContribution()
+    {
+        var (root, a, b, _) = Tree(2);
+        var result = Lay(
+            "#root { display: grid;"
+            + " grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);"
+            + " grid-template-rows: 30px; }"
+            + " #a { width: 300px; height: 30px; }"
+            + " #b { height: 30px; }",
+            root);
+
+        // minmax(0, 1fr) removes the automatic min-content floor, so both
+        // tracks get half the container even though A is 300px wide.
+        Assert.Equal(500, TestSupport.Box(result, b).BorderBox.X, 3);
+        Assert.Equal(500, TestSupport.Box(result, b).BorderBox.Width, 3);
+    }
+
     // ------------------------------------------------------------ placement
 
     [Fact]

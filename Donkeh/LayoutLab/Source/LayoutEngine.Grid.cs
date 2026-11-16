@@ -1681,7 +1681,16 @@ public sealed partial class LayoutEngine
                 case GridTrackKind.Fr:
                     frTotal += MathF.Max(0, track.Fr);
                     sizes[i] = MathF.Max(0, track.Minimum.ResolveOr(in context, available, 0));
-                    sizes[i] = MathF.Max(sizes[i], MathF.Max(0, minContributions[i]));
+
+                    // A flexible track only gets the automatic min-content floor
+                    // when its minimum is auto (plain 1fr) or intrinsic. An
+                    // explicit minimum such as minmax(0, 1fr) must be allowed to
+                    // shrink below the item's min-content size.
+                    if (track.Minimum.IsAuto || track.Minimum.IsIntrinsic)
+                    {
+                        sizes[i] = MathF.Max(sizes[i], MathF.Max(0, minContributions[i]));
+                    }
+
                     autoTracks.Add(i);
                     break;
 
@@ -1755,7 +1764,9 @@ public sealed partial class LayoutEngine
                 if (tracks[i].Kind == GridTrackKind.Fr)
                 {
                     var minimum = MathF.Max(0, tracks[i].Minimum.ResolveOr(in context, available, 0));
-                    sizes[i] = MathF.Max(minimum, MathF.Max(0, minContributions[i]));
+                    sizes[i] = tracks[i].Minimum.IsAuto || tracks[i].Minimum.IsIntrinsic
+                        ? MathF.Max(minimum, MathF.Max(0, minContributions[i]))
+                        : minimum;
                 }
             }
         }

@@ -71,9 +71,12 @@ public readonly record struct GridTrack(
 
     /// <summary>Creates a flexible track from a fraction.</summary>
     /// <param name="fr">Fraction of the free space, where <c>1</c> means <c>1fr</c>.</param>
-    /// <returns>A <see cref="GridTrackKind.Fr"/> track with a zero minimum.</returns>
+    /// <returns>
+    /// A <see cref="GridTrackKind.Fr"/> track with an auto minimum, matching the CSS
+    /// expansion of <c>1fr</c> to <c>minmax(auto, 1fr)</c>.
+    /// </returns>
     public static GridTrack Fraction(float fr)
-        => new(GridTrackKind.Fr, CssLength.Zero, CssLength.Fr(fr), fr, 0);
+        => new(GridTrackKind.Fr, CssLength.Auto, CssLength.Fr(fr), fr, 0);
 }
 
 /// <summary>
