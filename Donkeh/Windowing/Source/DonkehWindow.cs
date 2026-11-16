@@ -1235,6 +1235,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     {
         var view = _window ?? throw new InvalidOperationException("No view was created.");
 
+        WindowChrome.Attach(this);
         view.Load += OnLoad;
         view.Render += OnRender;
         view.Resize += OnResize;
@@ -1243,6 +1244,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
 
         // Silk owns the native window until the loop exits; tearing it down from
         // inside Closing resets an active context. Dispose after Run returns.
+        WindowChrome.Detach(this);
         Dispose();
     }
 
@@ -4422,6 +4424,34 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             _windowDragStartPosition.X + deltaX,
             _windowDragStartPosition.Y + deltaY);
     }
+
+    /// <summary>Gets whether the native window is currently maximized.</summary>
+    internal bool IsWindowMaximized => NativeWindow?.WindowState == WindowState.Maximized;
+
+    /// <summary>Minimizes the native window.</summary>
+    internal void MinimizeWindow()
+    {
+        if (NativeWindow is { } window)
+        {
+            window.WindowState = WindowState.Minimized;
+        }
+    }
+
+    /// <summary>Maximizes the native window, or restores it when already maximized.</summary>
+    internal void ToggleMaximizeWindow()
+    {
+        if (NativeWindow is not { } window)
+        {
+            return;
+        }
+
+        window.WindowState = window.WindowState == WindowState.Maximized
+            ? WindowState.Normal
+            : WindowState.Maximized;
+    }
+
+    /// <summary>Closes the native window.</summary>
+    internal void CloseWindow() => NativeWindow?.Close();
 
     /// <summary>
     /// Starts a manual resize when the press lands on an edge or corner of a
@@ -8414,6 +8444,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         }
 
         _disposed = true;
+        WindowChrome.Detach(this);
         _input?.Dispose();
         _devTools.Builds.Dispose();
         DisposeGpu();
