@@ -26,7 +26,7 @@ internal static class UpgradeService
         var projectFile = ComponentGenerator.FindProject(projectPath);
         var (projectText, newLine) = TextFiles.Read(projectFile);
 
-        if (projectText.Contains("Donkeh.props", StringComparison.OrdinalIgnoreCase))
+        if (CsprojEditor.UsesLocalCheckout(projectText))
         {
             throw new CliException(
                 "This project uses a local framework checkout. Upgrade its checkout with git instead.");
@@ -49,6 +49,12 @@ internal static class UpgradeService
 
         var updated = CsprojEditor.SetDonkehVersion(projectText, newLine, version);
         updated = CsprojEditor.SetDonkehPackageVersions(updated, version);
+
+        // Upgrading package versions implies NuGet mode for dual-mode projects.
+        if (CsprojEditor.HasProperty(updated, "UseLocalDonkeh"))
+        {
+            updated = CsprojEditor.SetProperty(updated, newLine, "UseLocalDonkeh", "false");
+        }
 
         if (!string.Equals(projectText, updated, StringComparison.Ordinal))
         {
@@ -102,7 +108,7 @@ internal static class UpgradeService
     }
 
     /// <summary>Finds the latest stable CLI version on NuGet.</summary>
-    private static string GetLatestVersion()
+    internal static string GetLatestVersion()
     {
         const string url = "https://api.nuget.org/v3-flatcontainer/donkeh.clitool/index.json";
 
@@ -144,7 +150,7 @@ internal static class UpgradeService
     }
 
     /// <summary>Normalises a user-supplied version.</summary>
-    private static string NormalizeVersion(string value)
+    internal static string NormalizeVersion(string value)
     {
         var version = value.Trim().TrimStart('v', 'V');
 
@@ -158,7 +164,7 @@ internal static class UpgradeService
     }
 
     /// <summary>Runs a dotnet command and throws when it exits non-zero.</summary>
-    private static (int ExitCode, string Output) RunDotnet(
+    internal static (int ExitCode, string Output) RunDotnet(
         IReadOnlyList<string> arguments,
         string? workingDirectory,
         bool throwOnError = true)

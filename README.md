@@ -46,6 +46,13 @@ donkeh enable-target android
 donkeh enable-target web
 ```
 
+Switch between published packages and a local framework checkout:
+
+```powershell
+donkeh use-local ../donkeh-ui.sln
+donkeh use-nuget --version 1.0.29
+```
+
 Building a reusable component library? Generate a packable library plus a live
 gallery:
 

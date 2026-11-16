@@ -274,6 +274,52 @@ public sealed class GeneratorTests
     }
 
     [Fact]
+    public void ConditionalCheckoutImportsAreNotTreatedAsLocal()
+    {
+        const string project = """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <UseLocalDonkeh Condition="'$(UseLocalDonkeh)' == ''">false</UseLocalDonkeh>
+              </PropertyGroup>
+              <Import Project="..\Donkeh\Build\Donkeh.props"
+                      Condition="'$(UseLocalDonkeh)' == 'true'" />
+            </Project>
+            """;
+
+        Assert.False(CsprojEditor.UsesLocalCheckout(project));
+    }
+
+    [Fact]
+    public void UnconditionalCheckoutImportsAreTreatedAsLocal()
+    {
+        const string project = """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <Import Project="..\Donkeh\Build\Donkeh.props" />
+            </Project>
+            """;
+
+        Assert.True(CsprojEditor.UsesLocalCheckout(project));
+    }
+
+    [Fact]
+    public void SwitchingModesUpdatesOnlyTheModeProperty()
+    {
+        const string project = """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <UseLocalDonkeh Condition="'$(UseLocalDonkeh)' == ''">false</UseLocalDonkeh>
+                <DonkehRoot>../donkeh</DonkehRoot>
+              </PropertyGroup>
+            </Project>
+            """;
+
+        var local = CsprojEditor.SetProperty(project, "\n", "UseLocalDonkeh", "true");
+
+        Assert.Contains("<UseLocalDonkeh Condition=\"'$(UseLocalDonkeh)' == ''\">true</UseLocalDonkeh>", local, StringComparison.Ordinal);
+        Assert.Contains("<DonkehRoot>../donkeh</DonkehRoot>", local, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void NewComponentCreatesFilesAndUpdatesProject()
     {
         using var directory = new TemporaryDirectory();

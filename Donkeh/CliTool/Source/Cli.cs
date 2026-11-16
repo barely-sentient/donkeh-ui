@@ -52,6 +52,16 @@ public static class Cli
             return RunUpgrade(args[1..]);
         }
 
+        if (string.Equals(args[0], "use-local", StringComparison.OrdinalIgnoreCase))
+        {
+            return RunUseLocal(args[1..]);
+        }
+
+        if (string.Equals(args[0], "use-nuget", StringComparison.OrdinalIgnoreCase))
+        {
+            return RunUseNuget(args[1..]);
+        }
+
         if (string.Equals(args[0], "enable-feature", StringComparison.OrdinalIgnoreCase))
         {
             return RunEnableFeature(args[1..]);
@@ -216,6 +226,60 @@ public static class Cli
         return 0;
     }
 
+    private static int RunUseLocal(string[] args)
+    {
+        var arguments = ParsedArguments.Parse(args, ["project"]);
+
+        if (arguments.Help)
+        {
+            PrintUseLocalHelp();
+            return 0;
+        }
+
+        if (arguments.Positionals.Count != 1)
+        {
+            throw new CliException(
+                "Expected a framework path. Example: donkeh use-local ../donkeh-ui.sln");
+        }
+
+        var projectFile = ProjectModeService.UseLocal(
+            arguments.Positionals[0],
+            arguments.Value("project"));
+
+        Console.WriteLine($"Using local framework in {projectFile}");
+        Console.WriteLine();
+        Console.WriteLine("Next:");
+        Console.WriteLine("  dotnet run");
+        return 0;
+    }
+
+    private static int RunUseNuget(string[] args)
+    {
+        var arguments = ParsedArguments.Parse(args, ["version", "project"]);
+
+        if (arguments.Help)
+        {
+            PrintUseNugetHelp();
+            return 0;
+        }
+
+        if (arguments.Positionals.Count != 0)
+        {
+            throw new CliException(
+                "Expected no positional arguments. Example: donkeh use-nuget --version 1.0.29");
+        }
+
+        var projectFile = ProjectModeService.UseNuget(
+            arguments.Value("version"),
+            arguments.Value("project"));
+
+        Console.WriteLine($"Using NuGet packages in {projectFile}");
+        Console.WriteLine();
+        Console.WriteLine("Next:");
+        Console.WriteLine("  dotnet run");
+        return 0;
+    }
+
     private static int RunEnableFeature(string[] args)
     {
         var arguments = ParsedArguments.Parse(args, ["project"]);
@@ -317,6 +381,8 @@ public static class Cli
               donkeh enable-feature <hot-reload> [--project <path>]
               donkeh watch [--project <path>] [-- <app args>]
               donkeh upgrade project [--version <version>] [--project <path>]
+              donkeh use-local <framework path> [--project <path>]
+              donkeh use-nuget [--version <version>] [--project <path>]
 
             Commands:
               new project       Create a minimal app, or a component library with a
@@ -328,6 +394,8 @@ public static class Cli
               watch             Run a project with CSS hot reload in Debug.
               upgrade project   Clear NuGet caches, update package versions, restore
                                 and update the global donkeh tool.
+              use-local         Switch the project to a local framework checkout.
+              use-nuget         Switch the project back to published NuGet packages.
 
             Options:
               -h, --help        Show this help.
@@ -447,6 +515,36 @@ public static class Cli
 
             Clears the NuGet caches, updates the Donkeh package version in the
             project, restores from NuGet and updates the global donkeh CLI tool.
+
+            Options:
+              --version <version>  Version to install; defaults to the latest stable.
+              --project <path>     Project file or project directory.
+            """);
+    }
+
+    private static void PrintUseLocalHelp()
+    {
+        Console.WriteLine("""
+            Usage:
+              donkeh use-local <framework path> [--project <path>]
+
+            Switches a project from NuGet packages to a local framework checkout.
+            The path may be the repository root, the Donkeh directory or a
+            solution/project file inside the checkout.
+
+            Options:
+              --project <path>     Project file or project directory.
+            """);
+    }
+
+    private static void PrintUseNugetHelp()
+    {
+        Console.WriteLine("""
+            Usage:
+              donkeh use-nuget [--version <version>] [--project <path>]
+
+            Switches a project from a local framework checkout to the published
+            NuGet packages and restores them.
 
             Options:
               --version <version>  Version to install; defaults to the latest stable.

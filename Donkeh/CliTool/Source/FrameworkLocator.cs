@@ -51,6 +51,12 @@ internal static class FrameworkLocator
     {
         var full = Path.GetFullPath(path);
 
+        // A solution or project file path selects the directory that contains it.
+        if (File.Exists(full))
+        {
+            full = Path.GetDirectoryName(full) ?? full;
+        }
+
         if (File.Exists(Path.Combine(full, "Build", "Donkeh.props")))
         {
             return full;
@@ -63,9 +69,10 @@ internal static class FrameworkLocator
             return framework;
         }
 
-        if (File.Exists(Path.Combine(full, "Donkeh.sln")))
+        if (File.Exists(Path.Combine(full, "Donkeh.sln"))
+            && Directory.Exists(framework))
         {
-            return Directory.Exists(framework) ? framework : null;
+            return framework;
         }
 
         return null;

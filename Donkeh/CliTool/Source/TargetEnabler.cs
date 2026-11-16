@@ -17,7 +17,7 @@ internal static class TargetEnabler
         var normalized = NormalizeTarget(target);
         var projectFile = ComponentGenerator.FindProject(projectPath);
         var (projectText, newLine) = TextFiles.Read(projectFile);
-        var checkout = projectText.Contains("Donkeh.props", StringComparison.OrdinalIgnoreCase);
+        var checkout = CsprojEditor.UsesLocalCheckout(projectText);
         var updated = normalized switch
         {
             "desktop" => EnableDesktop(projectText, newLine, checkout),

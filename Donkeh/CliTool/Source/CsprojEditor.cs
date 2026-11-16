@@ -6,29 +6,75 @@ namespace Donkeh.Cli;
 internal static class CsprojEditor
 {
     /// <summary>
-    /// Sets the <c>DonkehVersion</c> property, adding it to the first property
-    /// group when absent.
+    /// Reports whether a project actively imports a local framework checkout.
+    /// </summary>
+    /// <param name="projectText">Project file text.</param>
+    /// <returns>
+    /// <see langword="true"/> when an unconditional <c>Donkeh.props</c> import is
+    /// present. Conditional imports used by dual-mode projects are not treated as
+    /// local because they can be switched off.
+    /// </returns>
+    public static bool UsesLocalCheckout(string projectText)
+    {
+        var imports = Regex.Matches(
+            projectText,
+            @"<Import\b[^>]*>",
+            RegexOptions.IgnoreCase);
+
+        foreach (Match import in imports)
+        {
+            if (!import.Value.Contains("Donkeh.props", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!import.Value.Contains("Condition=", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Reports whether a project defines a property element.</summary>
+    /// <param name="projectText">Project file text.</param>
+    /// <param name="name">Property name, without angle brackets.</param>
+    /// <returns><see langword="true"/> when the element is present.</returns>
+    public static bool HasProperty(string projectText, string name)
+    {
+        var pattern = $@"<{Regex.Escape(name)}(?![A-Za-z])";
+        return Regex.IsMatch(projectText, pattern, RegexOptions.IgnoreCase);
+    }
+
+    /// <summary>
+    /// Sets a property value, preserving any attributes on the existing element,
+    /// or adds the element to the first property group when absent.
     /// </summary>
     /// <param name="projectText">Current project file text.</param>
     /// <param name="newLine">Line ending used by the project file.</param>
-    /// <param name="version">Package version to write.</param>
+    /// <param name="name">Property name, without angle brackets.</param>
+    /// <param name="value">Value to write.</param>
     /// <returns>The updated project text.</returns>
-    public static string SetDonkehVersion(
+    public static string SetProperty(
         string projectText,
         string newLine,
-        string version)
+        string name,
+        string value)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(version);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
 
+        var escaped = Regex.Escape(name);
         var property = new Regex(
-            @"<DonkehVersion(?<attributes>[^>]*)>.*?</DonkehVersion>",
+            $@"<{escaped}(?<attributes>[^>]*)>.*?</{escaped}>",
             RegexOptions.IgnoreCase | RegexOptions.Singleline);
 
         if (property.IsMatch(projectText))
         {
             return property.Replace(
                 projectText,
-                match => $"<DonkehVersion{match.Groups["attributes"].Value}>{version}</DonkehVersion>");
+                match => $"<{name}{match.Groups["attributes"].Value}>{value}</{name}>");
         }
 
         var group = new Regex(
@@ -42,9 +88,37 @@ internal static class CsprojEditor
             throw new CliException("The project file does not contain a PropertyGroup.");
         }
 
-        var insertion = $"{newLine}    <DonkehVersion>{version}</DonkehVersion>";
+        var insertion = $"{newLine}    <{name}>{value}</{name}>";
         return projectText.Insert(matchGroup.Index + matchGroup.Length, insertion);
     }
+
+    /// <summary>Removes a property element when present.</summary>
+    /// <param name="projectText">Current project file text.</param>
+    /// <param name="name">Property name, without angle brackets.</param>
+    /// <returns>The updated project text.</returns>
+    public static string RemoveProperty(string projectText, string name)
+    {
+        var escaped = Regex.Escape(name);
+        var property = new Regex(
+            $@"[ \t]*<{escaped}(?![A-Za-z])[^>]*>.*?</{escaped}>[ \t]*\r?\n?",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+        return property.Replace(projectText, string.Empty);
+    }
+
+    /// <summary>
+    /// Sets the <c>DonkehVersion</c> property, adding it to the first property
+    /// group when absent.
+    /// </summary>
+    /// <param name="projectText">Current project file text.</param>
+    /// <param name="newLine">Line ending used by the project file.</param>
+    /// <param name="version">Package version to write.</param>
+    /// <returns>The updated project text.</returns>
+    public static string SetDonkehVersion(
+        string projectText,
+        string newLine,
+        string version) =>
+        SetProperty(projectText, newLine, "DonkehVersion", version);
 
     /// <summary>
     /// Updates literal <c>Donkeh.*</c> package versions, leaving property-based
@@ -72,6 +146,85 @@ internal static class CsprojEditor
             match.Groups["version"].Value.StartsWith("$(", StringComparison.Ordinal)
                 ? match.Value
                 : match.Groups["start"].Value + version + match.Groups["end"].Value);
+    }
+
+    /// <summary>Adds a NuGet package reference when the project does not have it.</summary>
+    /// <param name="projectText">Current project file text.</param>
+    /// <param name="newLine">Line ending used by the project file.</param>
+    /// <param name="packageId">Package id, such as <c>Donkeh.Windowing</c>.</param>
+    /// <param name="version">Version or MSBuild version expression.</param>
+    /// <returns>The updated project text.</returns>
+    public static string EnsurePackageReference(
+        string projectText,
+        string newLine,
+        string packageId,
+        string version)
+    {
+        var existing = new Regex(
+            $@"<PackageReference\b[^>]*Include\s*=\s*""{Regex.Escape(packageId)}""",
+            RegexOptions.IgnoreCase);
+
+        if (existing.IsMatch(projectText))
+        {
+            return projectText;
+        }
+
+        var block =
+            $"  <ItemGroup>{newLine}" +
+            $"    <PackageReference Include=\"{packageId}\" Version=\"{version}\" />{newLine}" +
+            $"  </ItemGroup>{newLine}";
+
+        return AddItemGroup(projectText, newLine, block);
+    }
+
+    /// <summary>Removes every <c>Donkeh.*</c> package reference.</summary>
+    /// <param name="projectText">Current project file text.</param>
+    /// <returns>The updated project text.</returns>
+    public static string RemoveDonkehPackageReferences(string projectText)
+    {
+        var references = new Regex(
+            @"[ \t]*<PackageReference\b(?=[^>]*Include\s*=\s*""Donkeh\.[^""]*"")[^>]*(?:/>|>.*?</PackageReference>)[ \t]*\r?\n?",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+        return references.Replace(projectText, string.Empty);
+    }
+
+    /// <summary>Removes every import of a file name, such as <c>Donkeh.props</c>.</summary>
+    /// <param name="projectText">Current project file text.</param>
+    /// <param name="fileName">Import file name to remove.</param>
+    /// <returns>The updated project text.</returns>
+    public static string RemoveImports(string projectText, string fileName)
+    {
+        var imports = new Regex(
+            $@"[ \t]*<Import\b[^>]*{Regex.Escape(fileName)}[^>]*>[ \t]*\r?\n?",
+            RegexOptions.IgnoreCase);
+
+        return imports.Replace(projectText, string.Empty);
+    }
+
+    /// <summary>Inserts an import immediately after the opening project element.</summary>
+    /// <param name="projectText">Current project file text.</param>
+    /// <param name="newLine">Line ending used by the project file.</param>
+    /// <param name="importPath">Import path, escaped for XML when written.</param>
+    /// <returns>The updated project text.</returns>
+    public static string AddImportAfterProject(
+        string projectText,
+        string newLine,
+        string importPath)
+    {
+        var opening = Regex.Match(
+            projectText,
+            @"<Project\b[^>]*>",
+            RegexOptions.IgnoreCase);
+
+        if (!opening.Success)
+        {
+            throw new CliException("The project file does not contain an opening <Project> element.");
+        }
+
+        var escaped = System.Security.SecurityElement.Escape(importPath);
+        var insertion = $"{newLine}  <Import Project=\"{escaped}\" />";
+        return projectText.Insert(opening.Index + opening.Length, insertion);
     }
 
     /// <summary>
