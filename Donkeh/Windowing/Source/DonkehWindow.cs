@@ -967,6 +967,21 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         RebuildStyles();
     }
 
+    /// <summary>
+    /// Marks every mounted component dirty so the next frame re-runs its
+    /// <see cref="Donkeh.UILab.Component.Render"/> method.
+    /// </summary>
+    /// <remarks>
+    /// Development tooling calls this after a .NET hot reload patch has replaced
+    /// component method bodies. The tree is not remounted: component instances and
+    /// hook state survive, and the normal diff updates only the output that changed.
+    /// Call on the frame thread.
+    /// </remarks>
+    public void RefreshComponents()
+    {
+        _ui.RefreshAll();
+    }
+
     /// <summary>Marks the current tree as needing a new layout pass.</summary>
     /// <remarks>
     /// Use after mutating DOM state or CSS variables outside a UILab render, where

@@ -28,6 +28,16 @@ internal static class FeatureEnabler
 
         if (IsHotReloadEnabled(projectText))
         {
+            if (HasWatchExclude(projectText))
+            {
+                return projectFile;
+            }
+
+            var watchOnly = CsprojEditor.AddItemGroup(
+                projectText,
+                newLine,
+                ItemGroupStart(newLine) + WatchExcludeItem(newLine) + $"  </ItemGroup>{newLine}");
+            TextFiles.Write(projectFile, watchOnly);
             return projectFile;
         }
 
@@ -107,8 +117,9 @@ internal static class FeatureEnabler
         var version = DonkehVersion(projectText);
 
         return
-            $"  <ItemGroup Condition=\"'$(Configuration)' == 'Debug' and '$(TargetFramework)' == 'net10.0'\">{newLine}" +
+            ItemGroupStart(newLine) +
             $"    <PackageReference Include=\"{HotReloadPackage}\" Version=\"{version}\" />{newLine}" +
+            WatchExcludeItem(newLine) +
             $"  </ItemGroup>{newLine}";
     }
 
@@ -124,10 +135,21 @@ internal static class FeatureEnabler
             .Replace('\\', '/');
 
         return
-            $"  <ItemGroup Condition=\"'$(Configuration)' == 'Debug' and '$(TargetFramework)' == 'net10.0'\">{newLine}" +
+            ItemGroupStart(newLine) +
             $"    <ProjectReference Include=\"{reference}\" />{newLine}" +
+            WatchExcludeItem(newLine) +
             $"  </ItemGroup>{newLine}";
     }
+
+    private static string ItemGroupStart(string newLine) =>
+        $"  <ItemGroup Condition=\"'$(Configuration)' == 'Debug' and '$(TargetFramework)' == 'net10.0'\">{newLine}";
+
+    private static string WatchExcludeItem(string newLine) =>
+        $"    <EmbeddedResource Update=\"**/*.css\" Watch=\"false\" />{newLine}";
+
+    private static bool HasWatchExclude(string projectText) =>
+        projectText.Contains("Watch=\"false\"", StringComparison.OrdinalIgnoreCase)
+        && projectText.Contains("EmbeddedResource", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Resolves the Donkeh package version used by a project.</summary>
     private static string DonkehVersion(string projectText)

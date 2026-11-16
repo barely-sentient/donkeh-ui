@@ -138,6 +138,21 @@ public sealed class ComponentTests
     }
 
     [Fact]
+    public void RefreshAllRendersComponentsAgainWithoutResettingState()
+    {
+        Refreshable.Current = "first";
+        var renderer = new Renderer();
+        var root = (ElementNode)renderer.Mount(C<Refreshable>());
+
+        Assert.Equal("first:7", root.TextContent);
+
+        Refreshable.Current = "second";
+        renderer.RefreshAll();
+
+        Assert.Equal("second:7", root.TextContent);
+    }
+
+    [Fact]
     public void PropsWithChildrenRendersSuppliedChildren()
     {
         var renderer = new Renderer();
@@ -265,6 +280,17 @@ public sealed class ChildrenPanel : Component<PropsWithChildren>
 {
     public override Node Render() =>
         H("div", new Props { ClassName = "panel" }, Props.Children ?? []);
+}
+
+public sealed class Refreshable : Component
+{
+    public static string Current { get; set; } = "first";
+
+    public override Node Render()
+    {
+        var (count, _) = State(7);
+        return H("div", Text($"{Current}:{count}"));
+    }
 }
 
 public sealed class TitledPanelProps : PropsWithChildren

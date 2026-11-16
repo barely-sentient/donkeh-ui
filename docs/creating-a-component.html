@@ -443,7 +443,7 @@ return H("div", new Props { ClassName = "list" }, rows);</code></pre>
             transitions. The built-in inspector can edit the matched rules live.
         </p>
 
-        <h2 id="hot-reload">CSS hot reload</h2>
+        <h2 id="hot-reload">Hot reload</h2>
         <p>
             Hot reload is opt-in. Enable it once for the executable project:
         </p>
@@ -455,13 +455,25 @@ donkeh watch</code></pre>
 
         <p>
             The first command adds a reference that exists only in the Debug
-            configuration. The second starts the project with hot reload enabled and
-            keeps it running. The desktop host discovers the development package at
-            start-up and watches the source file behind every
-            <code>[Stylesheet]</code> declaration. Edit a CSS file while the app runs
-            and the window rebuilds the entire cascade: user-agent rules, author
-            sheets, style caches and layout engines. The next frame reflects the
-            change; no restart or rebuild is needed. C# edits still require a restart.
+            configuration. The second runs the project through <code>dotnet watch</code>
+            and keeps it running. Supported C# edits, such as changing a
+            <code>Render</code> method body, are applied to the running process by .NET
+            Hot Reload. The development package watches source files, waits for the
+            patch to settle and then asks the window to re-render every mounted
+            component. Instance state survives when the hook order did not change.
+            Edits that require new types, signatures or base classes make
+            <code>dotnet watch</code> restart the app. Changing the hook order or a
+            hook's type is not detected automatically; press Ctrl+R to restart when
+            doing that.
+        </p>
+
+        <p>
+            Stylesheet edits take a different path. The desktop host watches the source
+            file behind every <code>[Stylesheet]</code> declaration and rebuilds the
+            entire cascade in place: user-agent rules, author sheets, style caches and
+            layout engines. CSS is marked <code>Watch="false"</code> for
+            <code>dotnet watch</code>, so a stylesheet save does not cause a build or
+            restart.
         </p>
 
         <p>

@@ -181,9 +181,10 @@ donkeh watch</code></pre>
 
         <p>
             The test container references the library directly.
-            <code>enable-feature</code> adds the development-only CSS watcher and
-            <code>watch</code> runs the gallery in Debug. CSS edits update the live
-            preview; C# edits require a restart. When the library is ready:
+            <code>enable-feature</code> adds the development-only reloader and
+            <code>watch</code> runs the gallery in Debug. Supported C# edits and CSS
+            edits update the live preview; unsupported C# edits restart the app. When
+            the library is ready:
         </p>
 
         <div class="code" data-label="Terminal">

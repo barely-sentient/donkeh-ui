@@ -420,8 +420,8 @@ internal static class ProjectGenerator
             ```
 
             The container discovers every public component in `src/` and renders it
-            in a gallery. CSS edits update the running preview; C# edits require a
-            restart.
+            in a gallery. Supported C# edits and CSS edits update the running
+            preview; unsupported C# edits restart the app.
 
             ## Publish
 

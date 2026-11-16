@@ -112,6 +112,7 @@ public sealed class GeneratorTests
         var project = File.ReadAllText(projectFile);
 
         Assert.Contains("<PackageReference Include=\"Donkeh.HotReload\" Version=\"$(DonkehVersion)\" />", project, StringComparison.Ordinal);
+        Assert.Contains("<EmbeddedResource Update=\"**/*.css\" Watch=\"false\" />", project, StringComparison.Ordinal);
         Assert.Contains("'Debug'", project, StringComparison.Ordinal);
         Assert.Equal(1, CountOccurrences(project, "Include=\"Donkeh.HotReload\""));
     }
@@ -133,6 +134,7 @@ public sealed class GeneratorTests
         var project = File.ReadAllText(projectFile);
 
         Assert.Contains("Donkeh.HotReload.csproj", project, StringComparison.Ordinal);
+        Assert.Contains("<EmbeddedResource Update=\"**/*.css\" Watch=\"false\" />", project, StringComparison.Ordinal);
         Assert.Contains("'Debug'", project, StringComparison.Ordinal);
         Assert.Contains("<ProjectReference Include=", project, StringComparison.Ordinal);
     }

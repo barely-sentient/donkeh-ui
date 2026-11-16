@@ -259,9 +259,13 @@ window.Run(root, styles);</code></pre>
             embedded declarations back to source files and polls them from the window's
             frame loop. A change calls <code>SetStylesheet</code>, so the complete
             table, both layout engines, style caches and the inspector's sheet ranges
-            are rebuilt exactly as a programmatic stylesheet change would. Release
-            builds never reference the package, so the watcher is not part of the
-            application output.
+            are rebuilt exactly as a programmatic stylesheet change would. The same
+            package watches component source files; after the .NET Hot Reload agent
+            patches a method body it calls <code>RefreshComponents</code>, which marks
+            every mounted component dirty and lets the normal diff produce the new
+            output without remounting or resetting hook state. Release builds never
+            reference the package, so the watcher is not part of the application
+            output.
         </p>
 
         <h2 id="media">Images, audio, video and canvas</h2>

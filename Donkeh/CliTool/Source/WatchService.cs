@@ -13,11 +13,11 @@ internal static class WatchService
     /// Hot reload is not enabled for the project, or the process cannot start.
     /// </exception>
     /// <remarks>
-    /// The command runs <c>dotnet run</c> rather than <c>dotnet watch</c>. CSS files
-    /// are embedded resources, so a build watcher would restart the process for
-    /// every stylesheet edit. The hot reload package already polls the source files
-    /// and rebuilds the cascade in place, which keeps component state and layout
-    /// stable while styles change.
+    /// The command runs the project through <c>dotnet watch</c> so the .NET Hot
+    /// Reload agent can apply supported C# edits without restarting. CSS files are
+    /// removed from the watch list by <c>enable-feature hot-reload</c>, so a
+    /// stylesheet edit goes through the in-process CSS reloader instead of causing
+    /// a build and restart.
     /// </remarks>
     public static int Run(string? projectPath, IReadOnlyList<string> appArguments)
     {
@@ -41,6 +41,8 @@ internal static class WatchService
         };
 
         startInfo.Environment["DONKEH_HOT_RELOAD"] = "1";
+        startInfo.Environment["DOTNET_WATCH_RESTART_ON_RUDE_EDIT"] = "true";
+        startInfo.ArgumentList.Add("watch");
         startInfo.ArgumentList.Add("run");
         startInfo.ArgumentList.Add("--project");
         startInfo.ArgumentList.Add(projectFile);

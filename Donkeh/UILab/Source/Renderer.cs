@@ -357,6 +357,53 @@ namespace Donkeh.UILab
         }
 
         /// <summary>
+        /// Queues every mounted component for a fresh render.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// This is the update signal for development tooling: after a hot reload
+        /// patch has replaced component method bodies, nothing in the retained tree
+        /// would otherwise call <see cref="Component.Render"/> again. The method
+        /// marks each mounted instance dirty and lets the normal flush diff its new
+        /// output, so component instances and hook state are preserved when the hook
+        /// order did not change.
+        /// </para>
+        /// <para>
+        /// The snapshot of mounted components is taken before queueing, so a
+        /// synchronous <see cref="Flush"/> cannot observe a list that changes during
+        /// iteration. Calling this before <see cref="Mount"/> queues nothing.
+        /// </para>
+        /// </remarks>
+        public void RefreshAll()
+        {
+            if (_rootVdom is null)
+            {
+                return;
+            }
+
+            var components = _mounted.ToArray();
+
+            for (var i = 0; i < components.Length; i++)
+            {
+                var component = components[i];
+
+                if (!component.IsMounted || component.Queued)
+                {
+                    continue;
+                }
+
+                component.NeedsRender = true;
+                component.Queued = true;
+                _dirty.Enqueue(component);
+            }
+
+            if (AutoFlush && !_flushing)
+            {
+                Flush();
+            }
+        }
+
+        /// <summary>
         /// Queues a component for a re-render and, when <see cref="AutoFlush"/> is
         /// enabled, flushes it immediately.
         /// </summary>

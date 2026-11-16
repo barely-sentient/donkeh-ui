@@ -44,6 +44,7 @@ public static class HotReloadHost
         }
 
         CssHotReload.TryCreate()?.Attach(window);
+        ComponentHotReload.TryCreate()?.Attach(window);
     }
 
     private static bool IsDisabled()

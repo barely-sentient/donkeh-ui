@@ -423,10 +423,10 @@ public static class Cli
             Usage:
               donkeh watch [--project <path>] [-- <app args>]
 
-            Runs the project in the Debug configuration with CSS hot reload enabled.
-            Edit a declared stylesheet and the running window rebuilds its cascade in
-            place; no rebuild or restart is needed. Code changes still require the app
-            to be restarted.
+            Runs the project in the Debug configuration through dotnet watch with hot
+            reload enabled. Supported C# edits are applied to the running process,
+            and CSS edits rebuild the cascade in place. Unsupported C# edits restart
+            the app. No rebuild or manual restart is needed for normal edits.
 
             Hot reload must be enabled first:
               donkeh enable-feature hot-reload

@@ -393,19 +393,22 @@ donkeh watch</code></pre>
             framework checkout receives a conditional <code>ProjectReference</code>;
             a NuGet project receives a conditional <code>PackageReference</code>. Both
             carry <code>'$(Configuration)' == 'Debug'</code>, so Release builds and
-            published applications do not reference or copy the watcher. The command
-            is idempotent.
+            published applications do not reference or copy the watcher. The same item
+            group marks embedded CSS with <code>Watch="false"</code> so a stylesheet
+            save does not make <code>dotnet watch</code> rebuild. The command is
+            idempotent.
         </p>
 
         <p>
             <code>donkeh watch</code> refuses to start until the feature is enabled,
-            then runs <code>dotnet run -c Debug -f net10.0</code> with
+            then runs <code>dotnet watch run -c Debug -f net10.0</code> with
             <code>DONKEH_HOT_RELOAD=1</code>. Arguments after <code>--</code> are
-            forwarded to the application. The command deliberately does not use
-            <code>dotnet watch</code>: stylesheets are embedded resources, so a build
-            watcher would restart the process for every CSS edit. The runtime watcher
-            instead polls the source files and rebuilds the whole cascade in place.
-            C# edits still require the app to be restarted.
+            forwarded to the application. Supported C# edits are applied in place by
+            the .NET Hot Reload agent; the development package detects the source
+            change, waits for the patch to settle and re-renders every mounted
+            component. A second refresh covers a slower patch. Unsupported edits make
+            <code>dotnet watch</code> restart the app. CSS edits rebuild the cascade
+            through the in-process stylesheet reloader instead of a build.
         </p>
 
         <h2 id="upgrade">Upgrading a project</h2>
