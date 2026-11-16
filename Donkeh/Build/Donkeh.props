@@ -19,11 +19,18 @@
     </PropertyGroup>
 
     <PropertyGroup>
-        <_DonkehTargets />
-        <_DonkehTargets Condition="'$(DonkehDesktop)' == 'true'">net10.0</_DonkehTargets>
-        <_DonkehTargets Condition="'$(DonkehAndroid)' == 'true'">$(_DonkehTargets);net10.0-android</_DonkehTargets>
-        <_DonkehTargets Condition="'$(DonkehWeb)' == 'true'">$(_DonkehTargets);net10.0-browser</_DonkehTargets>
-        <DonkehTargetFrameworks>$([System.String]::Copy('$(_DonkehTargets)').Trim(';'))</DonkehTargetFrameworks>
+        <!--
+            Build the target list with plain properties. Joining them through a
+            property function such as String.Copy(...).Trim(';') escapes the
+            separator, so the SDK sees one target named "net10.0;net10.0-android"
+            and multi-targeting fails with NETSDK1046.
+        -->
+        <DonkehTargetFrameworks></DonkehTargetFrameworks>
+        <DonkehTargetFrameworks Condition="'$(DonkehDesktop)' == 'true'">net10.0</DonkehTargetFrameworks>
+        <DonkehTargetFrameworks Condition="'$(DonkehAndroid)' == 'true' and '$(DonkehTargetFrameworks)' != ''">$(DonkehTargetFrameworks);net10.0-android</DonkehTargetFrameworks>
+        <DonkehTargetFrameworks Condition="'$(DonkehAndroid)' == 'true' and '$(DonkehTargetFrameworks)' == ''">net10.0-android</DonkehTargetFrameworks>
+        <DonkehTargetFrameworks Condition="'$(DonkehWeb)' == 'true' and '$(DonkehTargetFrameworks)' != ''">$(DonkehTargetFrameworks);net10.0-browser</DonkehTargetFrameworks>
+        <DonkehTargetFrameworks Condition="'$(DonkehWeb)' == 'true' and '$(DonkehTargetFrameworks)' == ''">net10.0-browser</DonkehTargetFrameworks>
         <!-- Restore needs the browser RID in the outer build; inner Android builds
              keep the Android SDK's own ABI list. -->
         <RuntimeIdentifiers Condition="'$(DonkehWeb)' == 'true' and '$(TargetFramework)' == ''">browser-wasm;android-arm64;android-x64</RuntimeIdentifiers>

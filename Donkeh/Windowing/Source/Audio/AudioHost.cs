@@ -34,6 +34,7 @@ namespace Donkeh.Windowing
         private readonly object _deviceLock = new();
         private readonly Dictionary<ElementNode, Track> _tracks = [];
         private readonly HashSet<ElementNode> _pending = [];
+        private readonly HashSet<ElementNode> _readySignaled = [];
         private readonly AudioFormat _format = AudioFormat.DvdHq;
         private MiniAudioEngine? _engine;
         private AudioPlaybackDevice? _device;
@@ -102,6 +103,24 @@ namespace Donkeh.Windowing
             lock (_sync)
             {
                 return _tracks.TryGetValue(element, out var track) ? track.Player : null;
+            }
+        }
+
+        /// <summary>
+        /// Claims the one-time ready notification for an element.
+        /// </summary>
+        /// <param name="element">The audio element that now has a player.</param>
+        /// <returns>
+        /// <see langword="true"/> the first time it is called for this element;
+        /// <see langword="false"/> afterwards. Player creation runs on a worker,
+        /// so the frame that first observes the player is the only place the
+        /// callback can be dispatched.
+        /// </returns>
+        public bool MarkReady(ElementNode element)
+        {
+            lock (_sync)
+            {
+                return _readySignaled.Add(element);
             }
         }
 
@@ -239,6 +258,7 @@ namespace Donkeh.Windowing
         private void RemoveLocked(ElementNode element)
         {
             _pending.Remove(element);
+            _readySignaled.Remove(element);
 
             if (!_tracks.Remove(element, out var track))
             {

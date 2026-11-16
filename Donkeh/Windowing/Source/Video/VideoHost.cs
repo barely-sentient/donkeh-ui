@@ -30,6 +30,7 @@ namespace Donkeh.Windowing
         private readonly object _sync = new();
         private readonly Dictionary<ElementNode, Track> _tracks = [];
         private readonly HashSet<ElementNode> _pending = [];
+        private readonly HashSet<ElementNode> _readySignaled = [];
         private readonly byte[] _frameBuffer = new byte[VideoPlayer.FrameWidth * VideoPlayer.FrameHeight * 4];
         private bool _disposed;
 
@@ -262,10 +263,29 @@ namespace Donkeh.Windowing
         private void RemoveLocked(ElementNode element)
         {
             _pending.Remove(element);
+            _readySignaled.Remove(element);
 
             if (_tracks.Remove(element, out var track))
             {
                 Task.Run(track.Player.Dispose);
+            }
+        }
+
+        /// <summary>
+        /// Claims the one-time ready notification for an element.
+        /// </summary>
+        /// <param name="element">The video element that now has a player.</param>
+        /// <returns>
+        /// <see langword="true"/> the first time it is called for this element;
+        /// <see langword="false"/> afterwards. Player creation runs on a worker,
+        /// so the frame that first observes the player is the only place the
+        /// callback can be dispatched.
+        /// </returns>
+        public bool MarkReady(ElementNode element)
+        {
+            lock (_sync)
+            {
+                return _readySignaled.Add(element);
             }
         }
 

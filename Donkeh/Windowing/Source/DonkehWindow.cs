@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Numerics;
 using Donkeh.Data;
 using Donkeh.Data.Dom;
+using Donkeh.Hosting;
 using Donkeh.Inspector;
 using Donkeh.LayoutLab;
 using Donkeh.Parser;
@@ -534,6 +535,9 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
 
     /// <summary>Audio or video element whose progress thumb is being dragged, if any.</summary>
     private ElementNode? _mediaSeekElement;
+
+    /// <summary>Range input whose track is being scrubbed, if any.</summary>
+    private ElementNode? _rangeDragElement;
 
     /// <summary>Width in CSS pixels of the invisible frameless resize handle.</summary>
     private const int FramelessResizeBorder = 6;
@@ -1444,7 +1448,6 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
                 ReadFloatAttribute(element, "playbackrate", 1f));
 
             _audioHost ??= new AudioHost();
-            var known = _audioHost.GetPlayer(element) is not null;
             var player = _audioHost.Ensure(element, options);
 
             if (player is null)
@@ -1452,7 +1455,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
                 continue;
             }
 
-            if (!known && element.AudioReadyHandler is { } ready)
+            if (_audioHost.MarkReady(element) && element.AudioReadyHandler is { } ready)
             {
                 try { ready.DynamicInvoke(player); }
                 catch { }
@@ -1561,7 +1564,6 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
                 ReadFloatAttribute(element, "playbackrate", 1f));
 
             _videoHost ??= new VideoHost();
-            var known = _videoHost.GetPlayer(element) is not null;
             var textureKey = "videoframe:" + element.GetHashCode().ToString(CultureInfo.InvariantCulture);
             var player = _videoHost.Ensure(element, options, textureKey);
 
@@ -1570,7 +1572,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
                 continue;
             }
 
-            if (!known && element.VideoReadyHandler is { } ready)
+            if (_videoHost.MarkReady(element) && element.VideoReadyHandler is { } ready)
             {
                 try { ready.DynamicInvoke(player); }
                 catch { }
@@ -1895,6 +1897,11 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         UpdatePointerAutoScroll();
 
         BeforeFrame?.Invoke(this, delta);
+
+        // Worker-thread completions and frame clocks run before the flush so any
+        // state they change is applied in this frame instead of the next one.
+        Host.PumpPostedActions();
+        Host.RaiseFrameTick(delta);
 
         if (_renderer is null || _window is null)
         {
@@ -3052,6 +3059,24 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     }
 
     /// <summary>
+    /// Returns a box's content box translated into painted (window) coordinates by
+    /// subtracting every scrolling ancestor's offset.
+    /// </summary>
+    /// <param name="box">The box to project.</param>
+    /// <returns>The content box as it appears on screen, in CSS pixels.</returns>
+    /// <remarks>
+    /// Custom control painters receive the unscrolled layout box, unlike the
+    /// background and border painters which are handed an already translated
+    /// rectangle. Anything drawn from <see cref="LayoutBox.ContentBox"/> must use
+    /// this projection or it will not follow its scroll container.
+    /// </remarks>
+    private static Rect PaintedContentBox(LayoutBox box)
+    {
+        var (scrollX, scrollY) = AccumulatedScroll(box.Parent);
+        return box.ContentBox.Translate(-scrollX, -scrollY);
+    }
+
+    /// <summary>
     /// Rebuilds the app overlay display list (open dropdown, caret and inspector
     /// hover highlight).
     /// </summary>
@@ -3583,7 +3608,9 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             var best = 0;
             var bestDistance = float.MaxValue;
 
-            for (var index = 0; index <= text.Length; index = NextTextElement(text, index))
+            var index = 0;
+
+            while (true)
             {
                 var prefix = TextLayoutEngine.Layout(
                     text[..index],
@@ -3595,19 +3622,26 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
                     box.Style.WebkitLineClamp,
                     box.Style.TextOverflow);
 
-                if (prefix.Lines.Length == 0 || prefix.Lines.Length - 1 != line)
+                if (prefix.Lines.Length > 0 && prefix.Lines.Length - 1 == line)
                 {
-                    continue;
+                    var candidate = prefix.Lines[^1];
+                    var distance = MathF.Abs(originX + candidate.X + candidate.Width - x);
+
+                    if (distance < bestDistance)
+                    {
+                        bestDistance = distance;
+                        best = index;
+                    }
                 }
 
-                var candidate = prefix.Lines[^1];
-                var distance = MathF.Abs(originX + candidate.X + candidate.Width - x);
-
-                if (distance < bestDistance)
+                // NextTextElement clamps at the text length, so the end offset
+                // must be evaluated once and then the search must stop.
+                if (index >= text.Length)
                 {
-                    bestDistance = distance;
-                    best = index;
+                    break;
                 }
+
+                index = NextTextElement(text, index);
             }
 
             _caretIndex = best;
@@ -4710,11 +4744,12 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         ConstantPool constants,
         bool radio)
     {
-        var boxRect = box.ContentBox;
+        var boxRect = PaintedContentBox(box);
 
         if (boxRect.IsEmpty)
         {
-            boxRect = box.BorderBox.Deflate(box.Style.BorderWidth.Top.Value, box.Style.BorderWidth.Right.Value,
+            var border = PaintedBorderBox(box);
+            boxRect = border.Deflate(box.Style.BorderWidth.Top.Value, box.Style.BorderWidth.Right.Value,
                 box.Style.BorderWidth.Bottom.Value, box.Style.BorderWidth.Left.Value);
         }
 
@@ -4752,8 +4787,8 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     }
 
     /// <summary>
-    /// Draws a range input as a rounded track with an accent-colored fill up to the
-    /// current value.
+    /// Draws a range input as a rounded track with an accent-colored fill and a
+    /// draggable thumb up to the current value.
     /// </summary>
     /// <param name="box">The input's layout box.</param>
     /// <param name="instructions">Display list to append to.</param>
@@ -4761,8 +4796,9 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// <param name="element">The input, read for <c>min</c>, <c>max</c> and <c>value</c>.</param>
     /// <remarks>
     /// The ratios are clamped to 0–1 and the divisor is floored at 0.0001, so equal
-    /// bounds or a zero-height box cannot produce NaN geometry. No thumb is drawn;
-    /// the fill edge stands in for it.
+    /// bounds or a zero-height box cannot produce NaN geometry. Geometry is
+    /// projected through <see cref="PaintedContentBox"/> so the control scrolls
+    /// with its container.
     /// </remarks>
     private static void PaintRange(
         LayoutBox box,
@@ -4770,25 +4806,187 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         ConstantPool constants,
         ElementNode element)
     {
-        var rect = box.ContentBox;
+        var rect = PaintedContentBox(box);
+
+        if (rect.IsEmpty)
+        {
+            var border = PaintedBorderBox(box);
+            rect = border.Deflate(
+                box.Style.BorderWidth.Top.Value,
+                box.Style.BorderWidth.Right.Value,
+                box.Style.BorderWidth.Bottom.Value,
+                box.Style.BorderWidth.Left.Value);
+        }
 
         if (rect.IsEmpty)
         {
             return;
         }
 
-        var min = HtmlDefaults.AttributeLength(element, "min", 0);
-        var max = HtmlDefaults.AttributeLength(element, "max", 100);
+        var (min, max, _) = ReadRangeBounds(element);
         var value = HtmlDefaults.AttributeLength(element, "value", min);
-        var ratio = Math.Clamp((value - min) / MathF.Max(0.0001f, max - min), 0, 1);
-        var track = new Rect(rect.X, rect.Y + rect.Height * 0.4f, rect.Width, MathF.Max(4, rect.Height * 0.2f));
+        var ratio = max > min ? Math.Clamp((value - min) / (max - min), 0, 1) : 0;
+        var trackHeight = MathF.Max(4, rect.Height * 0.2f);
+        var trackY = rect.Y + (rect.Height - trackHeight) * 0.5f;
+        var track = new Rect(rect.X, trackY, rect.Width, trackHeight);
         var radius = constants.AddRadius(CornerRadius.All(track.Height * 0.5f));
         instructions.AddDrawRoundedRect(track, 0xFFD0D7DE, checked((ushort)radius));
-        instructions.AddDrawRoundedRect(
-            track.WithSize(MathF.Max(track.Height, track.Width * ratio), track.Height),
-            0xFF0969DA,
-            checked((ushort)radius));
+
+        var fillWidth = track.Width * ratio;
+
+        if (fillWidth > 0)
+        {
+            instructions.AddDrawRoundedRect(
+                track.WithSize(MathF.Max(track.Height, fillWidth), track.Height),
+                0xFF0969DA,
+                checked((ushort)radius));
+        }
+
+        // A visible handle is what tells the user the track can be dragged.
+        var thumbSize = Math.Clamp(rect.Height * 0.72f, 10f, 16f);
+        var thumbX = Math.Clamp(
+            rect.X + fillWidth - thumbSize * 0.5f,
+            rect.X,
+            rect.X + rect.Width - thumbSize);
+        var thumbY = rect.Y + (rect.Height - thumbSize) * 0.5f;
+        var rim = new Rect(thumbX - 1, thumbY - 1, thumbSize + 2, thumbSize + 2);
+        instructions.Add(new Instruction(
+            InstructionOpCode.DrawEllipse,
+            rim.X,
+            rim.Y,
+            rim.Width,
+            rim.Height,
+            unchecked((int)0xFFFFFFFF)));
+        instructions.Add(new Instruction(
+            InstructionOpCode.DrawEllipse,
+            thumbX,
+            thumbY,
+            thumbSize,
+            thumbSize,
+            unchecked((int)0xFF0969DA)));
     }
+
+    /// <summary>
+    /// Reports whether an element is a range input.
+    /// </summary>
+    /// <param name="element">Element to test.</param>
+    /// <returns><see langword="true"/> for <c>input type="range"</c>.</returns>
+    private static bool IsRangeInput(ElementNode element)
+    {
+        return element.Tag == "input"
+            && string.Equals(GetAttribute(element, "type"), "range", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Reads the numeric bounds and step of a range input.</summary>
+    /// <param name="element">Range input to inspect.</param>
+    /// <returns>The clamped <c>min</c>/<c>max</c> and the step, or zero for <c>any</c>.</returns>
+    private static (float Min, float Max, float Step) ReadRangeBounds(ElementNode element)
+    {
+        var min = HtmlDefaults.AttributeLength(element, "min", 0);
+        var max = HtmlDefaults.AttributeLength(element, "max", 100);
+
+        if (max < min)
+        {
+            (min, max) = (max, min);
+        }
+
+        var step = HtmlDefaults.AttributeLength(element, "step", 1);
+        return (min, max, step > 0 ? step : 0);
+    }
+
+    /// <summary>Formats a range value for the DOM.</summary>
+    private static string FormatRangeValue(float value) =>
+        value.ToString("0.####", CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Commits a value to a range input, quantised to its step, and raises
+    /// <c>input</c> when it changed.
+    /// </summary>
+    /// <param name="element">Range input to update.</param>
+    /// <param name="value">Requested value; clamped and snapped to the step.</param>
+    /// <param name="dispatch">Whether to raise an <c>input</c> event.</param>
+    private void SetRangeValue(ElementNode element, float value, bool dispatch)
+    {
+        var (min, max, step) = ReadRangeBounds(element);
+
+        if (max <= min)
+        {
+            return;
+        }
+
+        value = Math.Clamp(value, min, max);
+
+        if (step > 0)
+        {
+            value = Math.Clamp(min + MathF.Round((value - min) / step) * step, min, max);
+        }
+
+        var text = FormatRangeValue(value);
+
+        if (string.Equals(GetAttribute(element, "value"), text, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        element.SetAttribute(ValueAttribute, InternTable.Intern(text));
+        _needsPaint = true;
+
+        if (dispatch)
+        {
+            Invoke(element, "input", text);
+        }
+    }
+
+    /// <summary>
+    /// Maps a pointer X coordinate onto a range input's track and commits the
+    /// resulting value.
+    /// </summary>
+    /// <param name="element">Range input being scrubbed.</param>
+    /// <param name="x">Pointer X in client coordinates.</param>
+    private void SetRangeFromPoint(ElementNode element, float x)
+    {
+        var layout = LayoutFor(element);
+
+        if (layout is null || !layout.TryGetBox(element, out var box))
+        {
+            return;
+        }
+
+        var rect = PaintedContentBox(box);
+
+        if (rect.Width <= 0)
+        {
+            return;
+        }
+
+        var (min, max, _) = ReadRangeBounds(element);
+        var ratio = Math.Clamp((x - rect.X) / rect.Width, 0f, 1f);
+        SetRangeValue(element, min + (max - min) * ratio, dispatch: true);
+    }
+
+    /// <summary>
+    /// Moves a range input by a number of steps, used by the arrow keys.
+    /// </summary>
+    /// <param name="element">Range input to adjust.</param>
+    /// <param name="steps">Number of steps to add; negative values move left.</param>
+    private void NudgeRange(ElementNode element, int steps)
+    {
+        var (min, max, step) = ReadRangeBounds(element);
+
+        if (max <= min)
+        {
+            return;
+        }
+
+        if (step <= 0)
+        {
+            step = MathF.Max(0.01f, (max - min) / 100f);
+        }
+
+        var current = HtmlDefaults.AttributeLength(element, "value", min);
+        SetRangeValue(element, current + step * steps, dispatch: true);
+    }
+
 
     /// <summary>
     /// Draws a <c>progress</c> or <c>meter</c> element as a pill track with a fill
@@ -4809,7 +5007,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         ConstantPool constants,
         ElementNode element)
     {
-        var rect = box.ContentBox;
+        var rect = PaintedContentBox(box);
 
         if (rect.IsEmpty)
         {
@@ -4923,6 +5121,29 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         _mouseMovePending = false;
         var x = _pendingMouseX;
         var y = _pendingMouseY;
+
+        if (_rangeDragElement is not null)
+        {
+            if (!IsLeftMouseButtonDown())
+            {
+                _rangeDragElement = null;
+                _pressed = null;
+                SetActive(null);
+                _needsPaint = true;
+                return;
+            }
+
+            if (IsLiveNode(_rangeDragElement))
+            {
+                SetRangeFromPoint(_rangeDragElement, x);
+            }
+            else
+            {
+                _rangeDragElement = null;
+            }
+
+            return;
+        }
 
         if (_windowDragging)
         {
@@ -5191,6 +5412,15 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
 
         var shift = IsShiftPressed();
 
+        if (element is not null && IsRangeInput(element))
+        {
+            Focus(element, focusVisible: false);
+            _rangeDragElement = element;
+            SetRangeFromPoint(element, _mouseX);
+            Invoke(element, "mousedown");
+            return;
+        }
+
         if (element is not null && IsTextControl(element))
         {
             Focus(element, focusVisible: false, preserveSelection: shift);
@@ -5333,6 +5563,17 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             _mediaSeekElement = null;
             _pressed = null;
             SetActive(null);
+            _needsPaint = true;
+            return;
+        }
+
+        if (_rangeDragElement is not null)
+        {
+            var range = _rangeDragElement;
+            _rangeDragElement = null;
+            _pressed = null;
+            SetActive(null);
+            Invoke(range, "change", GetAttribute(range, "value") ?? string.Empty);
             _needsPaint = true;
             return;
         }
@@ -6156,6 +6397,53 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             }
         }
 
+        if (IsRangeInput(_focused))
+        {
+            var handled = true;
+
+            switch (key)
+            {
+                case Key.Left:
+                case Key.Down:
+                    NudgeRange(_focused, -1);
+                    break;
+
+                case Key.Right:
+                case Key.Up:
+                    NudgeRange(_focused, 1);
+                    break;
+
+                case Key.PageDown:
+                    NudgeRange(_focused, -10);
+                    break;
+
+                case Key.PageUp:
+                    NudgeRange(_focused, 10);
+                    break;
+
+                case Key.Home:
+                    SetRangeValue(_focused, ReadRangeBounds(_focused).Min, dispatch: true);
+                    break;
+
+                case Key.End:
+                    SetRangeValue(_focused, ReadRangeBounds(_focused).Max, dispatch: true);
+                    break;
+
+                case Key.Backspace:
+                case Key.Delete:
+                    break;
+
+                default:
+                    handled = false;
+                    break;
+            }
+
+            if (handled)
+            {
+                return;
+            }
+        }
+
         switch (key)
         {
             case Key.Backspace:
@@ -6641,7 +6929,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             _focused.IsFocused = false;
             _focused.IsFocusVisible = false;
 
-            if (_focused.Tag is "input" or "textarea")
+            if (IsTextControl(_focused))
             {
                 CommitEdit(_focused);
                 Invoke(_focused, "change", _editText ?? string.Empty);
@@ -6667,10 +6955,12 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         {
             element.IsFocused = true;
             element.IsFocusVisible = visible;
-            _editText = NormalizeEditText(
-                element,
-                GetAttribute(element, "value") ?? element.TextContent ?? string.Empty);
-            _caretIndex = _editText.Length;
+            _editText = IsTextControl(element)
+                ? NormalizeEditText(
+                    element,
+                    GetAttribute(element, "value") ?? element.TextContent ?? string.Empty)
+                : null;
+            _caretIndex = _editText?.Length ?? 0;
             ResetCaretBlink();
 
             if (element.TryGetEventHandler("focus", out var handler) && handler is Action action)
