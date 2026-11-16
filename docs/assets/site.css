@@ -787,6 +787,14 @@ td code {
     white-space: nowrap;
 }
 
+.table-note {
+    display: block;
+    margin-top: 3px;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.45;
+}
+
 /* ---------------------------------------------------------------- trees / steps */
 
 .tree {
