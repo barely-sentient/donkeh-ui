@@ -653,9 +653,13 @@ public sealed class InspectorPanel : Component<InspectorPanelProps>
         }
 
         var server = builds.Downloads;
+        var debugLabel = builds.DebugDirectory is null
+            ? "debug/"
+            : Path.GetRelativePath(builds.ProjectRoot!, builds.DebugDirectory).Replace('\\', '/');
         var serverDescription = server.IsRunning
-            ? "Serving " + (builds.BuildsRoot ?? "builds")
-            : "Serve build outputs over HTTP on this machine or local network.";
+            ? "Serving " + (builds.BuildsRoot ?? "builds") + "  \u00B7  screenshots \u2192 " + debugLabel
+            : "Serve build outputs over HTTP. Open the URL to download builds or drop screenshots into " +
+                debugLabel + ".";
 
         children.Add(_.H(
             "div",

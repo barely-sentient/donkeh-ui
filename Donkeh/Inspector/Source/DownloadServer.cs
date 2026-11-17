@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.Json;
 
 namespace Donkeh.Inspector;
 
@@ -18,11 +19,18 @@ namespace Donkeh.Inspector;
 /// browser walk folders, and any other path downloads the matching file.
 /// </para>
 /// <para>
+/// The same page also accepts screenshots. A <c>POST /upload?name=...</c> request
+/// writes the raw image body into <see cref="UploadDirectory"/>, normally the
+/// application's <c>debug</c> folder, so screenshots taken in a browser become
+/// files the application and its tooling can read.
+/// </para>
+/// <para>
 /// The implementation uses a raw <see cref="TcpListener"/> instead of
 /// <see cref="HttpListener"/> so it works without a Windows URL reservation or
-/// administrator rights. It supports <c>GET</c> and <c>HEAD</c>, streams large
-/// files, rejects path traversal and closes each connection after one request.
-/// The server has no authentication; it is intended for a trusted local network.
+/// administrator rights. It supports <c>GET</c>, <c>HEAD</c> and the upload
+/// <c>POST</c>, streams large files, rejects path traversal and closes each
+/// connection after one request. The server has no authentication; it is
+/// intended for a trusted local network.
 /// </para>
 /// </remarks>
 public sealed class DownloadServer : IDisposable
@@ -32,6 +40,9 @@ public sealed class DownloadServer : IDisposable
 
     /// <summary>Guards the listener and cancellation fields.</summary>
     private readonly object _gate = new();
+
+    /// <summary>Serializes name allocation and writing for simultaneous uploads.</summary>
+    private readonly object _uploadGate = new();
 
     /// <summary>The active listener, or null while stopped.</summary>
     private TcpListener? _listener;
@@ -48,8 +59,18 @@ public sealed class DownloadServer : IDisposable
     /// <summary>Backing field for <see cref="RootDirectory"/>.</summary>
     private string? _rootDirectory;
 
+    /// <summary>Backing field for <see cref="UploadDirectory"/>.</summary>
+    private string? _uploadDirectory;
+
     /// <summary>Backing field for <see cref="LastError"/>.</summary>
     private string? _lastError;
+
+    /// <summary>Largest upload body accepted, in bytes.</summary>
+    private const long MaxUploadBytes = 32L * 1024 * 1024;
+
+    /// <summary>Image extensions accepted by <c>POST /upload</c>.</summary>
+    private static readonly string[] UploadExtensions =
+        [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".avif", ".tif", ".tiff"];
 
     /// <summary>Addresses printed by the UI while the server is running.</summary>
     private IReadOnlyList<string> _urls = [];
@@ -117,6 +138,28 @@ public sealed class DownloadServer : IDisposable
             {
                 _changed();
             }
+        }
+    }
+
+    /// <summary>Gets or sets the directory that receives uploaded screenshots.</summary>
+    /// <remarks>
+    /// Normally the application's <c>debug</c> folder. The directory is created
+    /// on demand when the first image arrives, so it does not need to exist when
+    /// the server starts. A null or empty value disables uploads while leaving
+    /// downloads available.
+    /// </remarks>
+    public string? UploadDirectory
+    {
+        get => _uploadDirectory;
+        set
+        {
+            if (string.Equals(_uploadDirectory, value, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            _uploadDirectory = value;
+            _changed();
         }
     }
 
@@ -369,7 +412,7 @@ public sealed class DownloadServer : IDisposable
     /// <param name="root">The served directory.</param>
     /// <param name="cancellation">Cancellation token for shutdown.</param>
     /// <returns>A task that completes after the response is written.</returns>
-    private static async Task HandleClientAsync(
+    private async Task HandleClientAsync(
         TcpClient client,
         string root,
         CancellationToken cancellation)
@@ -381,28 +424,28 @@ public sealed class DownloadServer : IDisposable
                 client.NoDelay = true;
 
                 await using var stream = client.GetStream();
-                using var reader = new StreamReader(
-                    stream,
-                    Encoding.ASCII,
-                    detectEncodingFromByteOrderMarks: false,
-                    bufferSize: 4096,
-                    leaveOpen: true);
+                var head = await ReadHeadAsync(stream, cancellation).ConfigureAwait(false);
 
-                var requestLine = await reader.ReadLineAsync(cancellation).ConfigureAwait(false);
-
-                if (string.IsNullOrEmpty(requestLine))
+                if (string.IsNullOrEmpty(head))
                 {
                     return;
                 }
 
-                // Drain the headers; this server has no request body support.
-                string? header;
+                var lines = head.Split("\r\n", StringSplitOptions.None);
+                var requestLine = lines[0];
+                var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-                do
+                for (var i = 1; i < lines.Length; i++)
                 {
-                    header = await reader.ReadLineAsync(cancellation).ConfigureAwait(false);
+                    var separator = lines[i].IndexOf(':');
+
+                    if (separator <= 0)
+                    {
+                        continue;
+                    }
+
+                    headers[lines[i][..separator].Trim()] = lines[i][(separator + 1)..].Trim();
                 }
-                while (!string.IsNullOrEmpty(header));
 
                 var parts = requestLine.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
@@ -413,9 +456,12 @@ public sealed class DownloadServer : IDisposable
                     return;
                 }
 
-                var headOnly = string.Equals(parts[0], "HEAD", StringComparison.OrdinalIgnoreCase);
+                var method = parts[0];
+                var headOnly = string.Equals(method, "HEAD", StringComparison.OrdinalIgnoreCase);
+                var isGet = string.Equals(method, "GET", StringComparison.OrdinalIgnoreCase);
+                var isPost = string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase);
 
-                if (!headOnly && !string.Equals(parts[0], "GET", StringComparison.OrdinalIgnoreCase))
+                if (!isGet && !isPost && !headOnly)
                 {
                     await WriteStatusAsync(stream, 405, "Method Not Allowed", headOnly: false, cancellation)
                         .ConfigureAwait(false);
@@ -423,14 +469,29 @@ public sealed class DownloadServer : IDisposable
                 }
 
                 var target = parts[1];
-                var query = target.IndexOf('?');
+                var queryIndex = target.IndexOf('?');
+                var query = queryIndex >= 0 ? target[(queryIndex + 1)..] : string.Empty;
 
-                if (query >= 0)
+                if (queryIndex >= 0)
                 {
-                    target = target[..query];
+                    target = target[..queryIndex];
                 }
 
                 var relative = Uri.UnescapeDataString(target).TrimStart('/');
+
+                if (isPost)
+                {
+                    if (string.Equals(relative, "upload", StringComparison.OrdinalIgnoreCase))
+                    {
+                        await HandleUploadAsync(stream, query, headers, cancellation).ConfigureAwait(false);
+                        return;
+                    }
+
+                    await WriteStatusAsync(stream, 405, "Method Not Allowed", headOnly: false, cancellation)
+                        .ConfigureAwait(false);
+                    return;
+                }
+
                 var fullPath = Path.GetFullPath(
                     relative.Length == 0 ? root : Path.Combine(root, relative));
 
@@ -481,6 +542,388 @@ public sealed class DownloadServer : IDisposable
                 // down the accept loop.
             }
         }
+    }
+
+    /// <summary>Reads request headers without consuming any of the body.</summary>
+    /// <param name="stream">Client stream.</param>
+    /// <param name="cancellation">Cancellation token.</param>
+    /// <returns>The request head, or null when the peer closed immediately.</returns>
+    /// <remarks>
+    /// Reads one byte at a time because a buffered reader would swallow the
+    /// beginning of an upload body. Headers are tiny, so the extra reads are
+    /// negligible compared with the image transfer.
+    /// </remarks>
+    private static async Task<string?> ReadHeadAsync(
+        NetworkStream stream,
+        CancellationToken cancellation)
+    {
+        var buffer = new byte[1];
+        var head = new StringBuilder(1024);
+        var matched = 0;
+
+        while (head.Length < 64 * 1024)
+        {
+            var read = await stream.ReadAsync(buffer.AsMemory(0, 1), cancellation).ConfigureAwait(false);
+
+            if (read == 0)
+            {
+                return head.Length == 0 ? null : head.ToString();
+            }
+
+            var c = (char)buffer[0];
+            head.Append(c);
+
+            if (c == '\r')
+            {
+                matched = matched is 0 or 2 ? matched + 1 : 0;
+            }
+            else if (c == '\n')
+            {
+                matched = matched is 1 or 3 ? matched + 1 : 0;
+            }
+            else
+            {
+                matched = 0;
+            }
+
+            if (matched == 4)
+            {
+                return head.ToString();
+            }
+        }
+
+        return head.ToString();
+    }
+
+    /// <summary>Handles one screenshot upload request.</summary>
+    /// <param name="stream">Client stream positioned at the request body.</param>
+    /// <param name="query">Raw query string from the request target.</param>
+    /// <param name="headers">Parsed request headers.</param>
+    /// <param name="cancellation">Cancellation token.</param>
+    /// <returns>A task that completes after the response is written.</returns>
+    /// <remarks>
+    /// The body is the raw image; the original file name travels in the
+    /// <c>name</c> query parameter. Keeping the wire format this simple lets the
+    /// generated page use <c>fetch</c> without building a multipart encoder.
+    /// </remarks>
+    private async Task HandleUploadAsync(
+        NetworkStream stream,
+        string query,
+        IReadOnlyDictionary<string, string> headers,
+        CancellationToken cancellation)
+    {
+        if (string.IsNullOrWhiteSpace(_uploadDirectory))
+        {
+            await WriteJsonErrorAsync(
+                    stream,
+                    503,
+                    "Service Unavailable",
+                    "Uploads are not configured.",
+                    cancellation)
+                .ConfigureAwait(false);
+            return;
+        }
+
+        if (!headers.TryGetValue("Content-Length", out var lengthText)
+            || !long.TryParse(lengthText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var length)
+            || length < 0)
+        {
+            await WriteJsonErrorAsync(
+                    stream,
+                    411,
+                    "Length Required",
+                    "An upload needs a Content-Length header.",
+                    cancellation)
+                .ConfigureAwait(false);
+            return;
+        }
+
+        if (length > MaxUploadBytes)
+        {
+            await WriteJsonErrorAsync(
+                    stream,
+                    413,
+                    "Payload Too Large",
+                    "The image is larger than 32 MB.",
+                    cancellation)
+                .ConfigureAwait(false);
+            return;
+        }
+
+        var body = new byte[(int)length];
+        var offset = 0;
+
+        while (offset < body.Length)
+        {
+            var read = await stream
+                .ReadAsync(body.AsMemory(offset, body.Length - offset), cancellation)
+                .ConfigureAwait(false);
+
+            if (read == 0)
+            {
+                await WriteJsonErrorAsync(
+                        stream,
+                        400,
+                        "Bad Request",
+                        "The upload ended before the declared length.",
+                        cancellation)
+                    .ConfigureAwait(false);
+                return;
+            }
+
+            offset += read;
+        }
+
+        headers.TryGetValue("Content-Type", out var contentType);
+        var fileName = BuildUploadFileName(GetQueryValue(query, "name"), contentType);
+        var extension = Path.GetExtension(fileName);
+
+        if (!UploadExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
+        {
+            await WriteJsonErrorAsync(
+                    stream,
+                    415,
+                    "Unsupported Media Type",
+                    "Only image uploads are accepted (png, jpg, gif, webp, bmp, svg, avif, tif).",
+                    cancellation)
+                .ConfigureAwait(false);
+            return;
+        }
+
+        string directory;
+
+        try
+        {
+            directory = Path.GetFullPath(_uploadDirectory);
+            Directory.CreateDirectory(directory);
+        }
+        catch (Exception ex)
+        {
+            await WriteJsonErrorAsync(
+                    stream,
+                    500,
+                    "Internal Server Error",
+                    "Could not create the upload directory: " + ex.Message,
+                    cancellation)
+                .ConfigureAwait(false);
+            return;
+        }
+
+        string destination;
+
+        try
+        {
+            // Allocate the name and write under one lock so two files dropped
+            // together cannot pick the same path and overwrite each other.
+            lock (_uploadGate)
+            {
+                destination = GetUniquePath(directory, fileName);
+                File.WriteAllBytes(destination, body);
+            }
+        }
+        catch (Exception ex)
+        {
+            await WriteJsonErrorAsync(
+                    stream,
+                    500,
+                    "Internal Server Error",
+                    "Could not save the image: " + ex.Message,
+                    cancellation)
+                .ConfigureAwait(false);
+            return;
+        }
+
+        var relativePath = Path.GetRelativePath(directory, destination).Replace('\\', '/');
+        var json = JsonSerializer.Serialize(new
+        {
+            ok = true,
+            name = Path.GetFileName(destination),
+            path = relativePath
+        });
+
+        await WriteBodyAsync(
+                stream,
+                200,
+                "OK",
+                "application/json; charset=utf-8",
+                Encoding.UTF8.GetBytes(json),
+                extraHeaders: null,
+                headOnly: false,
+                cancellation)
+            .ConfigureAwait(false);
+
+        _changed();
+    }
+
+    /// <summary>Writes a JSON <c>{ ok: false }</c> response.</summary>
+    /// <param name="stream">Client stream.</param>
+    /// <param name="status">HTTP status code.</param>
+    /// <param name="reason">HTTP reason phrase.</param>
+    /// <param name="message">Error text shown to the browser.</param>
+    /// <param name="cancellation">Cancellation token.</param>
+    /// <returns>A task that completes after the response is written.</returns>
+    private static Task WriteJsonErrorAsync(
+        NetworkStream stream,
+        int status,
+        string reason,
+        string message,
+        CancellationToken cancellation)
+    {
+        var json = JsonSerializer.Serialize(new { ok = false, error = message });
+
+        return WriteBodyAsync(
+            stream,
+            status,
+            reason,
+            "application/json; charset=utf-8",
+            Encoding.UTF8.GetBytes(json),
+            extraHeaders: null,
+            headOnly: false,
+            cancellation);
+    }
+
+    /// <summary>Reads one value from a raw query string.</summary>
+    /// <param name="query">Query text without the leading <c>?</c>.</param>
+    /// <param name="key">Case-insensitive key to look for.</param>
+    /// <returns>The decoded value, or null when absent or malformed.</returns>
+    private static string? GetQueryValue(string query, string key)
+    {
+        if (string.IsNullOrEmpty(query))
+        {
+            return null;
+        }
+
+        foreach (var pair in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var separator = pair.IndexOf('=');
+            var name = separator < 0 ? pair : pair[..separator];
+
+            if (!string.Equals(Decode(name), key, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            return separator < 0 ? string.Empty : Decode(pair[(separator + 1)..]);
+        }
+
+        return null;
+    }
+
+    /// <summary>Decodes a percent-encoded query component.</summary>
+    /// <param name="value">Encoded text.</param>
+    /// <returns>The decoded text, or the original text when decoding fails.</returns>
+    private static string Decode(string value)
+    {
+        try
+        {
+            return Uri.UnescapeDataString(value);
+        }
+        catch (Exception)
+        {
+            return value;
+        }
+    }
+
+    /// <summary>Produces a safe, image-extension file name for an upload.</summary>
+    /// <param name="requested">File name supplied by the browser, if any.</param>
+    /// <param name="contentType">Request <c>Content-Type</c>, if any.</param>
+    /// <returns>A file name with no directory components.</returns>
+    private static string BuildUploadFileName(string? requested, string? contentType)
+    {
+        var candidate = (requested ?? string.Empty).Replace('\\', '/');
+        candidate = Path.GetFileName(candidate);
+        var extension = Path.GetExtension(candidate);
+
+        if (extension.Length == 0)
+        {
+            extension = ExtensionForContentType(contentType);
+        }
+
+        var stem = extension.Length > 0
+            ? Path.GetFileNameWithoutExtension(candidate)
+            : candidate;
+
+        if (string.IsNullOrWhiteSpace(stem))
+        {
+            stem = "screenshot";
+        }
+
+        var invalid = Path.GetInvalidFileNameChars();
+        var cleaned = new StringBuilder(stem.Length);
+
+        foreach (var c in stem)
+        {
+            if (Array.IndexOf(invalid, c) < 0)
+            {
+                cleaned.Append(c);
+            }
+        }
+
+        var safeStem = cleaned.ToString().Trim().Trim('.', ' ');
+
+        if (safeStem.Length == 0)
+        {
+            safeStem = "screenshot";
+        }
+
+        if (safeStem.Length > 96)
+        {
+            safeStem = safeStem[..96];
+        }
+
+        return safeStem + extension.ToLowerInvariant();
+    }
+
+    /// <summary>Maps an upload content type to a file extension.</summary>
+    /// <param name="contentType">Request content type, possibly with parameters.</param>
+    /// <returns>A file extension, or an empty string when unknown.</returns>
+    private static string ExtensionForContentType(string? contentType)
+    {
+        var mediaType = (contentType ?? string.Empty).Split(';')[0].Trim().ToLowerInvariant();
+
+        return mediaType switch
+        {
+            "image/png" => ".png",
+            "image/jpeg" or "image/jpg" => ".jpg",
+            "image/gif" => ".gif",
+            "image/webp" => ".webp",
+            "image/bmp" => ".bmp",
+            "image/svg+xml" => ".svg",
+            "image/avif" => ".avif",
+            "image/tiff" => ".tiff",
+            _ => string.Empty
+        };
+    }
+
+    /// <summary>Finds an unused path for a new upload.</summary>
+    /// <param name="directory">Destination directory.</param>
+    /// <param name="fileName">Requested file name.</param>
+    /// <returns>A path that does not exist yet.</returns>
+    private static string GetUniquePath(string directory, string fileName)
+    {
+        var path = Path.Combine(directory, fileName);
+
+        if (!File.Exists(path))
+        {
+            return path;
+        }
+
+        var stem = Path.GetFileNameWithoutExtension(fileName);
+        var extension = Path.GetExtension(fileName);
+
+        for (var i = 1; i < 10_000; i++)
+        {
+            path = Path.Combine(
+                directory,
+                stem + "-" + i.ToString(CultureInfo.InvariantCulture) + extension);
+
+            if (!File.Exists(path))
+            {
+                return path;
+            }
+        }
+
+        return Path.Combine(directory, stem + "-" + Guid.NewGuid().ToString("N") + extension);
     }
 
     /// <summary>Writes a small text response.</summary>
@@ -600,7 +1043,7 @@ public sealed class DownloadServer : IDisposable
     /// plugins, for example) can be browsed without dumping thousands of rows
     /// onto one page.
     /// </remarks>
-    private static string BuildIndex(string root, string directory)
+    private string BuildIndex(string root, string directory)
     {
         var relativeDirectory = Path.GetRelativePath(root, directory).Replace('\\', '/');
 
@@ -624,6 +1067,15 @@ public sealed class DownloadServer : IDisposable
         builder.Append("a{color:#93c5fd;text-decoration:none;word-break:break-all;}");
         builder.Append("a:hover{text-decoration:underline;}");
         builder.Append(".size{color:#8fa0b8;font-size:12px;white-space:nowrap;}");
+        builder.Append(".upload{border:2px dashed #3b4a63;border-radius:12px;background:#141d2d;padding:18px;text-align:center;cursor:pointer;margin:18px 0 8px;transition:border-color .15s,background .15s;}");
+        builder.Append(".upload.over{border-color:#93c5fd;background:#1b2941;}");
+        builder.Append(".upload-title{font-size:15px;font-weight:600;color:#e2e8f0;}");
+        builder.Append(".upload-sub{color:#8fa0b8;font-size:13px;margin-top:4px;}");
+        builder.Append(".upload-status{font-size:12px;margin-top:8px;min-height:16px;color:#8fa0b8;white-space:pre-wrap;word-break:break-all;}");
+        builder.Append(".upload-status.ok{color:#81c995;}");
+        builder.Append(".upload-status.fail{color:#f28b82;}");
+        builder.Append(".upload-status.busy{color:#f0b26b;}");
+        builder.Append("#file{display:none;}");
         builder.Append("</style></head><body><main><h1>Donkeh builds</h1><p>Serving <code>");
         builder.Append(WebUtility.HtmlEncode(root));
         builder.Append("</code></p>");
@@ -634,6 +1086,43 @@ public sealed class DownloadServer : IDisposable
             builder.Append(WebUtility.HtmlEncode(relativeDirectory));
             builder.Append("</code></p>");
         }
+
+        builder.Append("<div class=\"upload\" id=\"drop\">");
+        builder.Append("<input id=\"file\" type=\"file\" accept=\"image/*\" multiple>");
+        builder.Append("<div class=\"upload-title\">Drop screenshots here</div>");
+        builder.Append("<div class=\"upload-sub\">or click to browse &middot; saved to <code>");
+
+        if (string.IsNullOrWhiteSpace(_uploadDirectory))
+        {
+            builder.Append("uploads are disabled");
+        }
+        else
+        {
+            var uploadLabel = _uploadDirectory;
+
+            try
+            {
+                var uploadRoot = Path.GetFullPath(_uploadDirectory);
+                uploadLabel = Path.GetRelativePath(
+                    Path.GetFullPath(root),
+                    uploadRoot).Replace('\\', '/');
+
+                if (uploadLabel.StartsWith("..", StringComparison.Ordinal))
+                {
+                    uploadLabel = uploadRoot;
+                }
+            }
+            catch (Exception)
+            {
+                // Keep the configured text if the path cannot be normalised.
+            }
+
+            builder.Append(WebUtility.HtmlEncode(uploadLabel));
+        }
+
+        builder.Append("</code></div>");
+        builder.Append("<div class=\"upload-status\" id=\"status\"></div>");
+        builder.Append("</div>");
 
         if (relativeDirectory.Length == 0)
         {
@@ -700,6 +1189,101 @@ public sealed class DownloadServer : IDisposable
             builder.Append("<p>No builds yet. Use the Deploy tab to build a target.</p>");
         }
 
+        builder.Append(
+            """
+            <script>
+            (function () {
+              var drop = document.getElementById('drop');
+              var input = document.getElementById('file');
+              var status = document.getElementById('status');
+
+              function setStatus(text, kind) {
+                status.textContent = text;
+                status.className = 'upload-status' + (kind ? ' ' + kind : '');
+              }
+
+              async function upload(file) {
+                setStatus('Uploading ' + file.name + ' ...', 'busy');
+
+                try {
+                  var response = await fetch('/upload?name=' + encodeURIComponent(file.name), {
+                    method: 'POST',
+                    headers: { 'Content-Type': file.type || 'application/octet-stream' },
+                    body: file
+                  });
+
+                  var data = null;
+
+                  try {
+                    data = await response.json();
+                  } catch (ignored) {
+                  }
+
+                  if (!response.ok || !data || !data.ok) {
+                    throw new Error((data && data.error) || ('HTTP ' + response.status));
+                  }
+
+                  setStatus('Saved ' + data.path, 'ok');
+                } catch (error) {
+                  setStatus('Upload failed: ' + error.message, 'fail');
+                }
+              }
+
+              function uploadAll(files) {
+                for (var i = 0; i < files.length; i++) {
+                  var file = files[i];
+
+                  if (file.type.indexOf('image/') === 0
+                      || /\.(png|jpe?g|gif|webp|bmp|svg|avif|tiff?)$/i.test(file.name)) {
+                    upload(file);
+                  } else {
+                    setStatus('Skipped ' + file.name + ' (not an image).', 'fail');
+                  }
+                }
+              }
+
+              drop.addEventListener('click', function (event) {
+                if (event.target !== input) {
+                  input.click();
+                }
+              });
+
+              drop.addEventListener('dragover', function (event) {
+                event.preventDefault();
+                drop.classList.add('over');
+              });
+
+              drop.addEventListener('dragleave', function () {
+                drop.classList.remove('over');
+              });
+
+              drop.addEventListener('drop', function (event) {
+                event.preventDefault();
+                drop.classList.remove('over');
+
+                if (event.dataTransfer) {
+                  uploadAll(event.dataTransfer.files);
+                }
+              });
+
+              input.addEventListener('change', function () {
+                if (input.files) {
+                  uploadAll(input.files);
+                }
+
+                input.value = '';
+              });
+
+              window.addEventListener('dragover', function (event) {
+                event.preventDefault();
+              });
+
+              window.addEventListener('drop', function (event) {
+                event.preventDefault();
+              });
+            })();
+            </script>
+            """);
         builder.Append("</main></body></html>");
         return builder.ToString();
     }
@@ -825,6 +1409,12 @@ public sealed class DownloadServer : IDisposable
         ".txt" or ".log" => "text/plain; charset=utf-8",
         ".png" => "image/png",
         ".jpg" or ".jpeg" => "image/jpeg",
+        ".gif" => "image/gif",
+        ".webp" => "image/webp",
+        ".bmp" => "image/bmp",
+        ".svg" => "image/svg+xml",
+        ".avif" => "image/avif",
+        ".tif" or ".tiff" => "image/tiff",
         _ => "application/octet-stream"
     };
 

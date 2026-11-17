@@ -342,6 +342,16 @@ public sealed class DeployState : IDisposable
     public string? BuildsRoot { get; private set; }
 
     /// <summary>
+    /// Gets the folder that receives screenshots uploaded from the Deploy tab,
+    /// normally <c>{projectRoot}/debug</c>.
+    /// </summary>
+    /// <remarks>
+    /// The download server exposes this as its upload directory. Files land here
+    /// unchanged so the application and external tooling can read them.
+    /// </remarks>
+    public string? DebugDirectory { get; private set; }
+
+    /// <summary>
     /// Replaces the discovered project and output root and rebuilds the default
     /// target list.
     /// </summary>
@@ -371,7 +381,10 @@ public sealed class DeployState : IDisposable
             ? Path.Combine(projectRoot, "builds")
             : Path.GetFullPath(buildsDirectory);
 
+        DebugDirectory = Path.Combine(projectRoot, "debug");
+
         Downloads.RootDirectory = BuildsRoot;
+        Downloads.UploadDirectory = DebugDirectory;
         RebuildTargets();
     }
 
@@ -473,6 +486,7 @@ public sealed class DeployState : IDisposable
             ProjectFile = null;
             ProjectRoot = null;
             BuildsRoot = null;
+            DebugDirectory = null;
             _targets.Clear();
         }
     }

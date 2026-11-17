@@ -1,6 +1,7 @@
 bin/
 obj/
 builds/
+debug/
 artifacts/
 cli-artifacts/
 BenchmarkDotNet.Artifacts/

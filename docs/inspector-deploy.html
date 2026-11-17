@@ -104,7 +104,8 @@
         <p class="lead">
             Deploy builds the application targets into the project's
             <code>builds</code> folder, then serves that folder over the local network
-            so a device or phone can download the result.
+            so a device or phone can download the result. The same server page accepts
+            screenshots and writes them into the project's <code>debug</code> folder.
         </p>
 
         <h2 id="targets">Build targets</h2>
@@ -139,7 +140,8 @@
 │   └── wasm/
 │       ├── index.html
 │       ├── dotnet.js
-│       └── _framework/</div>
+│       └── _framework/
+└── debug/          # screenshots uploaded from the Deploy server page</div>
 
         <p>
             The default build configuration is <strong>Release</strong>. The deploy
@@ -186,6 +188,22 @@
                 </tbody>
             </table>
         </div>
+
+        <h3 id="screenshots">Uploading screenshots</h3>
+        <p>
+            Every page served by the download server also has an upload area. Drop
+            screenshots onto it, or click it to browse, and each image is saved to
+            <code>{project}/debug</code>. The application can then read those files as
+            local context, for example to attach a visual regression screenshot to a
+            bug report or an agent prompt.
+        </p>
+
+        <ul>
+            <li>The original file name is kept; a numeric suffix is added when the name already exists.</li>
+            <li>Only image files are accepted, up to 32 MB each. Several files can be dropped at once.</li>
+            <li>Uploads are written by the same local server, so the page must be opened from the server URL.</li>
+            <li>The <code>debug</code> folder is ignored by Git in the framework repository.</li>
+        </ul>
 
         <h2 id="device">Getting a build onto a device</h2>
         <h3>Android</h3>

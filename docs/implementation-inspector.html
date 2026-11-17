@@ -289,16 +289,20 @@
             The Deploy tab can expose the build directory over a tiny HTTP server. It
             uses a raw <code>TcpListener</code> instead of <code>HttpListener</code>, so
             no Windows URL reservation or administrator rights are needed. It binds all
-            IPv4 interfaces, supports <code>GET</code> and <code>HEAD</code>, lists the
-            build directory, streams large files, rejects path traversal and closes each
-            connection after one request.
+            IPv4 interfaces, supports <code>GET</code>, <code>HEAD</code> and a
+            <code>POST /upload</code> endpoint, lists the build directory, streams large
+            files, rejects path traversal and closes each connection after one request.
+            Uploads accept raw image bodies up to 32 MB, restrict the extension to known
+            image types and write into <code>{project}/debug</code>; the generated index
+            page exposes the drop area and posts one file per request.
         </p>
 
         <div class="callout warning">
             <strong>Local-network file server, no authentication</strong>
             The download server is intended for a trusted local network. Anyone who can
-            reach the port can browse and download the build artifacts. Stop it when not
-            deploying; changing the root stops a running server.
+            reach the port can browse and download the build artifacts and upload images
+            into the project's <code>debug</code> folder. Stop it when not deploying;
+            changing the root stops a running server.
         </div>
 
         <h2 id="host-integration">Host integration</h2>
