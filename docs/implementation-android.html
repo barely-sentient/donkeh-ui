@@ -246,6 +246,16 @@ public class DonkehActivity : SilkActivity</code></pre>
             drag instead of jumping the track.
         </p>
 
+        <h3>Long press</h3>
+        <p>
+            A touch press held still for 500 ms becomes a <code>contextmenu</code>
+            event, so Android gets the same menus as a desktop right-click. Drifting
+            more than 10 px, starting a drag or starting a scroll pan cancels the
+            candidate. Once it fires, the click that would normally follow the
+            release is suppressed, so the menu does not also activate the item under
+            the finger.
+        </p>
+
         <h2 id="permissions">Runtime permissions</h2>
         <p>
             <code>AndroidPermissionService</code> translates Donkeh’s portable

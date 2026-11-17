@@ -587,6 +587,30 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// <summary>Whether the locked pan axis is vertical; otherwise horizontal.</summary>
     private bool _touchPanVertical;
 
+    /// <summary>How long a finger must stay still before it becomes a context menu.</summary>
+    private const int LongPressMilliseconds = 500;
+
+    /// <summary>CSS pixels the finger may drift during a long press.</summary>
+    private const float LongPressMoveTolerance = 10;
+
+    /// <summary>Whether a touch press is waiting to become a context menu.</summary>
+    private bool _longPressPending;
+
+    /// <summary>Whether a long press already dispatched its context menu.</summary>
+    private bool _longPressFired;
+
+    /// <summary>Timestamp when the long-press candidate started.</summary>
+    private long _longPressStartTicks;
+
+    /// <summary>Press X for the long-press candidate.</summary>
+    private float _longPressX;
+
+    /// <summary>Press Y for the long-press candidate.</summary>
+    private float _longPressY;
+
+    /// <summary>The element hit when the long-press candidate started.</summary>
+    private ElementNode? _longPressHit;
+
     /// <summary>Audio or video element whose progress thumb is being dragged, if any.</summary>
     private ElementNode? _mediaSeekElement;
 
@@ -1950,6 +1974,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         }
 
         ProcessPendingMouseMove();
+        UpdateLongPress();
         UpdatePointerAutoScroll();
 
         BeforeFrame?.Invoke(this, delta);
@@ -5246,6 +5271,8 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         var x = _pendingMouseX;
         var y = _pendingMouseY;
 
+        UpdateLongPressMove(x, y);
+
         if (_touchPanPending || _touchPanning)
         {
             UpdateTouchPan(x, y);
@@ -5529,6 +5556,9 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
                 return;
             }
 
+            // A real swipe wins over a pending long press.
+            CancelLongPress();
+
             // Choose the axis first, then the nearest container that can actually
             // scroll along it. This lets a vertical page scroll when the finger
             // starts inside a nested horizontal scroller.
@@ -5618,6 +5648,112 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         _touchPanNode = null;
         _touchPanStartTarget = null;
         _touchPanVertical = false;
+    }
+
+    /// <summary>
+    /// Starts tracking a touch press that may become a context menu.
+    /// </summary>
+    /// <remarks>
+    /// Long press is a mobile behaviour: Android has no right mouse button. Only
+    /// presses that can reach an <c>OnContextMenu</c> handler are tracked, so an
+    /// ordinary tap keeps its normal click behaviour.
+    /// </remarks>
+    private void BeginLongPress()
+    {
+        CancelLongPress();
+        _longPressFired = false;
+
+        if (!Host.IsMobile)
+        {
+            return;
+        }
+
+        var hit = HitTest(_mouseX, _mouseY);
+
+        if (hit is null
+            || FindContextMenuTarget(hit, out var contextHandler) is null
+            || contextHandler is null)
+        {
+            return;
+        }
+
+        _longPressPending = true;
+        _longPressStartTicks = Stopwatch.GetTimestamp();
+        _longPressX = _mouseX;
+        _longPressY = _mouseY;
+        _longPressHit = hit;
+    }
+
+    /// <summary>Drops a pending long-press candidate without firing it.</summary>
+    private void CancelLongPress()
+    {
+        _longPressPending = false;
+        _longPressHit = null;
+    }
+
+    /// <summary>Cancels a pending long press once the finger drifts too far.</summary>
+    /// <param name="x">Pointer X in window CSS pixels.</param>
+    /// <param name="y">Pointer Y in window CSS pixels.</param>
+    private void UpdateLongPressMove(float x, float y)
+    {
+        if (!_longPressPending)
+        {
+            return;
+        }
+
+        if (MathF.Abs(x - _longPressX) > LongPressMoveTolerance
+            || MathF.Abs(y - _longPressY) > LongPressMoveTolerance)
+        {
+            CancelLongPress();
+        }
+    }
+
+    /// <summary>
+    /// Fires a pending long press as a context-menu event.
+    /// </summary>
+    /// <remarks>
+    /// Called once per frame. The press must still be down and the hit element
+    /// must still be mounted; a drag or pan cancels the candidate first. Once it
+    /// fires, <see cref="_longPressFired"/> suppresses the click that would
+    /// otherwise run on release.
+    /// </remarks>
+    private void UpdateLongPress()
+    {
+        if (!_longPressPending)
+        {
+            return;
+        }
+
+        if (!IsLeftMouseButtonDown() || _dragActive || _touchPanning)
+        {
+            CancelLongPress();
+            return;
+        }
+
+        if (Stopwatch.GetElapsedTime(_longPressStartTicks).TotalMilliseconds < LongPressMilliseconds)
+        {
+            return;
+        }
+
+        var hit = _longPressHit;
+        CancelLongPress();
+        ResetTouchPan();
+
+        if (hit is null || !IsLiveNode(hit))
+        {
+            return;
+        }
+
+        var currentTarget = FindContextMenuTarget(hit, out var handler);
+
+        if (currentTarget is null || handler is null)
+        {
+            return;
+        }
+
+        _longPressFired = true;
+        ClearDragState();
+        InvokeContextMenu(currentTarget, hit, handler, _mouseX, _mouseY);
     }
 
     /// <summary>
@@ -5713,6 +5849,11 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         // A finger drag over plain scrollable content becomes a pan. Content
         // that owns the gesture (pointerdown handlers, controls, media and
         // scrollbars) keeps the normal press path.
+        if (button == MouseButton.Left)
+        {
+            BeginLongPress();
+        }
+
         if (button == MouseButton.Left && allowTouchPan && TryBeginTouchPan(_mouseX, _mouseY))
         {
             return;
@@ -5720,6 +5861,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
 
         if (button == MouseButton.Right)
         {
+            CancelLongPress();
             var hit = HitTest(_mouseX, _mouseY);
             var contextTarget = FindContextMenuTarget(hit, out var contextHandler);
 
@@ -5942,6 +6084,10 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             return;
         }
 
+        var longPressed = _longPressFired;
+        _longPressFired = false;
+        CancelLongPress();
+
         // A fast flick can move and lift between two frames. Apply the last
         // coalesced move before deciding whether the gesture was a pan or a tap.
         if ((_touchPanPending || _touchPanning) && _mouseMovePending)
@@ -6077,7 +6223,8 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             && MathF.Abs(_mouseX - _pressX) < 4
             && MathF.Abs(_mouseY - _pressY) < 4;
 
-        if ((ReferenceEquals(element, _pressed) || nearPress)
+        if (!longPressed
+            && (ReferenceEquals(element, _pressed) || nearPress)
             && _pressed is not null
             && !_pressed.TryGetAttribute("disabled", out var ignoredDisabled))
         {
@@ -8048,6 +8195,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// <param name="y">Pointer Y in window CSS pixels.</param>
     private void BeginDrag(float x, float y)
     {
+        CancelLongPress();
         _dragPending = false;
         var source = _dragSource;
 

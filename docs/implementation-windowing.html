@@ -339,8 +339,10 @@ window.Run(root, styles);</code></pre>
 }, rows);</code></pre>
 
         <p>
-            Android and desktop share the same right-button path. Right-click is the only
-            trigger; touch devices need a mouse for it.
+            Android and desktop share the same right-button path. Desktop dispatches
+            the event on the right-button press. Android also treats a stationary
+            500 ms touch as a context-menu request; moving more than 10 px or starting
+            a drag/pan cancels it, and the release click is suppressed after it fires.
         </p>
 
         <p>
