@@ -21,22 +21,20 @@ internal static class TargetEnabler
         var updated = normalized switch
         {
             "desktop" => EnableDesktop(projectText, newLine, checkout),
-            "android" => EnableAndroid(projectText, newLine, checkout),
+            "android" => EnableAndroid(projectText, newLine, projectFile, checkout),
             "web" => EnableWeb(projectText, newLine, checkout),
             _ => throw new CliException($"Unknown target '{target}'.")
         };
 
-        if (string.Equals(projectText, updated, StringComparison.Ordinal))
+        if (!string.Equals(projectText, updated, StringComparison.Ordinal))
         {
-            throw new CliException(
-                $"The {normalized} target is already enabled in {Path.GetFileName(projectFile)}.");
+            TextFiles.Write(projectFile, updated);
         }
 
-        TextFiles.Write(projectFile, updated);
         return projectFile;
     }
 
-    private static string NormalizeTarget(string target) =>
+    internal static string NormalizeTarget(string target) =>
         target.Trim().ToLowerInvariant() switch
         {
             "desktop" or "windows" or "linux" or "macos" or "mac" => "desktop",
@@ -50,14 +48,30 @@ internal static class TargetEnabler
             ? SetCheckoutFlag(projectText, newLine, "DonkehDesktop")
             : projectText;
 
-    private static string EnableAndroid(string projectText, string newLine, bool checkout)
+    private static string EnableAndroid(
+        string projectText,
+        string newLine,
+        string projectFile,
+        bool checkout)
     {
-        if (checkout)
+        var updated = checkout
+            ? SetCheckoutFlag(projectText, newLine, "DonkehAndroid")
+            : projectText;
+
+        if (!checkout)
         {
-            return SetCheckoutFlag(projectText, newLine, "DonkehAndroid");
+            if (CsprojEditor.HasProperty(updated, "DonkehAndroid"))
+            {
+                // A dual-mode project already has the platform switch. Turn it on
+                // so a plain restore includes the Android TFM.
+                updated = CsprojEditor.SetProperty(updated, newLine, "DonkehAndroid", "true");
+            }
+            else
+            {
+                updated = EnsureTargetFramework(updated, newLine, AndroidTargetFramework);
+            }
         }
 
-        var updated = EnsureTargetFramework(projectText, newLine, AndroidTargetFramework);
         updated = EnsureProperty(
             updated,
             newLine,
@@ -65,11 +79,54 @@ internal static class TargetEnabler
             "24",
             "'$(TargetFramework)' == '" + AndroidTargetFramework + "'");
 
+        var projectName = Path.GetFileNameWithoutExtension(projectFile);
+        var title = System.Security.SecurityElement.Escape(projectName);
+        var applicationId = DefaultApplicationId(projectName);
+
+        updated = EnsureProperty(
+            updated,
+            newLine,
+            "ApplicationId",
+            applicationId,
+            "'$(TargetFramework)' == '" + AndroidTargetFramework + "'");
+
+        updated = EnsureProperty(
+            updated,
+            newLine,
+            "ApplicationTitle",
+            title,
+            "'$(TargetFramework)' == '" + AndroidTargetFramework + "'");
+
+        if (checkout)
+        {
+            return updated;
+        }
+
+        // Dual-mode projects keep the NuGet host package inactive in local mode.
+        var condition = "'$(TargetFramework)' == '" + AndroidTargetFramework + "'";
+
+        if (CsprojEditor.HasProperty(updated, "UseLocalDonkeh"))
+        {
+            condition = "'$(UseLocalDonkeh)' != 'true' and " + condition;
+        }
+
+        updated = CsprojEditor.RemovePackageReference(updated, "Donkeh.Windowing.Android");
+
         return AddPackageReference(
             updated,
             newLine,
             "Donkeh.Windowing.Android",
-            "'$(TargetFramework)' == '" + AndroidTargetFramework + "'");
+            condition);
+    }
+
+    private static string DefaultApplicationId(string projectName)
+    {
+        var slug = new string(projectName
+            .ToLowerInvariant()
+            .Where(char.IsLetterOrDigit)
+            .ToArray());
+
+        return "com.donkeh." + (slug.Length == 0 ? "app" : slug);
     }
 
     private static string EnableWeb(string projectText, string newLine, bool checkout)

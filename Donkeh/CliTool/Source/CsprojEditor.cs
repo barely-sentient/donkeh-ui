@@ -158,7 +158,8 @@ internal static class CsprojEditor
         string projectText,
         string newLine,
         string packageId,
-        string version)
+        string version,
+        string? condition = null)
     {
         var existing = new Regex(
             $@"<PackageReference\b[^>]*Include\s*=\s*""{Regex.Escape(packageId)}""",
@@ -169,9 +170,12 @@ internal static class CsprojEditor
             return projectText;
         }
 
+        var conditionAttribute = string.IsNullOrWhiteSpace(condition)
+            ? string.Empty
+            : $" Condition=\"{condition}\"";
         var block =
             $"  <ItemGroup>{newLine}" +
-            $"    <PackageReference Include=\"{packageId}\" Version=\"{version}\" />{newLine}" +
+            $"    <PackageReference Include=\"{packageId}\" Version=\"{version}\"{conditionAttribute} />{newLine}" +
             $"  </ItemGroup>{newLine}";
 
         return AddItemGroup(projectText, newLine, block);
@@ -184,6 +188,19 @@ internal static class CsprojEditor
     {
         var references = new Regex(
             @"[ \t]*<PackageReference\b(?=[^>]*Include\s*=\s*""Donkeh\.[^""]*"")[^>]*(?:/>|>.*?</PackageReference>)[ \t]*\r?\n?",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+        return references.Replace(projectText, string.Empty);
+    }
+
+    /// <summary>Removes one package reference, if present.</summary>
+    /// <param name="projectText">Current project file text.</param>
+    /// <param name="packageId">Package id to remove.</param>
+    /// <returns>The updated project text.</returns>
+    public static string RemovePackageReference(string projectText, string packageId)
+    {
+        var references = new Regex(
+            $@"[ \t]*<PackageReference\b(?=[^>]*Include\s*=\s*""{Regex.Escape(packageId)}"")[^>]*(?:/>|>.*?</PackageReference>)[ \t]*\r?\n?",
             RegexOptions.IgnoreCase | RegexOptions.Singleline);
 
         return references.Replace(projectText, string.Empty);

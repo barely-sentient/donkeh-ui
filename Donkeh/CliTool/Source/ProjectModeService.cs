@@ -85,6 +85,28 @@ internal static class ProjectModeService
             packageId,
             "$(DonkehVersion)");
 
+        if (Regex.IsMatch(updated, @"net10\.0-android", RegexOptions.IgnoreCase))
+        {
+            if (CsprojEditor.HasProperty(updated, "DonkehAndroid"))
+            {
+                updated = CsprojEditor.SetProperty(updated, newLine, "DonkehAndroid", "true");
+            }
+
+            var condition = "'$(TargetFramework)' == 'net10.0-android'";
+
+            if (CsprojEditor.HasProperty(updated, "UseLocalDonkeh"))
+            {
+                condition = "'$(UseLocalDonkeh)' != 'true' and " + condition;
+            }
+
+            updated = CsprojEditor.EnsurePackageReference(
+                updated,
+                newLine,
+                "Donkeh.Windowing.Android",
+                "$(DonkehVersion)",
+                condition);
+        }
+
         if (!string.Equals(projectText, updated, StringComparison.Ordinal))
         {
             TextFiles.Write(projectFile, updated);

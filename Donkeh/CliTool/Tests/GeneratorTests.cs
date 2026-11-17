@@ -69,6 +69,8 @@ public sealed class GeneratorTests
             project,
             StringComparison.Ordinal);
         Assert.Contains("<SupportedOSPlatformVersion Condition=\"'$(TargetFramework)' == 'net10.0-android'\">24</SupportedOSPlatformVersion>", project, StringComparison.Ordinal);
+        Assert.Contains("<ApplicationId Condition=\"'$(TargetFramework)' == 'net10.0-android'\">com.donkeh.sampleapp</ApplicationId>", project, StringComparison.Ordinal);
+        Assert.Contains("<ApplicationTitle Condition=\"'$(TargetFramework)' == 'net10.0-android'\">SampleApp</ApplicationTitle>", project, StringComparison.Ordinal);
         Assert.Contains("Include=\"Donkeh.Windowing.Android\"", project, StringComparison.Ordinal);
 
         TargetEnabler.Enable("web", projectFile);
@@ -77,6 +79,51 @@ public sealed class GeneratorTests
         Assert.Contains("net10.0-browser", project, StringComparison.Ordinal);
         Assert.Contains("<RuntimeIdentifiers Condition=\"'$(TargetFramework)' == ''\">browser-wasm</RuntimeIdentifiers>", project, StringComparison.Ordinal);
         Assert.Contains("Include=\"Donkeh.Windowing.Browser\"", project, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EnableTargetAndroidWiresDualModeProject()
+    {
+        using var directory = new TemporaryDirectory();
+        var projectFile = Path.Combine(directory.Path, "SampleApp.csproj");
+
+        File.WriteAllText(
+            projectFile,
+            """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <OutputType>Exe</OutputType>
+                <UseLocalDonkeh Condition="'$(UseLocalDonkeh)' == ''">false</UseLocalDonkeh>
+                <DonkehAndroid Condition="'$(DonkehAndroid)' == ''">false</DonkehAndroid>
+                <TargetFrameworks Condition="'$(DonkehAndroid)' == 'true'">net10.0;net10.0-android</TargetFrameworks>
+                <TargetFramework Condition="'$(DonkehAndroid)' != 'true'">net10.0</TargetFramework>
+              </PropertyGroup>
+              <ItemGroup Condition="'$(UseLocalDonkeh)' != 'true'">
+                <PackageReference Include="Donkeh.Windowing" Version="$(DonkehVersion)" />
+              </ItemGroup>
+            </Project>
+            """);
+
+        TargetEnabler.Enable("android", projectFile);
+
+        var project = File.ReadAllText(projectFile);
+
+        Assert.Contains(
+            "<DonkehAndroid Condition=\"'$(DonkehAndroid)' == ''\">true</DonkehAndroid>",
+            project,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "<PackageReference Include=\"Donkeh.Windowing.Android\" Version=\"$(DonkehVersion)\" Condition=\"'$(UseLocalDonkeh)' != 'true' and '$(TargetFramework)' == 'net10.0-android'\" />",
+            project,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "<ApplicationId Condition=\"'$(TargetFramework)' == 'net10.0-android'\">com.donkeh.sampleapp</ApplicationId>",
+            project,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "<ApplicationTitle Condition=\"'$(TargetFramework)' == 'net10.0-android'\">SampleApp</ApplicationTitle>",
+            project,
+            StringComparison.Ordinal);
     }
 
     [Fact]

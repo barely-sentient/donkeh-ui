@@ -33,7 +33,7 @@ namespace Donkeh.Windowing.Android;
 /// </para>
 /// </remarks>
 [Activity(
-    Label = "Donkeh",
+    Name = "dev.donkeh.windowing.DonkehActivity",
     MainLauncher = true,
     Exported = true,
     Theme = "@android:style/Theme.Material.NoActionBar.Fullscreen",

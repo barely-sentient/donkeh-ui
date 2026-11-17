@@ -192,13 +192,31 @@ public static class Cli
                 "Example: donkeh enable-target android");
         }
 
-        var target = arguments.Positionals[0];
+        var target = TargetEnabler.NormalizeTarget(arguments.Positionals[0]);
         var projectFile = TargetEnabler.Enable(target, arguments.Value("project"));
 
-        Console.WriteLine($"Enabled {target} target in {projectFile}");
+        Console.WriteLine($"{target} target ready in {projectFile}");
+        Console.WriteLine("  restoring packages");
+        UpgradeService.RunDotnet(
+            ["restore", projectFile],
+            Path.GetDirectoryName(projectFile));
+
         Console.WriteLine();
         Console.WriteLine("Next:");
-        Console.WriteLine("  dotnet restore");
+
+        switch (target)
+        {
+            case "android":
+                Console.WriteLine("  dotnet build -f net10.0-android --no-restore");
+                break;
+            case "web":
+                Console.WriteLine("  dotnet build -f net10.0-browser --no-restore");
+                break;
+            default:
+                Console.WriteLine("  dotnet run");
+                break;
+        }
+
         return 0;
     }
 
@@ -452,8 +470,9 @@ public static class Cli
             Usage:
               donkeh enable-target <desktop|android|web> [--project <path>]
 
-            Adds a platform target to a generated project and wires up the packages
-            or framework properties it needs. Desktop is enabled by default.
+            Adds a platform target to a generated project, wires up the packages,
+            framework properties and app identity it needs, then restores the
+            project. Desktop is enabled by default.
 
             Targets:
               desktop              Desktop window host (net10.0).
