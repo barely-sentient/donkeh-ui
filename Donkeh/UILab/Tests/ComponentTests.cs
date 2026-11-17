@@ -39,6 +39,24 @@ public sealed class ComponentTests
     }
 
     [Fact]
+    public void RerenderReplacesCanvasDrawHandler()
+    {
+        var renderer = new Renderer();
+        var root = (ElementNode)renderer.Mount(C<CanvasCounter>());
+        var canvas = (ElementNode)root.Children[1];
+        var first = canvas.CanvasDrawHandler;
+
+        Assert.NotNull(first);
+
+        var button = (ElementNode)root.Children[0];
+        Assert.True(button.TryGetEventHandler("click", out var click));
+        ((Action)click!)();
+
+        Assert.NotNull(canvas.CanvasDrawHandler);
+        Assert.NotSame(first, canvas.CanvasDrawHandler);
+    }
+
+    [Fact]
     public void EffectRunsAfterCommitAndCanUpdateState()
     {
         var renderer = new Renderer();
@@ -225,6 +243,25 @@ public sealed class EffectComponent : Component
         Effect(() => setCount(1), []);
 
         return H("div", Text($"effect: {count}"));
+    }
+}
+
+public sealed class CanvasCounter : Component
+{
+    private readonly List<int> _drawn = [];
+
+    public override Node Render()
+    {
+        var (count, setCount) = State(0);
+
+        return H("div", new Props(),
+            H("button", new Props { ClassName = "bump" }, Text("+"))
+                .OnClick(() => setCount(count + 1)),
+            H("canvas", new Props
+            {
+                ClassName = "thumb",
+                OnCanvasDraw = new Action<int>(value => _drawn.Add(value + count)),
+            }));
     }
 }
 

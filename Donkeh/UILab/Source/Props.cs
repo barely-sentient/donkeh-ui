@@ -301,7 +301,10 @@ namespace Donkeh.UILab
 
         /// <summary>
         /// Gets or sets the handler for the <c>keydown</c> event. The handler
-        /// receives the key name, for example <c>Enter</c>.
+        /// receives the key name, for example <c>Enter</c>, prefixed with the
+        /// modifiers that were held, for example <c>Ctrl+Shift+Z</c>. See
+        /// <see cref="KeyChord.Format(string, KeyModifiers)"/> for the exact
+        /// spelling.
         /// </summary>
         public Action<string>? OnKeyDown { get; init; }
 

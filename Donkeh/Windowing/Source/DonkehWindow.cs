@@ -6957,6 +6957,11 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// With no focused element, nothing further happens.
     /// </description></item>
     /// <item><description>
+    /// The focused element's <c>keydown</c> handler receives the key text built by
+    /// <see cref="KeyChord.Format(string, KeyModifiers)"/>, so Ctrl+C arrives as
+    /// <c>Ctrl+C</c> and a bare C as <c>C</c>.
+    /// </description></item>
+    /// <item><description>
     /// <c>Ctrl+V</c> on a text control prefers a <c>paste</c> handler, otherwise
     /// normalizes the clipboard text and inserts it.
     /// </description></item>
@@ -6981,6 +6986,30 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     {
         var control = keyboard.IsKeyPressed(Key.ControlLeft) || keyboard.IsKeyPressed(Key.ControlRight);
         var shift = keyboard.IsKeyPressed(Key.ShiftLeft) || keyboard.IsKeyPressed(Key.ShiftRight);
+        var alt = keyboard.IsKeyPressed(Key.AltLeft) || keyboard.IsKeyPressed(Key.AltRight);
+        var meta = keyboard.IsKeyPressed(Key.SuperLeft) || keyboard.IsKeyPressed(Key.SuperRight);
+
+        var modifiers = KeyModifiers.None;
+
+        if (control)
+        {
+            modifiers |= KeyModifiers.Control;
+        }
+
+        if (shift)
+        {
+            modifiers |= KeyModifiers.Shift;
+        }
+
+        if (alt)
+        {
+            modifiers |= KeyModifiers.Alt;
+        }
+
+        if (meta)
+        {
+            modifiers |= KeyModifiers.Meta;
+        }
 
         if (_settings.EnableDevTools
             && ((key == Key.I && control && shift) || key == Key.F12))
@@ -7011,8 +7040,10 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         }
 
         // Application key handlers run before the host's editing shortcuts, so
-        // the same keydown delegate fires on desktop and in the browser.
-        Invoke(_focused, "keydown", key.ToString());
+        // the same keydown delegate fires on desktop and in the browser. Modifiers
+        // are folded into the key text, which keeps the delegate a plain string
+        // while still letting a handler tell Ctrl+C from C.
+        Invoke(_focused, "keydown", KeyChord.Format(key.ToString(), modifiers));
 
         if (key == Key.V && control && IsTextControl(_focused))
         {

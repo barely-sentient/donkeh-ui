@@ -106,6 +106,9 @@ public sealed class DomHost
     /// <param name="y">Event-local Y coordinate, a vertical delta, or a checked flag.</param>
     /// <param name="text">The key name, input value or pasted text, depending on the event.</param>
     /// <param name="value">Current control value for key events.</param>
+    /// <param name="modifiers">
+    /// The modifier keys held during a key event, or zero elsewhere.
+    /// </param>
     /// <returns>A task that completes once the handler has run.</returns>
     [JSInvokable("HandleEvent")]
     public Task HandleEventAsync(
@@ -115,7 +118,8 @@ public sealed class DomHost
         double x,
         double y,
         string? text,
-        string? value)
+        string? value,
+        int modifiers = 0)
     {
         if (!_nodes.TryGetValue(handlerId, out var handlerNode)
             || handlerNode is not ElementNode handler)
@@ -180,7 +184,7 @@ public sealed class DomHost
 
             case "keydown":
                 var key = MapKey(text);
-                InvokeString(handler, "keydown", key);
+                InvokeString(handler, "keydown", KeyChord.Format(key, (KeyModifiers)modifiers));
 
                 // Desktop commits an edit and raises change on Enter even when a
                 // keydown handler also runs, so the browser path does the same.

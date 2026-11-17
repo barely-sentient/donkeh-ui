@@ -420,8 +420,14 @@ function onKeyDown(event) {
     const handler = nearestHandlerElement(target, "keydown");
     const textControl = isTextControl(target);
 
+    // Bit-for-bit the KeyModifiers values the desktop host builds.
+    const modifiers = (event.ctrlKey ? 1 : 0)
+        | (event.shiftKey ? 2 : 0)
+        | (event.altKey ? 4 : 0)
+        | (event.metaKey ? 8 : 0);
+
     if (handler || (textControl && event.key === "Enter")) {
-        call(handler || target, target, "keydown", 0, 0, event.key, readValue(target));
+        call(handler || target, target, "keydown", 0, 0, event.key, readValue(target), modifiers);
     }
 
     if (event.key === "Escape" && textControl) {
@@ -464,7 +470,7 @@ function dispatchSimple(event, type) {
     if (handler) call(handler, target, type, 0, 0, null, null);
 }
 
-function call(handler, target, type, x, y, text, value) {
+function call(handler, target, type, x, y, text, value, modifiers = 0) {
     if (!dotNetRef || !handler || handler.__donkehId === undefined) {
         return;
     }
@@ -481,7 +487,8 @@ function call(handler, target, type, x, y, text, value) {
         x,
         y,
         text,
-        value);
+        value,
+        modifiers);
 }
 
 function asElement(node) {

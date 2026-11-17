@@ -837,7 +837,10 @@ namespace Donkeh.UILab
         /// <returns>This element, so calls can be chained.</returns>
         public ElementNode OnSubmit(Action handler) => On("submit", handler);
 
-        /// <summary>Registers a key-down handler that receives the key name.</summary>
+        /// <summary>
+        /// Registers a key-down handler that receives the key name, prefixed with
+        /// any held modifiers (for example <c>Ctrl+Shift+Z</c>).
+        /// </summary>
         /// <param name="handler">The handler to invoke when a key is pressed.</param>
         /// <returns>This element, so calls can be chained.</returns>
         public ElementNode OnKeyDown(Action<string> handler) => On("keydown", handler);
@@ -954,6 +957,15 @@ namespace Donkeh.UILab
 
             Attributes = source.Attributes;
             Events = source.Events;
+
+            // Canvas and media handlers live outside the event map, but they are
+            // props all the same: a reconciled element must draw with the new
+            // closure or a reused canvas keeps painting the previous frame's
+            // captured state (for example another document's layer thumbnail).
+            CanvasContextHandler = source.CanvasContextHandler;
+            CanvasDrawHandler = source.CanvasDrawHandler;
+            AudioReadyHandler = source.AudioReadyHandler;
+            VideoReadyHandler = source.VideoReadyHandler;
 
             if (!ReferenceEquals(Ref, source.Ref))
             {
