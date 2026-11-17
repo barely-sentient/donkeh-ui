@@ -207,6 +207,27 @@ namespace Donkeh.Windowing
         public float DpiScale;
 
         /// <summary>
+        /// Treat a left-button drag over scrollable content as a finger pan.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Desktop hosts leave this disabled: dragging is reserved for text
+        /// selection, range inputs and app-owned <c>pointerdown</c> handlers.
+        /// Android enables it so a swipe scrolls the nearest scroll container,
+        /// matching the platform rather than requiring a mouse wheel or a
+        /// scrollbar grab.
+        /// </para>
+        /// <para>
+        /// Gestures that start on a scrollbar, range input, text control, link,
+        /// button or an element with a <c>pointerdown</c> handler keep their
+        /// existing behaviour. A drag only pans content that no component has
+        /// claimed, and a tap that never crosses the pan threshold is replayed as
+        /// a normal click.
+        /// </para>
+        /// </remarks>
+        public bool EnableTouchScrolling;
+
+        /// <summary>
         /// Enables the built-in inspector. Press Ctrl+Shift+I or F12 to toggle it.
         /// </summary>
         /// <remarks>

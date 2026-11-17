@@ -142,6 +142,7 @@ public class DonkehActivity : SilkActivity
             Resizable = false,
             Frameless = false,
             EnableDevTools = false,
+            EnableTouchScrolling = true,
             DpiScale = density
         };
 

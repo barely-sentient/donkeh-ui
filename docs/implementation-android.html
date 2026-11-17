@@ -199,6 +199,7 @@ public class DonkehActivity : SilkActivity</code></pre>
     Resizable = false,
     Frameless = false,
     EnableDevTools = false,
+    EnableTouchScrolling = true, // swipe pans the nearest scroll container
     DpiScale = density
 };</code></pre>
         </div>
@@ -224,6 +225,25 @@ public class DonkehActivity : SilkActivity</code></pre>
             to zero when the framebuffer is already larger than the logical size. The
             same handler prints density, DPI, size, framebuffer and GL version for
             diagnosis.
+        </p>
+
+        <h2 id="scrolling">Touch scrolling</h2>
+        <p>
+            SDL synthesizes mouse events from a single finger, which keeps taps,
+            focus and app-owned pointer handlers working. The missing piece is
+            panning, so the host enables <code>EnableTouchScrolling</code>: a drag
+            over scrollable content waits for an eight-pixel slop threshold, locks
+            to the gesture’s dominant axis and scrolls the nearest container that
+            can move on that axis. Panning bypasses smooth-scroll easing so the
+            content tracks the finger. A press that never crosses the threshold is
+            replayed as a normal click.
+        </p>
+        <p>
+            Gestures that begin on a scrollbar, text control, range slider, button,
+            link, media element or an element with a <code>pointerdown</code>
+            handler keep their existing behaviour. Scrollbar tracks gain a twelve-pixel
+            inward hit margin on touch hosts, and touching beside the thumb starts a
+            drag instead of jumping the track.
         </p>
 
         <h2 id="permissions">Runtime permissions</h2>

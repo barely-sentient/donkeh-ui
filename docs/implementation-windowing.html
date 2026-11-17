@@ -312,7 +312,8 @@ window.Run(root, styles);</code></pre>
                     <tr><td>Text editing</td><td>Focused text controls own caret, selection, clipboard, IME composition and keyboard navigation.</td></tr>
                     <tr><td>Select menus</td><td>Host-painted popup list positioned from the select box; hit testing and option selection are explicit overlays.</td></tr>
                     <tr><td>Scrolling</td><td>Wheel deltas find the nearest scroll container, clamp offsets, animate smooth scroll and repaint without relayout.</td></tr>
-                    <tr><td>Scrollbars</td><td>Host-painted thumbs and tracks with drag interaction and pointer auto-scroll.</td></tr>
+                    <tr><td>Touch pan</td><td>With <code>EnableTouchScrolling</code>, a finger drag pans the nearest container that scrolls on the gesture's dominant axis; taps replay as clicks.</td></tr>
+                    <tr><td>Scrollbars</td><td>Host-painted thumbs and tracks with drag interaction and pointer auto-scroll. Touch hosts get a wider grab area beside the bar.</td></tr>
                     <tr><td>Media controls</td><td>Play/pause, scrubber and seek-drag handled directly by the window.</td></tr>
                     <tr><td>Frameless windows</td><td><code>app-region: drag</code> starts a native window drag; edge/corner hit testing provides resize handles.</td></tr>
                     <tr><td>Cursor</td><td>Computed <code>cursor</code> maps to a native standard cursor and is applied on the hover chain.</td></tr>

@@ -554,6 +554,39 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// <summary>Active thumb drag on a native scrollbar, if any.</summary>
     private ScrollbarDrag? _scrollDrag;
 
+    /// <summary>CSS pixels a touch must travel before the press becomes a pan.</summary>
+    private const float TouchPanThreshold = 8;
+
+    /// <summary>Extra CSS pixels added inward to scrollbar hit targets for touch.</summary>
+    private const float TouchScrollbarHitSlop = 12;
+
+    /// <summary>Whether a touch-like press is waiting to see whether it becomes a pan.</summary>
+    private bool _touchPanPending;
+
+    /// <summary>Whether the current touch-like press is panning a scroll container.</summary>
+    private bool _touchPanning;
+
+    /// <summary>Node of the scroll container captured by the current gesture.</summary>
+    private IgniteSupportedDomNode? _touchPanNode;
+
+    /// <summary>Element that received the touch-like press, used to validate a tap.</summary>
+    private ElementNode? _touchPanStartTarget;
+
+    /// <summary>Press position that starts a pan once the touch threshold is crossed.</summary>
+    private float _touchPanStartX;
+
+    /// <summary>Press position that starts a pan once the touch threshold is crossed.</summary>
+    private float _touchPanStartY;
+
+    /// <summary>Last position already applied to the active pan.</summary>
+    private float _touchPanLastX;
+
+    /// <summary>Last position already applied to the active pan.</summary>
+    private float _touchPanLastY;
+
+    /// <summary>Whether the locked pan axis is vertical; otherwise horizontal.</summary>
+    private bool _touchPanVertical;
+
     /// <summary>Audio or video element whose progress thumb is being dragged, if any.</summary>
     private ElementNode? _mediaSeekElement;
 
@@ -5213,6 +5246,12 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         var x = _pendingMouseX;
         var y = _pendingMouseY;
 
+        if (_touchPanPending || _touchPanning)
+        {
+            UpdateTouchPan(x, y);
+            return;
+        }
+
         if (_dragActive)
         {
             if (!IsLeftMouseButtonDown())
@@ -5386,6 +5425,202 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     }
 
     /// <summary>
+    /// Starts a touch-pan candidate when a press lands on plain scrollable
+    /// content.
+    /// </summary>
+    /// <param name="x">Pointer X in window CSS pixels.</param>
+    /// <param name="y">Pointer Y in window CSS pixels.</param>
+    /// <returns>
+    /// <see langword="true"/> when the press was captured and must not run the
+    /// normal press path.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// This is the Android/finger equivalent of a browser touch pan. The press is
+    /// held until the pointer either crosses <see cref="TouchPanThreshold"/> and
+    /// becomes a scroll, or is released and replayed as a tap.
+    /// </para>
+    /// <para>
+    /// Interactive content keeps its existing behaviour: scrollbars, range and
+    /// text inputs, buttons, links, media controls and any element with a
+    /// <c>pointerdown</c> handler are excluded. That lets a component such as a
+    /// timeline capture implement its own drag without the host stealing it.
+    /// </para>
+    /// </remarks>
+    private bool TryBeginTouchPan(float x, float y)
+    {
+        if (!_settings.EnableTouchScrolling)
+        {
+            return false;
+        }
+
+        // An open dropdown should close through the normal press path.
+        if (_openSelect is not null)
+        {
+            return false;
+        }
+
+        var element = HitTest(x, y);
+
+        if (element is null || FindPointerTarget(element, "pointerdown") is not null)
+        {
+            return false;
+        }
+
+        for (IgniteSupportedDomNode? node = element; node is not null; node = node.Parent)
+        {
+            if (node is not ElementNode current)
+            {
+                continue;
+            }
+
+            if (current.Tag is "input" or "textarea" or "select" or "button" or "a"
+                or "audio" or "video")
+            {
+                return false;
+            }
+        }
+
+        // A press on the bar itself is a scrollbar drag, not a content pan.
+        if (FindScrollbarAt(x, y) is not null)
+        {
+            return false;
+        }
+
+        var scroll = FindScrollContainer(HitTestBox(x, y), 1, 1);
+
+        if (scroll is null
+            || (scroll.ScrollHeight <= scroll.ClientHeight + 0.5f
+                && scroll.ScrollWidth <= scroll.ClientWidth + 0.5f))
+        {
+            return false;
+        }
+
+        _touchPanPending = true;
+        _touchPanning = false;
+        _touchPanStartTarget = element;
+        _touchPanStartX = _touchPanLastX = x;
+        _touchPanStartY = _touchPanLastY = y;
+        _pressed = null;
+        SetActive(null);
+        return true;
+    }
+
+    /// <summary>
+    /// Advances a touch gesture: waits for the slop threshold, then scrolls the
+    /// captured container one-to-one with the finger.
+    /// </summary>
+    /// <param name="x">Pointer X in window CSS pixels.</param>
+    /// <param name="y">Pointer Y in window CSS pixels.</param>
+    /// <remarks>
+    /// The first movement past the threshold chooses a scroll axis. On a
+    /// container that can scroll both ways the dominant finger direction wins,
+    /// so a diagonal swipe does not jitter between the two. Subsequent movement
+    /// is applied as a delta, negated because dragging content down moves the
+    /// scroll offset down.
+    /// </remarks>
+    private void UpdateTouchPan(float x, float y)
+    {
+        if (!_touchPanning)
+        {
+            if (MathF.Abs(x - _touchPanStartX) < TouchPanThreshold
+                && MathF.Abs(y - _touchPanStartY) < TouchPanThreshold)
+            {
+                return;
+            }
+
+            // Choose the axis first, then the nearest container that can actually
+            // scroll along it. This lets a vertical page scroll when the finger
+            // starts inside a nested horizontal scroller.
+            _touchPanVertical = MathF.Abs(y - _touchPanStartY) >= MathF.Abs(x - _touchPanStartX);
+            var start = FindScrollContainer(
+                HitTestBox(_touchPanStartX, _touchPanStartY),
+                _touchPanVertical ? 1 : 0,
+                _touchPanVertical ? 0 : 1);
+
+            if (start is null || !CanScrollAlong(start, _touchPanVertical))
+            {
+                ResetTouchPan();
+                return;
+            }
+
+            _touchPanNode = start.Node;
+            _touchPanning = true;
+            _touchPanLastX = _touchPanStartX;
+            _touchPanLastY = _touchPanStartY;
+            CloseSelectMenu();
+            _pressed = null;
+            _pointerTarget = null;
+            _selectionDragging = false;
+            _selectionDragged = false;
+            _rangeDragElement = null;
+            _scrollDrag = null;
+            _mediaSeekElement = null;
+            _dragPending = false;
+
+            if (_dragActive)
+            {
+                EndDrag(cancel: true);
+            }
+
+            SetActive(null);
+        }
+
+        if (_touchPanNode is null
+            || LayoutForNode(_touchPanNode)?.TryGetBox(_touchPanNode, out var scroll) != true)
+        {
+            ResetTouchPan();
+            return;
+        }
+
+        var dx = x - _touchPanLastX;
+        var dy = y - _touchPanLastY;
+        _touchPanLastX = x;
+        _touchPanLastY = y;
+
+        if (_touchPanVertical)
+        {
+            dx = 0;
+        }
+        else
+        {
+            dy = 0;
+        }
+
+        if (dx == 0 && dy == 0)
+        {
+            return;
+        }
+
+        // Immediate scrolling keeps the content under the finger while dragging;
+        // scroll-behavior only applies to wheel and programmatic scrolls.
+        var (appliedX, appliedY) = ScrollBy(scroll, -dx, -dy, immediate: true);
+
+        if (appliedX != 0 || appliedY != 0)
+        {
+            Invoke(HitTest(x, y), "scroll", appliedX, appliedY);
+        }
+    }
+
+    /// <summary>Returns whether a box actually overflows on one axis.</summary>
+    /// <param name="box">The candidate scroll container.</param>
+    /// <param name="vertical">Whether to test the vertical axis.</param>
+    /// <returns><see langword="true"/> when there is scrollable content on the axis.</returns>
+    private static bool CanScrollAlong(LayoutBox box, bool vertical) => vertical
+        ? box.ScrollHeight > box.ClientHeight + 0.5f
+        : box.ScrollWidth > box.ClientWidth + 0.5f;
+
+    /// <summary>Clears every field owned by a touch-pan gesture.</summary>
+    private void ResetTouchPan()
+    {
+        _touchPanPending = false;
+        _touchPanning = false;
+        _touchPanNode = null;
+        _touchPanStartTarget = null;
+        _touchPanVertical = false;
+    }
+
+    /// <summary>
     /// Routes a pointer press, from inspect-mode picking and pointer capture down
     /// to focus, text selection, dropdowns and control activation.
     /// </summary>
@@ -5427,8 +5662,27 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// selection instead of replacing it.
     /// </para>
     /// </remarks>
-    private void OnMouseDown(MouseButton button)
+    private void OnMouseDown(MouseButton button) => PressPointer(button, allowTouchPan: true);
+
+    /// <summary>
+    /// Implements a pointer press, optionally taking ownership of a drag as a
+    /// touch pan.
+    /// </summary>
+    /// <param name="button">The pressed button.</param>
+    /// <param name="allowTouchPan">
+    /// Whether this press may become a touch pan. A replay of a tap after a
+    /// touch release passes <see langword="false"/> so it cannot be captured
+    /// twice.
+    /// </param>
+    private void PressPointer(MouseButton button, bool allowTouchPan)
     {
+        if (button == MouseButton.Left)
+        {
+            // A new press always starts a new gesture; never let a missed
+            // release leave a stale pan intercepting pointer moves.
+            ResetTouchPan();
+        }
+
         _devTools.PointerX = _mouseX;
         _devTools.PointerY = _mouseY;
 
@@ -5452,6 +5706,14 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         }
 
         if (button == MouseButton.Left && TryBeginWindowDrag(HitTest(_mouseX, _mouseY)))
+        {
+            return;
+        }
+
+        // A finger drag over plain scrollable content becomes a pan. Content
+        // that owns the gesture (pointerdown handlers, controls, media and
+        // scrollbars) keeps the normal press path.
+        if (button == MouseButton.Left && allowTouchPan && TryBeginTouchPan(_mouseX, _mouseY))
         {
             return;
         }
@@ -5677,6 +5939,37 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         if (button == MouseButton.Right)
         {
             return;
+        }
+
+        // A fast flick can move and lift between two frames. Apply the last
+        // coalesced move before deciding whether the gesture was a pan or a tap.
+        if ((_touchPanPending || _touchPanning) && _mouseMovePending)
+        {
+            _mouseMovePending = false;
+            UpdateTouchPan(_mouseX, _mouseY);
+        }
+
+        if (_touchPanPending || _touchPanning)
+        {
+            var panned = _touchPanning;
+            var startTarget = _touchPanStartTarget;
+            ResetTouchPan();
+
+            if (panned)
+            {
+                SetActive(null);
+                return;
+            }
+
+            // The finger never crossed the pan threshold. Replay the press now so
+            // the normal release path can dispatch the click exactly once. If the
+            // release landed on a different element, treat it as a cancelled tap.
+            if (!ReferenceEquals(HitTest(_mouseX, _mouseY), startTarget))
+            {
+                return;
+            }
+
+            PressPointer(MouseButton.Left, allowTouchPan: false);
         }
 
         if (_dragActive)
@@ -5953,6 +6246,9 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// <param name="scroll">The container box providing scroll metrics.</param>
     /// <param name="dx">Horizontal delta in CSS pixels.</param>
     /// <param name="dy">Vertical delta in CSS pixels.</param>
+    /// <param name="immediate">
+    /// Bypass <c>scroll-behavior</c> so a finger pan tracks the pointer one-to-one.
+    /// </param>
     /// <remarks>
     /// While a smooth scroll is animating, the delta is applied to the animation's
     /// pending target rather than the current offset, so a fast train of wheel
@@ -5963,7 +6259,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// scrollable range, in CSS pixels. Both are zero when the container is already
     /// at the requested edge.
     /// </returns>
-    private (float X, float Y) ScrollBy(LayoutBox scroll, float dx, float dy)
+    private (float X, float Y) ScrollBy(LayoutBox scroll, float dx, float dy, bool immediate = false)
     {
         var node = scroll.Node;
 
@@ -5980,7 +6276,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         var targetX = Math.Clamp(baseX + dx, 0, maxX);
         var targetY = Math.Clamp(baseY + dy, 0, maxY);
 
-        ScrollTo(scroll, targetX, targetY);
+        ScrollTo(scroll, targetX, targetY, immediate);
 
         return (targetX - baseX, targetY - baseY);
     }
@@ -5992,19 +6288,23 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// <param name="scroll">The container box providing scroll metrics.</param>
     /// <param name="x">Target horizontal offset in CSS pixels; clamped to range.</param>
     /// <param name="y">Target vertical offset in CSS pixels; clamped to range.</param>
+    /// <param name="immediate">
+    /// Apply the offset without easing, used by finger panning and other direct
+    /// pointer drags.
+    /// </param>
     /// <remarks>
     /// Distance-dependent duration (0.18–0.45 s) keeps short hops quick and long
     /// jumps readable. A target within half a pixel of the current offset cancels
     /// any running animation instead of starting a new one.
     /// </remarks>
-    private void ScrollTo(LayoutBox scroll, float x, float y)
+    private void ScrollTo(LayoutBox scroll, float x, float y, bool immediate = false)
     {
         var maxX = MathF.Max(0, scroll.ScrollWidth - scroll.ClientWidth);
         var maxY = MathF.Max(0, scroll.ScrollHeight - scroll.ClientHeight);
         x = Math.Clamp(x, 0, maxX);
         y = Math.Clamp(y, 0, maxY);
 
-        if (!IsSmoothScrolling(scroll))
+        if (immediate || !IsSmoothScrolling(scroll))
         {
             SetScrollOffset(scroll.Node, x, y);
             return;
@@ -6200,8 +6500,9 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         var box = hit.Value.Box;
         var metrics = hit.Value.Metrics;
         var node = box.Node;
+        var slop = _settings.EnableTouchScrolling ? TouchScrollbarHitSlop : 0;
 
-        if (metrics.ThumbRect.Contains(x, y))
+        if (IsOnScrollbarThumb(metrics, x, y, slop))
         {
             _scrollDrag = new ScrollbarDrag
             {
@@ -6290,12 +6591,14 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// </remarks>
     private ScrollbarHit? FindScrollbarAt(float x, float y)
     {
+        var slop = _settings.EnableTouchScrolling ? TouchScrollbarHitSlop : 0;
+
         if (_settings.EnableDevTools
             && _devTools.Visible
             && _devTools.Dock != DevToolsDock.Window
             && _devToolsLayout?.Root is { } devRoot)
         {
-            var devHit = FindScrollbarAt(devRoot, x, y, 0, 0);
+            var devHit = FindScrollbarAt(devRoot, x, y, 0, 0, slop);
 
             if (devHit is not null)
             {
@@ -6304,7 +6607,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         }
 
         return _layoutResult?.Root is { } root
-            ? FindScrollbarAt(root, x, y, 0, 0)
+            ? FindScrollbarAt(root, x, y, 0, 0, slop)
             : null;
     }
 
@@ -6316,19 +6619,25 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// <param name="y">Pointer Y in window CSS pixels.</param>
     /// <param name="scrollX">Accumulated horizontal scroll offset from ancestors.</param>
     /// <param name="scrollY">Accumulated vertical scroll offset from ancestors.</param>
+    /// <param name="slop">
+    /// Extra CSS pixels added toward the content on a touch host, so a finger can
+    /// grab a bar that is only ten pixels thick.
+    /// </param>
     /// <returns>The deepest matching scrollbar, or <see langword="null"/>.</returns>
     /// <remarks>
     /// Children are visited in reverse paint order so the topmost scrollbar wins.
     /// A container's own scrollbar is tested only after its children, since content
     /// can overlap the track. Scroll offsets are accumulated exactly as the painter
-    /// applies them.
+    /// applies them. The reported track keeps its painted geometry; only the hit
+    /// test grows.
     /// </remarks>
     private static ScrollbarHit? FindScrollbarAt(
         LayoutBox box,
         float x,
         float y,
         float scrollX,
-        float scrollY)
+        float scrollY,
+        float slop)
     {
         if (box.Style.Display == Display.None
             || box.Style.Visibility is Visibility.Hidden or Visibility.Collapse)
@@ -6361,7 +6670,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
 
         for (var i = box.Children.Count - 1; i >= 0; i--)
         {
-            var hit = FindScrollbarAt(box.Children[i], x, y, childScrollX, childScrollY);
+            var hit = FindScrollbarAt(box.Children[i], x, y, childScrollX, childScrollY, slop);
 
             if (hit is not null)
             {
@@ -6378,7 +6687,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         {
             var track = vertical.Track.Translate(-scrollX, -scrollY);
 
-            if (track.Contains(x, y))
+            if (ContainsScrollbar(track, x, y, vertical: true, slop))
             {
                 return new ScrollbarHit(box, vertical with { Track = track });
             }
@@ -6388,13 +6697,93 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         {
             var track = horizontal.Track.Translate(-scrollX, -scrollY);
 
-            if (track.Contains(x, y))
+            if (ContainsScrollbar(track, x, y, vertical: false, slop))
             {
                 return new ScrollbarHit(box, horizontal with { Track = track });
             }
         }
 
         return null;
+    }
+
+    /// <summary>Tests whether a point grabs a scrollbar thumb, with touch margin.</summary>
+    /// <param name="metrics">The hit scrollbar geometry in window CSS pixels.</param>
+    /// <param name="x">Pointer X in window CSS pixels.</param>
+    /// <param name="y">Pointer Y in window CSS pixels.</param>
+    /// <param name="slop">Extra inward CSS pixels used on touch hosts.</param>
+    /// <returns><see langword="true"/> when the point should start a thumb drag.</returns>
+    /// <remarks>
+    /// The expanded area alongside the thumb also starts a drag instead of a
+    /// track jump, so touching near a finger-width thumb grabs it rather than
+    /// teleporting the scroll position.
+    /// </remarks>
+    private static bool IsOnScrollbarThumb(
+        in ScrollbarMetrics metrics,
+        float x,
+        float y,
+        float slop)
+    {
+        if (metrics.ThumbRect.Contains(x, y))
+        {
+            return true;
+        }
+
+        if (slop <= 0)
+        {
+            return false;
+        }
+
+        var thumb = metrics.ThumbRect;
+        var track = metrics.Track;
+
+        if (metrics.Vertical)
+        {
+            return y >= thumb.Y
+                && y <= thumb.Bottom
+                && x >= track.X - slop
+                && x <= track.Right;
+        }
+
+        return x >= thumb.X
+            && x <= thumb.Right
+            && y >= track.Y - slop
+            && y <= track.Bottom;
+    }
+
+    /// <summary>Tests a scrollbar track with an optional inward touch margin.</summary>
+    /// <param name="track">Painted track rectangle in window CSS pixels.</param>
+    /// <param name="x">Pointer X in window CSS pixels.</param>
+    /// <param name="y">Pointer Y in window CSS pixels.</param>
+    /// <param name="vertical">Whether the track is vertical.</param>
+    /// <param name="slop">Extra inward CSS pixels, or zero for the exact track.</param>
+    /// <returns><see langword="true"/> when the point is on the painted or expanded track.</returns>
+    /// <remarks>
+    /// Vertical bars sit at the right edge, so they grow left into content;
+    /// horizontal bars sit at the bottom, so they grow up into content. Growing
+    /// outward instead would fall outside the container's clip box.
+    /// </remarks>
+    private static bool ContainsScrollbar(
+        in Rect track,
+        float x,
+        float y,
+        bool vertical,
+        float slop)
+    {
+        if (track.Contains(x, y))
+        {
+            return true;
+        }
+
+        if (slop <= 0)
+        {
+            return false;
+        }
+
+        var expanded = vertical
+            ? new Rect(track.X - slop, track.Y, track.Width + slop, track.Height)
+            : new Rect(track.X, track.Y - slop, track.Width, track.Height + slop);
+
+        return expanded.Contains(x, y);
     }
 
     /// <summary>
