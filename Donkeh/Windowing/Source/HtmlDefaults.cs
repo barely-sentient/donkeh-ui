@@ -120,9 +120,22 @@ public static class HtmlDefaults
         }
 
         button { cursor: pointer; font-weight: 600; }
-        input { min-height: 32px; }
+        input {
+            min-height: 32px;
+            /* A text field is a single-line control: its value must never wrap.
+               Long values clip (and ellipsize when the author asks for it)
+               instead of overflowing the control's line box. */
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
         textarea { width: 120px; min-height: 72px; white-space: pre-wrap; }
-        select { min-height: 32px; }
+        select {
+            min-height: 32px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
         select option { display: none; }
         input[type="checkbox"], input[type="radio"] { min-height: 0; padding: 0; }
         button:disabled, input:disabled, select:disabled, textarea:disabled { color: #8c959f; background-color: #eff2f5; }

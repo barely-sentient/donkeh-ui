@@ -1,5 +1,17 @@
 <Project>
 
+    <PropertyGroup>
+        <!--
+            INTERNET permission for external assets (remote @import rules, fonts
+            and url(...) images in the app's stylesheets).
+
+            auto   detect remote URLs in the app's CSS and declare the permission
+            true   always declare it
+            false  never declare it (offline app)
+        -->
+        <DonkehAndroidInternet Condition="'$(DonkehAndroidInternet)' == ''">auto</DonkehAndroidInternet>
+    </PropertyGroup>
+
     <!--
         Browser builds need the Blazor WebAssembly SDK props. The generated
         project only sets TargetFrameworks, so the package adds the SDK pieces

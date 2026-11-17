@@ -277,6 +277,18 @@ public class DonkehActivity : SilkActivity</code></pre>
             add more.
         </p>
 
+        <p>
+            <code>INTERNET</code> is added automatically when an app stylesheet
+            references an external asset. The native host resolves remote
+            <code>@import</code> rules, their <code>@font-face</code> sources and
+            <code>url(...)</code> backgrounds at start-up; the build scans the app’s
+            CSS for <code>http://</code> or <code>https://</code> and emits the
+            permission. This matters for release builds because only debuggable APKs
+            receive <code>INTERNET</code> implicitly from the Android SDK. Set
+            <code>DonkehAndroidInternet</code> to <code>true</code> or
+            <code>false</code> to override detection.
+        </p>
+
         <h2 id="differences">Android versus desktop</h2>
         <div class="table-wrap">
             <table>

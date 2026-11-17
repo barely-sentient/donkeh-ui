@@ -39,6 +39,16 @@
         <!-- Semicolon-separated Android permission tokens, for example
              Camera;Microphone;Location;Notifications. -->
         <DonkehAndroidPermissions Condition="'$(DonkehAndroidPermissions)' == ''"></DonkehAndroidPermissions>
+
+        <!--
+            INTERNET permission for external assets (remote @import rules, fonts
+            and url(...) images in the app's stylesheets).
+
+            auto   detect remote URLs in the app's CSS and declare the permission
+            true   always declare it
+            false  never declare it (offline app)
+        -->
+        <DonkehAndroidInternet Condition="'$(DonkehAndroidInternet)' == ''">auto</DonkehAndroidInternet>
     </PropertyGroup>
 
     <!--

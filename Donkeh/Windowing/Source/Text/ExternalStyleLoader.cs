@@ -207,6 +207,7 @@ internal static class ExternalStyleLoader
 
             if (path is null || resolved is null)
             {
+                Console.WriteLine($"[Donkeh] Could not download external font '{family}' from {source}");
                 continue;
             }
 
@@ -220,10 +221,13 @@ internal static class ExternalStyleLoader
             {
                 fonts.RegisterFont(family, path, weight, italic);
             }
-            catch
+            catch (Exception ex)
             {
                 // An unsupported or malformed external font must not break the
-                // rest of the stylesheet.
+                // rest of the stylesheet, but losing an icon font makes the UI
+                // look broken, so leave a line in the platform log.
+                Console.WriteLine(
+                    $"[Donkeh] Could not register external font '{family}' from {source}: {ex.Message}");
             }
         }
     }
@@ -285,12 +289,11 @@ internal static class ExternalStyleLoader
         }
 
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source))).ToLowerInvariant();
-        var directory = Path.Combine(Path.GetTempPath(), "donkeh", "fonts");
-        var path = Path.Combine(directory, hash + extension);
+        var path = Path.Combine(CacheDirectory(), hash + extension);
 
         try
         {
-            Directory.CreateDirectory(directory);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
 
             if (!File.Exists(path))
             {
@@ -300,10 +303,30 @@ internal static class ExternalStyleLoader
             FontPaths[source] = path;
             return path;
         }
-        catch
+        catch (Exception ex)
         {
+            Console.WriteLine($"[Donkeh] Could not cache external font '{source}': {ex.Message}");
             return null;
         }
+    }
+
+    /// <summary>Returns the writable directory used to cache downloaded fonts.</summary>
+    /// <returns>An application-data path, or the system temp path as a fallback.</returns>
+    /// <remarks>
+    /// Android apps cannot write to the process temp directory on every image,
+    /// so the local application-data folder is preferred. It is also the right
+    /// place for a cache that should survive between launches.
+    /// </remarks>
+    private static string CacheDirectory()
+    {
+        var root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+        if (string.IsNullOrWhiteSpace(root))
+        {
+            root = Path.GetTempPath();
+        }
+
+        return Path.Combine(root, "donkeh", "fonts");
     }
 
     private static string? GetCss(Uri uri)
@@ -324,8 +347,12 @@ internal static class ExternalStyleLoader
             CssCache[key] = text;
             return text;
         }
-        catch
+        catch (Exception ex)
         {
+            // A missing stylesheet is usually a missing permission or network.
+            // The app still starts with the fallback font chain, so report the
+            // cause once instead of failing the whole stylesheet pass.
+            Console.WriteLine($"[Donkeh] Could not load external stylesheet '{uri}': {ex.Message}");
             CssCache[key] = string.Empty;
             return null;
         }

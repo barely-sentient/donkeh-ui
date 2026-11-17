@@ -232,6 +232,16 @@ if (await Host.Permissions.Camera())
             manifest if you prefer.
         </p>
 
+        <p>
+            The framework also adds <code>INTERNET</code> automatically when the app’s
+            stylesheets contain a remote <code>@import</code> or <code>url(...)</code>.
+            Remote imports (icon fonts, for example) are fetched by the native host at
+            start-up, and release APKs do not receive <code>INTERNET</code> implicitly
+            the way debuggable builds do. Set
+            <code>DonkehAndroidInternet</code> to <code>auto</code> (the default),
+            <code>true</code> or <code>false</code> to override detection.
+        </p>
+
         <h2 id="custom">Custom providers</h2>
         <p>
             A host can replace the permission provider during startup. Implement

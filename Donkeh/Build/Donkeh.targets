@@ -107,19 +107,40 @@
     <!--
         Generates an Android manifest overlay from the opt-in permission list, so
         an app does not have to hand-write uses-permission entries that the
-        Host.Permissions API already knows about.
+        Host.Permissions API already knows about. Remote stylesheets, fonts and
+        url(...) images also declare INTERNET automatically; see
+        DonkehAndroidInternet in Donkeh.props.
     -->
     <Target Name="DonkehGenerateAndroidPermissions"
             BeforeTargets="_ManifestMerger;ProcessAndroidManifest"
-            Condition="'$(TargetFramework)' == 'net10.0-android' and '$(DonkehAndroidPermissions)' != ''">
+            Condition="'$(TargetFramework)' == 'net10.0-android'">
+        <!--
+            The native host loads remote @import rules and their fonts at
+            start-up. A release APK does not get INTERNET from the SDK the way a
+            debuggable one does, so scan the app's stylesheets and declare it.
+        -->
+        <ItemGroup>
+            <_DonkehAndroidCss
+                Include="@(EmbeddedResource);@(Content);@(None);@(AndroidResource)"
+                Condition="'%(Extension)' == '.css' and Exists('%(FullPath)')" />
+            <_DonkehAndroidRemoteCss
+                Include="@(_DonkehAndroidCss)"
+                Condition="$([System.Text.RegularExpressions.Regex]::IsMatch($([System.IO.File]::ReadAllText('%(FullPath)')), 'https?://'))" />
+        </ItemGroup>
+
         <PropertyGroup>
-            <_DonkehAndroidPermissionOverlay>$(IntermediateOutputPath)donkeh.android.permissions.xml</_DonkehAndroidPermissionOverlay>
+            <_DonkehAndroidInternetAuto Condition="'$(DonkehAndroidInternet)' == '' or '$(DonkehAndroidInternet)' == 'auto'">true</_DonkehAndroidInternetAuto>
+            <_DonkehAndroidNeedsInternet Condition="'$(DonkehAndroidInternet)' == 'true'">true</_DonkehAndroidNeedsInternet>
+            <_DonkehAndroidNeedsInternet Condition="'$(_DonkehAndroidInternetAuto)' == 'true' and '@(_DonkehAndroidRemoteCss)' != ''">true</_DonkehAndroidNeedsInternet>
             <_DonkehPermissions>$(DonkehAndroidPermissions)</_DonkehPermissions>
+            <_DonkehAndroidNeedsOverlay Condition="'$(_DonkehAndroidNeedsInternet)' == 'true' or '$(_DonkehPermissions)' != ''">true</_DonkehAndroidNeedsOverlay>
+            <_DonkehAndroidPermissionOverlay>$(IntermediateOutputPath)donkeh.android.permissions.xml</_DonkehAndroidPermissionOverlay>
         </PropertyGroup>
 
-        <ItemGroup>
+        <ItemGroup Condition="'$(_DonkehAndroidNeedsOverlay)' == 'true'">
             <_DonkehAndroidPermissionLine Include="&lt;?xml version=&quot;1.0&quot; encoding=&quot;utf-8&quot;?&gt;" />
             <_DonkehAndroidPermissionLine Include="&lt;manifest xmlns:android=&quot;http://schemas.android.com/apk/res/android&quot;&gt;" />
+            <_DonkehAndroidPermissionLine Include="  &lt;uses-permission android:name=&quot;android.permission.INTERNET&quot; /&gt;" Condition="'$(_DonkehAndroidNeedsInternet)' == 'true'" />
             <_DonkehAndroidPermissionLine Include="  &lt;uses-permission android:name=&quot;android.permission.CAMERA&quot; /&gt;" Condition="$([System.String]::Copy('$(_DonkehPermissions)').Contains('Camera'))" />
             <_DonkehAndroidPermissionLine Include="  &lt;uses-permission android:name=&quot;android.permission.RECORD_AUDIO&quot; /&gt;" Condition="$([System.String]::Copy('$(_DonkehPermissions)').Contains('Microphone'))" />
             <_DonkehAndroidPermissionLine Include="  &lt;uses-permission android:name=&quot;android.permission.ACCESS_FINE_LOCATION&quot; /&gt;" Condition="$([System.String]::Copy('$(_DonkehPermissions)').Contains('Location'))" />
@@ -137,9 +158,10 @@
         <WriteLinesToFile File="$(_DonkehAndroidPermissionOverlay)"
                           Lines="@(_DonkehAndroidPermissionLine)"
                           Overwrite="true"
-                          Encoding="UTF-8" />
+                          Encoding="UTF-8"
+                          Condition="'$(_DonkehAndroidNeedsOverlay)' == 'true'" />
 
-        <ItemGroup>
+        <ItemGroup Condition="'$(_DonkehAndroidNeedsOverlay)' == 'true'">
             <AndroidManifestOverlay Include="$(_DonkehAndroidPermissionOverlay)" />
         </ItemGroup>
     </Target>
