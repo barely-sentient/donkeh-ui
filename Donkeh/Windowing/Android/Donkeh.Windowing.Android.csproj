@@ -30,4 +30,14 @@
         <ProjectReference Include="..\Source\Donkeh.Windowing.csproj" />
     </ItemGroup>
 
+    <ItemGroup>
+        <!-- The shared sideload key travels with the Android host package. -->
+        <None Include="Donkeh.Windowing.Android.keystore"
+              Pack="true"
+              PackagePath="buildTransitive\Donkeh.Windowing.Android.keystore" />
+        <None Include="buildTransitive\Donkeh.Windowing.Android.targets"
+              Pack="true"
+              PackagePath="buildTransitive\Donkeh.Windowing.Android.targets" />
+    </ItemGroup>
+
 </Project>

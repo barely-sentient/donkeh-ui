@@ -1,0 +1,22 @@
+<Project>
+
+    <!--
+        Shared sideload/debug signing key.
+
+        Local builds, CI releases and every Donkeh app use the same key so an
+        APK downloaded from GitHub can replace a locally-built APK (and vice
+        versa) without an uninstall. This is not a production/Play Store key;
+        set AndroidKeyStore=true in the app to opt out and provide a private
+        keystore.
+    -->
+    <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0-android'
+        and '$(DonkehSharedAndroidSigning)' != 'false'
+        and '$(AndroidKeyStore)' != 'true'">
+        <AndroidKeyStore>true</AndroidKeyStore>
+        <AndroidSigningKeyStore>$(MSBuildThisFileDirectory)Donkeh.Windowing.Android.keystore</AndroidSigningKeyStore>
+        <AndroidSigningKeyAlias>donkeh</AndroidSigningKeyAlias>
+        <AndroidSigningKeyPass>donkeh</AndroidSigningKeyPass>
+        <AndroidSigningStorePass>donkeh</AndroidSigningStorePass>
+    </PropertyGroup>
+
+</Project>
