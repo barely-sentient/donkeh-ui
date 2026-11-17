@@ -315,10 +315,17 @@ AfterUpdate?.Invoke(); // one signal after a settled pass</code></pre>
         <p>
             Events are ordinary delegates stored in an element’s event map keyed by a
             normalised lowercase name. <code>Props</code> exposes common handlers such as
-            <code>OnClick</code>, <code>OnPointerDown</code>, <code>OnInput</code> and
-            <code>OnKeyDown</code>; arbitrary events can go through
+            <code>OnClick</code>, <code>OnPointerDown</code>, <code>OnContextMenu</code>,
+            <code>OnInput</code> and <code>OnKeyDown</code>; arbitrary events can go through
             <code>Attr(name, handler)</code>. Hosts mirror handler presence into their
             own event system, but the delegate stays owned by the element.
+        </p>
+        <p>
+            Pointer handlers receive element-local coordinates. A
+            <code>ContextMenuEvent</code> also exposes the deepest clicked node as
+            <code>Target</code>, the node whose handler is running as
+            <code>CurrentTarget</code>, and the original pointer position in window CSS
+            pixels.
         </p>
         <p>
             <code>Ref&lt;ElementNode&gt;</code> points at a mounted element and is cleared

@@ -86,6 +86,30 @@ public sealed class BuilderTests
     }
 
     [Fact]
+    public void Props_OnContextMenuReceivesTheClickedNode()
+    {
+        ContextMenuEvent? received = null;
+        var tree = H("div", new Props
+        {
+            OnContextMenu = menu => received = menu,
+        });
+
+        Assert.True(tree.TryGetEventHandler("contextmenu", out var handler));
+
+        var clicked = H("span");
+        ((Action<ContextMenuEvent>)handler!)(
+            new ContextMenuEvent(clicked, tree, 4f, 6f, 100f, 200f));
+
+        Assert.NotNull(received);
+        Assert.Same(clicked, received!.Target);
+        Assert.Same(tree, received.CurrentTarget);
+        Assert.Equal(4f, received.X);
+        Assert.Equal(6f, received.Y);
+        Assert.Equal(100f, received.WindowX);
+        Assert.Equal(200f, received.WindowY);
+    }
+
+    [Fact]
     public void TextOnlyChildrenAreFoldedIntoTextContent()
     {
         var renderer = new Renderer();

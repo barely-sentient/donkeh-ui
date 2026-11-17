@@ -5720,11 +5720,12 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
 
         if (button == MouseButton.Right)
         {
-            var contextTarget = FindPointerTarget(HitTest(_mouseX, _mouseY), "contextmenu");
+            var hit = HitTest(_mouseX, _mouseY);
+            var contextTarget = FindContextMenuTarget(hit, out var contextHandler);
 
-            if (contextTarget is not null)
+            if (contextTarget is not null && contextHandler is not null && hit is not null)
             {
-                InvokePointer(contextTarget, "contextmenu", _mouseX, _mouseY);
+                InvokeContextMenu(contextTarget, hit, contextHandler, _mouseX, _mouseY);
             }
 
             return;
@@ -7888,6 +7889,69 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
 
         var painted = PaintedBorderBox(box);
         action(x - painted.X, y - painted.Y);
+    }
+
+    /// <summary>
+    /// Walks from a hit element up to the nearest ancestor that handles a
+    /// context-menu event.
+    /// </summary>
+    /// <param name="element">The hit element, or <see langword="null"/>.</param>
+    /// <param name="handler">Receives the registered handler, or <see langword="null"/>.</param>
+    /// <returns>The handling element, or <see langword="null"/> when nobody handles it.</returns>
+    /// <remarks>
+    /// Both <see cref="ContextMenuEvent"/> handlers and the older
+    /// two-coordinate <c>Action&lt;float, float&gt;</c> shape are accepted, so
+    /// hosts built against the earlier API keep working.
+    /// </remarks>
+    private static ElementNode? FindContextMenuTarget(ElementNode? element, out Delegate? handler)
+    {
+        for (var node = (IgniteSupportedDomNode?)element; node is not null; node = node.Parent)
+        {
+            if (node is ElementNode current
+                && current.TryGetEventHandler("contextmenu", out var candidate)
+                && candidate is Action<ContextMenuEvent> or Action<float, float>)
+            {
+                handler = candidate;
+                return current;
+            }
+        }
+
+        handler = null;
+        return null;
+    }
+
+    /// <summary>
+    /// Dispatches a right-button context-menu event to the handling element.
+    /// </summary>
+    /// <param name="currentTarget">The element whose handler runs.</param>
+    /// <param name="target">The deepest element under the pointer.</param>
+    /// <param name="handler">The registered handler.</param>
+    /// <param name="x">Pointer X in window CSS pixels.</param>
+    /// <param name="y">Pointer Y in window CSS pixels.</param>
+    /// <remarks>
+    /// Coordinates are translated into <paramref name="currentTarget"/>'s painted
+    /// border box, matching the pointer-event contract. The event object also
+    /// carries the original window coordinates for positioning a menu.
+    /// </remarks>
+    private void InvokeContextMenu(ElementNode currentTarget, ElementNode target, Delegate handler, float x, float y)
+    {
+        var layout = LayoutFor(currentTarget);
+
+        if (layout is null || !layout.TryGetBox(currentTarget, out var box))
+        {
+            return;
+        }
+
+        var painted = PaintedBorderBox(box);
+
+        if (handler is Action<ContextMenuEvent> action)
+        {
+            action(new ContextMenuEvent(target, currentTarget, x - painted.X, y - painted.Y, x, y));
+        }
+        else if (handler is Action<float, float> legacy)
+        {
+            legacy(x - painted.X, y - painted.Y);
+        }
     }
 
     /// <summary>Finds the nearest ancestor marked as draggable.</summary>

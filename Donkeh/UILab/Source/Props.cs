@@ -230,9 +230,15 @@ namespace Donkeh.UILab
 
         /// <summary>
         /// Gets or sets the handler for the host's right-button context-menu event.
-        /// Coordinates are relative to the element's painted border box.
         /// </summary>
-        public Action<float, float>? OnContextMenu { get; init; }
+        /// <remarks>
+        /// The event carries the deepest element under the pointer
+        /// (<see cref="ContextMenuEvent.Target"/>), the element that owns the
+        /// handler (<see cref="ContextMenuEvent.CurrentTarget"/>) and the pointer
+        /// position both in window and element-local coordinates. Attach the
+        /// handler to a container to treat its children as one context-menu area.
+        /// </remarks>
+        public Action<ContextMenuEvent>? OnContextMenu { get; init; }
 
         /// <summary>
         /// Gets or sets the handler for <c>dragstart</c>, dispatched on the

@@ -148,9 +148,12 @@ public sealed class DomHost
             case "pointerdown":
             case "pointermove":
             case "pointerup":
-            case "contextmenu":
             case "scroll":
                 InvokePointer(handler, eventName, (float)x, (float)y);
+                break;
+
+            case "contextmenu":
+                InvokeContextMenu(handler, targetNode, (float)x, (float)y);
                 break;
 
             case "input":
@@ -702,6 +705,38 @@ public sealed class DomHost
             else
             {
                 handler.DynamicInvoke(x, y);
+            }
+        });
+    }
+
+    /// <summary>Invokes a right-button context-menu handler with its target node.</summary>
+    /// <param name="currentTarget">The virtual element that owns the handler.</param>
+    /// <param name="targetNode">The deepest virtual node under the DOM event target.</param>
+    /// <param name="x">Event-local X coordinate.</param>
+    /// <param name="y">Event-local Y coordinate.</param>
+    /// <remarks>
+    /// The browser bridge reports element-local coordinates, so they are used for
+    /// both the local and window positions. The desktop and Android hosts provide
+    /// true window coordinates.
+    /// </remarks>
+    private static void InvokeContextMenu(ElementNode currentTarget, Node targetNode, float x, float y)
+    {
+        if (!currentTarget.TryGetEventHandler("contextmenu", out var handler)
+            || handler is not (Action<ContextMenuEvent> or Action<float, float>))
+        {
+            return;
+        }
+
+        InvokeSafely(() =>
+        {
+            if (handler is Action<ContextMenuEvent> action)
+            {
+                var target = targetNode as ElementNode ?? currentTarget;
+                action(new ContextMenuEvent(target, currentTarget, x, y, x, y));
+            }
+            else if (handler is Action<float, float> legacy)
+            {
+                legacy(x, y);
             }
         });
     }

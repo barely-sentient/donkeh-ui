@@ -313,6 +313,7 @@ window.Run(root, styles);</code></pre>
                     <tr><td>Select menus</td><td>Host-painted popup list positioned from the select box; hit testing and option selection are explicit overlays.</td></tr>
                     <tr><td>Scrolling</td><td>Wheel deltas find the nearest scroll container, clamp offsets, animate smooth scroll and repaint without relayout.</td></tr>
                     <tr><td>Touch pan</td><td>With <code>EnableTouchScrolling</code>, a finger drag pans the nearest container that scrolls on the gesture's dominant axis; taps replay as clicks.</td></tr>
+                    <tr><td>Context menu</td><td>A right-button press bubbles to the nearest ancestor with an <code>OnContextMenu</code> handler. The event carries the deepest clicked node, the handling node and both window and element-local coordinates.</td></tr>
                     <tr><td>Scrollbars</td><td>Host-painted thumbs and tracks with drag interaction and pointer auto-scroll. Touch hosts get a wider grab area beside the bar.</td></tr>
                     <tr><td>Media controls</td><td>Play/pause, scrubber and seek-drag handled directly by the window.</td></tr>
                     <tr><td>Frameless windows</td><td><code>app-region: drag</code> starts a native window drag; edge/corner hit testing provides resize handles.</td></tr>
@@ -320,6 +321,27 @@ window.Run(root, styles);</code></pre>
                 </tbody>
             </table>
         </div>
+
+        <p>
+            Context menus are opt-in per element. Attach the handler to a container to
+            treat a whole list as one menu area, then read <code>e.Target</code> to find
+            the row that was actually clicked:
+        </p>
+
+<pre><code>H("div", new Props
+{
+    OnContextMenu = e =&gt;
+    {
+        var clicked = e.Target;          // deepest element under the pointer
+        var owner = e.CurrentTarget;     // element that owns this handler
+        Console.WriteLine($"menu at {e.WindowX},{e.WindowY}");
+    }
+}, rows);</code></pre>
+
+        <p>
+            Android and desktop share the same right-button path. Right-click is the only
+            trigger; touch devices need a mouse for it.
+        </p>
 
         <p>
             Scrolling is especially important to the frame budget. Box geometry stays in
