@@ -1733,39 +1733,38 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     }
 
     /// <summary>
-    /// Walks the current layout tree and records every batched
-    /// <see cref="CanvasProps.OnDraw"/> callback into the pending indirect frame.
+    /// Submits a display list and records each canvas's
+    /// <see cref="CanvasProps.OnDraw"/> callback where its marker appears.
     /// </summary>
+    /// <param name="result">Layout result whose instruction stream is submitted.</param>
     /// <remarks>
-    /// This runs after the app, overlay and inspector streams have been
-    /// submitted but before <see cref="GLRenderer.Flush"/>, so canvas primitives
-    /// paint above the UI yet still travel through the same GPU instance buffer
-    /// and indirect batch.
+    /// Interleaving the canvas with the stream is what makes <c>z-index</c> and
+    /// stacking contexts apply to canvas content: the callback runs with the
+    /// clip, opacity and transform that the ancestors pushed up to the marker.
+    /// Faulty handlers are swallowed so one canvas cannot tear down the frame;
+    /// <see cref="CanvasContext.End"/> still balances any open scopes.
     /// </remarks>
-    private void RecordCanvasElements()
+    private void SubmitDisplayList(LayoutResult result)
     {
-        EnsureMediaBoxCache();
-
-        if (_layoutResult is null || _renderer is null)
+        if (_renderer is null)
         {
             return;
         }
 
-        for (var boxIndex = 0; boxIndex < _canvasBoxes.Count; boxIndex++)
+        _renderer.Submit(result, (index, rect) =>
         {
-            var box = _canvasBoxes[boxIndex];
-
-            if (box.Node is not ElementNode element
-                || element.CanvasDrawHandler is not Action<CanvasContext> handler)
+            if ((uint)index >= (uint)result.Canvases.Count)
             {
-                continue;
+                return;
             }
 
-            var rect = box.BorderBox;
+            var box = result.Canvases[index];
 
-            if (rect.IsEmpty)
+            if (box.Node is not ElementNode element
+                || element.CanvasDrawHandler is not Action<CanvasContext> handler
+                || rect.IsEmpty)
             {
-                continue;
+                return;
             }
 
             _canvasContext.Begin(_renderer, rect);
@@ -1776,14 +1775,13 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             }
             catch
             {
-                // A faulty canvas must not tear down the frame; End still
-                // balances the clip/transform/opacity stacks.
+                // A faulty canvas must not tear down the frame.
             }
             finally
             {
                 _canvasContext.End();
             }
-        }
+        });
     }
 
     /// <summary>
@@ -2213,50 +2211,48 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
 
             if (hasOverlay && _devToolsOverlay.Count > 0)
             {
-                _renderer.Submit(_layoutResult);
+                SubmitDisplayList(_layoutResult);
                 _renderer.Submit(overlay.Span, overlayConstants);
 
                 if (_devToolsLayout is not null)
                 {
-                    _renderer.Submit(_devToolsLayout);
+                    SubmitDisplayList(_devToolsLayout);
                 }
 
                 _renderer.Submit(_devToolsOverlay.Span, _devToolsOverlayConstants);
             }
             else if (hasOverlay)
             {
-                _renderer.Submit(_layoutResult);
+                SubmitDisplayList(_layoutResult);
                 _renderer.Submit(overlay.Span, overlayConstants);
 
                 if (_devToolsLayout is not null)
                 {
-                    _renderer.Submit(_devToolsLayout);
+                    SubmitDisplayList(_devToolsLayout);
                 }
             }
             else if (_devToolsOverlay.Count > 0)
             {
-                _renderer.Submit(_layoutResult);
+                SubmitDisplayList(_layoutResult);
 
                 if (_devToolsLayout is not null)
                 {
-                    _renderer.Submit(_devToolsLayout);
+                    SubmitDisplayList(_devToolsLayout);
                 }
 
                 _renderer.Submit(_devToolsOverlay.Span, _devToolsOverlayConstants);
             }
             else
             {
-                _renderer.Submit(_layoutResult);
+                SubmitDisplayList(_layoutResult);
 
                 if (_devToolsLayout is not null)
                 {
-                    _renderer.Submit(_devToolsLayout);
+                    SubmitDisplayList(_devToolsLayout);
                 }
             }
         }
 
-        // Batched canvas paint lists join the same indirect batch as the UI.
-        RecordCanvasElements();
         _renderer.Flush();
 
         // Raw GL callbacks own their element's pixels, so they run after the

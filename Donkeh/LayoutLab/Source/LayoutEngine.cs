@@ -92,6 +92,16 @@ public sealed partial class LayoutEngine
     private readonly Dictionary<IgniteSupportedDomNode, LayoutBox> _byNode = [];
 
     /// <summary>
+    /// Canvas boxes in tree order. A <see cref="InstructionOpCode.DrawCanvas"/>
+    /// marker indexes this list, so the host can invoke the matching element's
+    /// draw callback at the canvas's paint position.
+    /// </summary>
+    private readonly List<LayoutBox> _canvases = [];
+
+    /// <summary>Reverse lookup from a canvas box to its <see cref="_canvases"/> index.</summary>
+    private readonly Dictionary<LayoutBox, int> _canvasIndices = [];
+
+    /// <summary>
     /// Absolutely and fixed positioned boxes discovered while building the tree,
     /// in discovery order. They are laid out after normal flow by
     /// <see cref="ProcessAbsoluteBoxes"/>.
@@ -363,6 +373,7 @@ public sealed partial class LayoutEngine
         {
             LayoutRootBox(_root, viewport);
             ProcessAbsoluteBoxes(viewport);
+            CollectCanvases(_root);
             BuildDisplayList(_root);
         }
 
@@ -378,7 +389,8 @@ public sealed partial class LayoutEngine
             frame.Stats,
             _animations.HasRunningAnimations,
             snapshot: _options.SnapshotResults,
-            hasLayoutAnimations: _animations.HasLayoutAnimations);
+            hasLayoutAnimations: _animations.HasLayoutAnimations,
+            canvases: _canvases);
     }
 
     /// <summary>
@@ -451,6 +463,7 @@ public sealed partial class LayoutEngine
         {
             ApplyRootScrollBehavior(_root);
             RefreshScrollMetrics(_root);
+            CollectCanvases(_root);
             BuildDisplayList(_root);
         }
 
@@ -466,7 +479,8 @@ public sealed partial class LayoutEngine
             frame.Stats,
             previous.HasAnimations,
             snapshot: _options.SnapshotResults,
-            hasLayoutAnimations: previous.HasLayoutAnimations);
+            hasLayoutAnimations: previous.HasLayoutAnimations,
+            canvases: _canvases);
     }
 
     /// <summary>
@@ -540,6 +554,7 @@ public sealed partial class LayoutEngine
 
         if (_root is not null)
         {
+            CollectCanvases(_root);
             BuildDisplayList(_root);
         }
 
@@ -555,7 +570,8 @@ public sealed partial class LayoutEngine
             frame.Stats,
             _animations.HasRunningAnimations,
             snapshot: _options.SnapshotResults,
-            hasLayoutAnimations: _animations.HasLayoutAnimations);
+            hasLayoutAnimations: _animations.HasLayoutAnimations,
+            canvases: _canvases);
     }
 
     /// <summary>

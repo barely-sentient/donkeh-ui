@@ -13,8 +13,10 @@ namespace Donkeh.Windowing;
 /// <see cref="CanvasProps.OnDraw"/>. Every primitive it receives is appended to
 /// the same GPU instance buffer as the rest of the UI, so the canvas does not
 /// force a viewport/scissor switch, a buffer upload or a separate draw call per
-/// shape. The host runs the batched canvas pass before the frame flush and the
-/// raw <see cref="CanvasProps.OnContext"/> pass afterwards.
+/// shape. The host invokes the callback while it processes the canvas's
+/// <see cref="LayoutLab.InstructionOpCode.DrawCanvas"/> marker, so the content
+/// lands at the canvas's position in paint order. The raw
+/// <see cref="CanvasProps.OnContext"/> pass still runs after the frame flush.
 /// </para>
 /// <para>
 /// Coordinates are canvas-local CSS pixels with the origin at the top-left of
@@ -47,6 +49,9 @@ public sealed class CanvasContext
     /// <summary>Accumulated canvas-local transform.</summary>
     private Matrix3x2 _transform = Matrix3x2.Identity;
 
+    /// <summary>Display-list transform active when the canvas marker was reached.</summary>
+    private Matrix3x2 _parentTransform = Matrix3x2.Identity;
+
     /// <summary>The renderer transform to restore when recording ends.</summary>
     private Matrix3x2 _savedTransform = Matrix3x2.Identity;
 
@@ -68,13 +73,14 @@ public sealed class CanvasContext
         _bounds = bounds;
         _translation = Matrix3x2.CreateTranslation(bounds.X, bounds.Y);
         _transform = Matrix3x2.Identity;
+        _parentTransform = renderer.CanvasTransform;
         _transforms.Clear();
         _opacities.Clear();
         _clipDepth = 0;
         _transformDepth = 0;
         _opacityDepth = 0;
 
-        _savedTransform = renderer.SetCanvasTransform(_translation);
+        _savedTransform = renderer.SetCanvasTransform(CurrentTransform);
         renderer.PushCanvasClip(bounds);
     }
 
@@ -194,7 +200,7 @@ public sealed class CanvasContext
     public void PushClip(in Rect rect)
     {
         var renderer = Active;
-        var matrix = Matrix3x2.Multiply(_transform, _translation);
+        var matrix = CurrentTransform;
 
         var topLeft = Vector2.Transform(new Vector2(rect.X, rect.Y), matrix);
         var topRight = Vector2.Transform(new Vector2(rect.Right, rect.Y), matrix);
@@ -227,7 +233,7 @@ public sealed class CanvasContext
     {
         _transforms.Push(_transform);
         _transform = Matrix3x2.Multiply(_transform, transform);
-        Active.SetCanvasTransform(Matrix3x2.Multiply(_transform, _translation));
+        Active.SetCanvasTransform(CurrentTransform);
         _transformDepth++;
     }
 
@@ -240,9 +246,13 @@ public sealed class CanvasContext
         }
 
         _transform = _transforms.Count > 0 ? _transforms.Pop() : Matrix3x2.Identity;
-        Active.SetCanvasTransform(Matrix3x2.Multiply(_transform, _translation));
+        Active.SetCanvasTransform(CurrentTransform);
         _transformDepth--;
     }
+
+    /// <summary>Gets the canvas-local transform composed with the display-list transform.</summary>
+    private Matrix3x2 CurrentTransform =>
+        Matrix3x2.Multiply(Matrix3x2.Multiply(_transform, _translation), _parentTransform);
 
     /// <summary>Pushes an opacity multiplier for subsequent canvas primitives.</summary>
     /// <param name="opacity">Multiplier clamped to the 0..1 range.</param>

@@ -444,6 +444,11 @@ public sealed class LayoutResult
     /// <param name="hasAnimations">Whether any box had a running animation.</param>
     /// <param name="snapshot">Whether to copy the instruction stream and node map.</param>
     /// <param name="hasLayoutAnimations">Whether an active animation can change geometry.</param>
+    /// <param name="canvases">
+    /// Canvas boxes in tree order, indexed by a
+    /// <see cref="InstructionOpCode.DrawCanvas"/> marker; may be
+    /// <see langword="null"/> when the frame has none.
+    /// </param>
     /// <remarks>
     /// The instruction copy pre-sizes its buffer to the source count; the
     /// constant pool and node map are shallow copies. The box tree is always
@@ -457,7 +462,8 @@ public sealed class LayoutResult
         OptimisationStats stats,
         bool hasAnimations = false,
         bool snapshot = true,
-        bool hasLayoutAnimations = false)
+        bool hasLayoutAnimations = false,
+        IReadOnlyList<LayoutBox>? canvases = null)
     {
         Root = root;
         Instructions = snapshot ? Snapshot(instructions) : instructions;
@@ -468,6 +474,9 @@ public sealed class LayoutResult
         Stats = stats;
         HasAnimations = hasAnimations;
         HasLayoutAnimations = hasLayoutAnimations;
+        Canvases = snapshot && canvases is not null
+            ? new List<LayoutBox>(canvases)
+            : canvases ?? [];
     }
 
     /// <summary>Copies the visible instructions into a new buffer.</summary>
@@ -508,6 +517,17 @@ public sealed class LayoutResult
     /// can reuse the previous layout; when true the box tree must be rebuilt.
     /// </remarks>
     public bool HasLayoutAnimations { get; }
+
+    /// <summary>
+    /// Gets the canvas boxes referenced by <see cref="InstructionOpCode.DrawCanvas"/>
+    /// markers in this frame.
+    /// </summary>
+    /// <remarks>
+    /// Indexes in the display list address this list. It is copied when
+    /// <see cref="LayoutOptions.SnapshotResults"/> is enabled and otherwise
+    /// aliases engine storage that is replaced by the next layout.
+    /// </remarks>
+    public IReadOnlyList<LayoutBox> Canvases { get; }
 
     /// <summary>The node-to-box map, shared with the engine that built it.</summary>
     /// <remarks>Aliases the engine's dictionary when snapshotting is disabled; do not mutate.</remarks>

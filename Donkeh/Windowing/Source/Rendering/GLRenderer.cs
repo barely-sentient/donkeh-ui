@@ -498,13 +498,29 @@ public sealed unsafe class GLRenderer : IDisposable
     /// split lets host-owned overlays and canvas paint lists join the same
     /// indirect batch as the main display list.
     /// </remarks>
-    public void Submit(LayoutResult result) => Process(result.Opcodes, result.Constants);
+    public void Submit(LayoutResult result) => Process(result.Opcodes, result.Constants, null);
+
+    /// <summary>Appends one layout result and paints its canvases in place.</summary>
+    /// <param name="result">The layout output to append.</param>
+    /// <param name="drawCanvas">
+    /// Invoked for every <see cref="InstructionOpCode.DrawCanvas"/> marker with
+    /// the index into <see cref="LayoutResult.Canvases"/> and the canvas border
+    /// box in absolute CSS pixels.
+    /// </param>
+    /// <remarks>
+    /// The callback runs while the marker is processed, so the canvas joins the
+    /// surrounding clip, opacity and transform scopes. This is what lets a
+    /// canvas participate in stacking order (including <c>z-index</c>) instead
+    /// of being appended after the whole display list.
+    /// </remarks>
+    public void Submit(LayoutResult result, Action<int, Rect>? drawCanvas) =>
+        Process(result.Opcodes, result.Constants, drawCanvas);
 
     /// <summary>Appends an instruction stream to the current scene.</summary>
     /// <param name="opcodes">Instructions in paint order.</param>
     /// <param name="constants">Pool resolving the payload ids.</param>
     public void Submit(ReadOnlySpan<Instruction> opcodes, ConstantPool constants) =>
-        Process(opcodes, constants);
+        Process(opcodes, constants, null);
 
     /// <summary>
     /// Submits every recorded instance and resets the per-frame counters.
@@ -558,12 +574,21 @@ public sealed unsafe class GLRenderer : IDisposable
     /// <summary>Translates an instruction stream into GPU instance records.</summary>
     /// <param name="opcodes">The instructions to consume, in paint order.</param>
     /// <param name="constants">Pool used to resolve payload ids.</param>
+    /// <param name="drawCanvas">
+    /// Callback invoked for a <see cref="InstructionOpCode.DrawCanvas"/> marker,
+    /// or <see langword="null"/> to skip canvas content.
+    /// </param>
     /// <remarks>
     /// Clip, opacity, transform and blend opcodes update the paint state; every
     /// draw opcode appends one or more <see cref="GpuInstance"/> records that
-    /// snapshot the current state. Nothing is uploaded or drawn here.
+    /// snapshot the current state. Nothing is uploaded or drawn here. A canvas
+    /// marker calls back into the host so the element's draw handler appends its
+    /// primitives at this exact position in the stream.
     /// </remarks>
-    private void Process(ReadOnlySpan<Instruction> opcodes, ConstantPool constants)
+    private void Process(
+        ReadOnlySpan<Instruction> opcodes,
+        ConstantPool constants,
+        Action<int, Rect>? drawCanvas)
     {
         for (var i = 0; i < opcodes.Length; i++)
         {
@@ -617,6 +642,10 @@ public sealed unsafe class GLRenderer : IDisposable
 
                 case InstructionOpCode.DrawScrollbar:
                     AddScrollbar(instruction.Rect, constants.GetScrollbar(instruction.Payload));
+                    break;
+
+                case InstructionOpCode.DrawCanvas:
+                    drawCanvas?.Invoke(instruction.Payload, instruction.Rect);
                     break;
 
                 case InstructionOpCode.PushClipRect:
@@ -2009,6 +2038,14 @@ public sealed unsafe class GLRenderer : IDisposable
     // ---------------------------------------------------------------------
     // Canvas integration
     // ---------------------------------------------------------------------
+
+    /// <summary>Gets the transform currently applied to display-list geometry.</summary>
+    /// <remarks>
+    /// A canvas records its own primitives while the display list is being
+    /// processed, so its local transform is composed with this value to keep
+    /// ancestor transforms intact.
+    /// </remarks>
+    internal Matrix3x2 CanvasTransform => _transform;
 
     /// <summary>Pushes a rectangular clip for a batched canvas pass.</summary>
     /// <param name="rect">Clip rectangle in absolute CSS pixels.</param>

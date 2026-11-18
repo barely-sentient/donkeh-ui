@@ -196,7 +196,7 @@ public readonly struct Instruction
     /// their conservative paint bounds in <see cref="Rect"/> and may be culled
     /// by the optimiser.
     /// </remarks>
-    public bool IsDraw => OpCode is >= InstructionOpCode.DrawRect and <= InstructionOpCode.DrawScrollbar;
+    public bool IsDraw => OpCode is >= InstructionOpCode.DrawRect and <= InstructionOpCode.DrawCanvas;
 
     /// <summary>Gets a value indicating whether the opcode opens a scoped effect.</summary>
     /// <remarks>
@@ -362,6 +362,27 @@ public readonly struct Instruction
             rect.Width,
             rect.Height,
             borderConstant);
+    }
+
+    /// <summary>Emits a canvas element's content at its paint position.</summary>
+    /// <param name="rect">The canvas border box in absolute CSS pixels.</param>
+    /// <param name="canvasIndex">Index into <see cref="LayoutResult.Canvases"/>.</param>
+    /// <returns>A <see cref="InstructionOpCode.DrawCanvas"/> instruction.</returns>
+    /// <remarks>
+    /// The marker is a draw so the optimiser can cull it with the rest of the
+    /// content when the canvas is off-screen. It carries no constant-pool
+    /// payload, which keeps the canvas list independent of constant compaction.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Instruction DrawCanvas(in Rect rect, int canvasIndex)
+    {
+        return new Instruction(
+            InstructionOpCode.DrawCanvas,
+            rect.X,
+            rect.Y,
+            rect.Width,
+            rect.Height,
+            canvasIndex);
     }
 
     /// <summary>Emits one laid-out text line.</summary>

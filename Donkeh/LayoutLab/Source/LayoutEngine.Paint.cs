@@ -96,6 +96,41 @@ public sealed partial class LayoutEngine
     }
 
     /// <summary>
+    /// Collects every canvas box in tree order so a
+    /// <see cref="InstructionOpCode.DrawCanvas"/> marker can name one by index.
+    /// </summary>
+    /// <param name="root">Root of the laid-out box tree.</param>
+    /// <remarks>
+    /// Tree order, not paint order: the marker itself is emitted where the canvas
+    /// is painted, which is what makes stacking contexts and z-index apply. The
+    /// list is rebuilt for every layout and repaint because boxes are reused.
+    /// </remarks>
+    private void CollectCanvases(LayoutBox root)
+    {
+        _canvases.Clear();
+        _canvasIndices.Clear();
+
+        var stack = new Stack<LayoutBox>();
+        stack.Push(root);
+
+        while (stack.Count > 0)
+        {
+            var box = stack.Pop();
+
+            if (string.Equals(box.Node.TagName, "canvas", StringComparison.OrdinalIgnoreCase))
+            {
+                _canvasIndices[box] = _canvases.Count;
+                _canvases.Add(box);
+            }
+
+            for (var i = box.Children.Count - 1; i >= 0; i--)
+            {
+                stack.Push(box.Children[i]);
+            }
+        }
+    }
+
+    /// <summary>
     /// Paints one box and recursively its descendants into the instruction
     /// stream.
     /// </summary>
@@ -310,6 +345,15 @@ public sealed partial class LayoutEngine
             PaintInsetShadows(box, rect);
             PaintOutline(box, rect);
             PaintReplacedContent(box, rect);
+
+            // A canvas is replaced content too, but its pixels come from the
+            // host. The marker keeps it in the same paint order as its siblings
+            // so z-index and stacking contexts apply to canvas overlays.
+            if (_canvasIndices.TryGetValue(box, out var canvasIndex))
+            {
+                _instructions.Add(Instruction.DrawCanvas(rect, canvasIndex));
+            }
+
             _options.CustomPainter?.Invoke(box, _instructions, _constants);
         }
 

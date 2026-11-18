@@ -16,7 +16,7 @@ namespace Donkeh.LayoutLab;
 /// </para>
 /// <para>
 /// Numeric values are grouped by role so classification is cheap: draws occupy
-/// 1-12, scoped pushes 32-41, scoped pops 48-56, and frame/scroll hint opcodes
+/// 1-13, scoped pushes 32-41, scoped pops 48-56, and frame/scroll hint opcodes
 /// 64-81. <see cref="Nop"/> is zero. The optimiser relies on these contiguous
 /// ranges (see <see cref="Instruction.IsDraw"/>), so values must not be
 /// renumbered without updating both the optimiser and every renderer that
@@ -154,6 +154,18 @@ public enum InstructionOpCode : byte
     /// X/Y/W/H is the track rectangle.
     /// </summary>
     DrawScrollbar = 12,
+
+    /// <summary>
+    /// Draw a canvas element's batched content. Payload indexes
+    /// <see cref="LayoutResult.Canvases"/>; X/Y/W/H is the translated border box.
+    /// </summary>
+    /// <remarks>
+    /// The marker occupies the canvas's position in paint order, so a canvas is
+    /// composited with its siblings instead of being appended after the frame.
+    /// The renderer invokes the element's <c>OnDraw</c> callback at this point,
+    /// with the clip, opacity and transform state accumulated by the ancestors.
+    /// </remarks>
+    DrawCanvas = 13,
 
     /// <summary>
     /// Begin a rectangular clip. X/Y/W/H is the clip rect. Nested clips always
