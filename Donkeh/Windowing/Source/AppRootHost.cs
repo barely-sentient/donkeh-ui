@@ -13,6 +13,9 @@ namespace Donkeh.Windowing;
 /// </remarks>
 public static class AppRootHost
 {
+    /// <summary>Gets the desktop window currently running the application.</summary>
+    public static DonkehWindow? Current { get; private set; }
+
     /// <summary>Runs the discovered desktop application.</summary>
     /// <param name="args">Command-line arguments.</param>
     /// <remarks>
@@ -23,6 +26,7 @@ public static class AppRootHost
     {
         var app = AppRootLocator.Find();
         var window = new DonkehWindow(app.Settings);
+        Current = window;
         DevelopmentFeatures.Attach(window);
 
         var screenshotIndex = Array.IndexOf(args, "--screenshot");

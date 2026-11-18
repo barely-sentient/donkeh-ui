@@ -1084,6 +1084,18 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     public void Invalidate() => _needsLayout = true;
 
     /// <summary>
+    /// Requests a repaint without re-running layout. Use this after changing a
+    /// node's scroll offsets: geometry is unchanged and the painter already
+    /// applies the new offsets.
+    /// </summary>
+    /// <remarks>
+    /// Prefer this over <see cref="Invalidate"/> for scrolling and other
+    /// paint-only changes. A full layout rebuild on every pointer move makes a
+    /// drag stutter.
+    /// </remarks>
+    public void RequestRepaint() => _needsPaint = true;
+
+    /// <summary>
     /// Saves the next finished frame to a 24-bit BMP and closes the window. This
     /// is useful for headless smoke tests and visual regression fixtures.
     /// </summary>
@@ -5283,6 +5295,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         _mouseY = y;
         _devTools.PointerX = x;
         _devTools.PointerY = y;
+        InputState.SetPointer(x, y);
         _pendingMouseX = x;
         _pendingMouseY = y;
         _mouseMovePending = true;
@@ -5407,6 +5420,10 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         {
             UpdateCursor(_pointerTarget);
             InvokePointer(_pointerTarget, "pointermove", x, y);
+
+            // The handler may have changed the cursor for the gesture (for
+            // example to a grabbing hand); apply it in the same frame.
+            UpdateCursor(_pointerTarget);
             return;
         }
 
@@ -5432,6 +5449,15 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         }
 
         SetHovered(element);
+
+        // Hover does not capture the pointer, so no pointermove is dispatched.
+        // A component that draws a pointer preview (a brush ring, a ruler
+        // marker) still needs the display list refreshed while the pointer
+        // moves over it.
+        if (FindPointerTarget(element, "pointermove") is not null)
+        {
+            _needsPaint = true;
+        }
     }
 
     /// <summary>
@@ -5859,6 +5885,18 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
 
         _devTools.PointerX = _mouseX;
         _devTools.PointerY = _mouseY;
+        InputState.SetPointer(_mouseX, _mouseY);
+
+        // The middle button is an application gesture (typically panning), not a
+        // press. Capture the pointer so moves keep arriving, but do not dispatch
+        // pointerdown: that would start painting, a text selection or a drag
+        // under the pointer.
+        if (button == MouseButton.Middle)
+        {
+            _pointerTarget = FindPointerTarget(HitTest(_mouseX, _mouseY), "pointermove");
+            _pressed = null;
+            return;
+        }
 
         // Resize handles sit above the page, so the outer few pixels remain
         // reachable even when a drag region or an inspector pick target covers
@@ -6117,9 +6155,18 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         InputState.SetButton(button, false);
         _devTools.PointerX = _mouseX;
         _devTools.PointerY = _mouseY;
+        InputState.SetPointer(_mouseX, _mouseY);
 
-        if (button == MouseButton.Right)
+        if (button is MouseButton.Right or MouseButton.Middle)
         {
+            if (button == MouseButton.Middle)
+            {
+                _pointerTarget = null;
+                SetActive(null);
+                InputState.CursorOverride = null;
+                UpdateCursor(HitTest(_mouseX, _mouseY));
+            }
+
             return;
         }
 
@@ -6389,10 +6436,10 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         InputState.Update(_input);
         CloseSelectMenu();
 
-        // Ctrl+wheel is reserved for the application (brush size, zoom and
+        // Ctrl/Alt+wheel is reserved for the application (zoom, brush size and
         // similar gestures). Skip the native scroll step and forward the raw
         // wheel direction so a component handler can act on it.
-        if (InputState.Control)
+        if (InputState.Control || InputState.Alt)
         {
             Invoke(HitTest(_mouseX, _mouseY), "scroll", horizontal, vertical);
             return;
@@ -7862,6 +7909,15 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// </remarks>
     private void UpdateCursor(ElementNode? element)
     {
+        // A component that owns a drag may pin the cursor for the gesture, such
+        // as a grabbing hand while panning. It wins over element cursors until
+        // the gesture ends.
+        if (InputState.CursorOverride is { } overrideCursor)
+        {
+            SetCursor(ToStandardCursor(overrideCursor));
+            return;
+        }
+
         // A captured pointer keeps the target's cursor; otherwise the frameless
         // resize border wins over element cursors so the edge is discoverable.
         if (_pointerTarget is null && !_windowResizing)

@@ -237,7 +237,9 @@ namespace Donkeh.Data.Dom
         /// <remarks>
         /// Written by the layout engine after each layout pass. It is a snapshot of
         /// the last frame, so read it from event handlers or effects rather than
-        /// while building the virtual tree.
+        /// while building the virtual tree. These are painted coordinates: every
+        /// scrolling ancestor's offset is already subtracted, so the value matches
+        /// what is on screen.
         /// </remarks>
         public float PositionX { get; internal set; }
 
@@ -245,6 +247,7 @@ namespace Donkeh.Data.Dom
         /// Offset of this element's border box from the top of the viewport, in CSS
         /// pixels. Written by the layout engine after each layout pass.
         /// </summary>
+        /// <remarks>Painted coordinates; scrolling ancestors are already applied.</remarks>
         public float PositionY { get; internal set; }
 
         /// <summary>

@@ -2894,10 +2894,28 @@ public sealed partial class LayoutEngine
     {
         foreach (var pair in _byNode)
         {
-            var rect = pair.Value.BorderBox;
+            var box = pair.Value;
+            var rect = box.BorderBox;
             var node = pair.Key;
-            node.PositionX = rect.X;
-            node.PositionY = rect.Y;
+
+            // Published bounds are painted (viewport) coordinates, matching what
+            // hit testing and the display list use. Subtracting every scrolling
+            // ancestor keeps screen-space consumers such as tooltips and canvas
+            // overlays aligned with the element the user can see.
+            var scrollX = 0f;
+            var scrollY = 0f;
+
+            for (var parent = box.Parent; parent is not null; parent = parent.Parent)
+            {
+                if (parent.IsScrollContainer)
+                {
+                    scrollX += parent.ScrollOffsetX;
+                    scrollY += parent.ScrollOffsetY;
+                }
+            }
+
+            node.PositionX = rect.X - scrollX;
+            node.PositionY = rect.Y - scrollY;
             node.Width = rect.Width;
             node.Height = rect.Height;
             node.ScrollWidth = pair.Value.ScrollWidth;
