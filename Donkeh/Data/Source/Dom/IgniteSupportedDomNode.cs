@@ -259,6 +259,18 @@ namespace Donkeh.Data.Dom
         /// </summary>
         public float Height { get; internal set; }
 
+        /// <summary>Gets the scrollable content width of this container in CSS pixels.</summary>
+        public float ScrollWidth { get; internal set; }
+
+        /// <summary>Gets the scrollable content height of this container in CSS pixels.</summary>
+        public float ScrollHeight { get; internal set; }
+
+        /// <summary>Gets the client width of this container in CSS pixels.</summary>
+        public float ClientWidth { get; internal set; }
+
+        /// <summary>Gets the client height of this container in CSS pixels.</summary>
+        public float ClientHeight { get; internal set; }
+
         /// <summary>
         /// Horizontal scroll position in CSS pixels for this element when it is
         /// a scroll container. LayoutLab clamps it to the scrollable range.

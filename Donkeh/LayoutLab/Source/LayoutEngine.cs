@@ -2900,6 +2900,10 @@ public sealed partial class LayoutEngine
             node.PositionY = rect.Y;
             node.Width = rect.Width;
             node.Height = rect.Height;
+            node.ScrollWidth = pair.Value.ScrollWidth;
+            node.ScrollHeight = pair.Value.ScrollHeight;
+            node.ClientWidth = pair.Value.ClientWidth;
+            node.ClientHeight = pair.Value.ClientHeight;
         }
     }
 

@@ -5834,6 +5834,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     private void OnMouseDown(MouseButton button)
     {
         InputState.Update(_input);
+        InputState.SetButton(button, true);
         PressPointer(button, allowTouchPan: true);
     }
 
@@ -6113,6 +6114,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// </remarks>
     private void OnMouseUp(MouseButton button)
     {
+        InputState.SetButton(button, false);
         _devTools.PointerX = _mouseX;
         _devTools.PointerY = _mouseY;
 
