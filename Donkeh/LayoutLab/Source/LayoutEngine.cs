@@ -375,6 +375,7 @@ public sealed partial class LayoutEngine
             ProcessAbsoluteBoxes(viewport);
             CollectCanvases(_root);
             BuildDisplayList(_root);
+            WriteNodeBounds();
         }
 
         var frame = _options.Optimise
@@ -465,6 +466,7 @@ public sealed partial class LayoutEngine
             RefreshScrollMetrics(_root);
             CollectCanvases(_root);
             BuildDisplayList(_root);
+            WriteNodeBounds();
         }
 
         var frame = _options.Optimise
@@ -556,6 +558,7 @@ public sealed partial class LayoutEngine
         {
             CollectCanvases(_root);
             BuildDisplayList(_root);
+            WriteNodeBounds();
         }
 
         var frame = _options.Optimise
@@ -2870,6 +2873,23 @@ public sealed partial class LayoutEngine
             }
 
             items[j + 1] = item;
+        }
+    }
+
+    /// <summary>
+    /// Copies each node's border box into the DOM node, so event handlers and
+    /// components can position floating UI without reaching into the layout tree.
+    /// </summary>
+    private void WriteNodeBounds()
+    {
+        foreach (var pair in _byNode)
+        {
+            var rect = pair.Value.BorderBox;
+            var node = pair.Key;
+            node.PositionX = rect.X;
+            node.PositionY = rect.Y;
+            node.Width = rect.Width;
+            node.Height = rect.Height;
         }
     }
 

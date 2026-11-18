@@ -232,6 +232,34 @@ namespace Donkeh.Data.Dom
         }
 
         /// <summary>
+        /// Offset of this element's border box from the viewport, in CSS pixels.
+        /// </summary>
+        /// <remarks>
+        /// Written by the layout engine after each layout pass. It is a snapshot of
+        /// the last frame, so read it from event handlers or effects rather than
+        /// while building the virtual tree.
+        /// </remarks>
+        public float PositionX { get; internal set; }
+
+        /// <summary>
+        /// Offset of this element's border box from the top of the viewport, in CSS
+        /// pixels. Written by the layout engine after each layout pass.
+        /// </summary>
+        public float PositionY { get; internal set; }
+
+        /// <summary>
+        /// Border-box width in CSS pixels. Written by the layout engine after each
+        /// layout pass.
+        /// </summary>
+        public float Width { get; internal set; }
+
+        /// <summary>
+        /// Border-box height in CSS pixels. Written by the layout engine after each
+        /// layout pass.
+        /// </summary>
+        public float Height { get; internal set; }
+
+        /// <summary>
         /// Horizontal scroll position in CSS pixels for this element when it is
         /// a scroll container. LayoutLab clamps it to the scrollable range.
         /// </summary>
