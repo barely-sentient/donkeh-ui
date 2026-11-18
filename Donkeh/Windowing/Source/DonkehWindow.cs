@@ -5831,7 +5831,11 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// selection instead of replacing it.
     /// </para>
     /// </remarks>
-    private void OnMouseDown(MouseButton button) => PressPointer(button, allowTouchPan: true);
+    private void OnMouseDown(MouseButton button)
+    {
+        InputState.Update(_input);
+        PressPointer(button, allowTouchPan: true);
+    }
 
     /// <summary>
     /// Implements a pointer press, optionally taking ownership of a drag as a
@@ -6380,7 +6384,17 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// </remarks>
     private void OnScroll(float vertical, float horizontal)
     {
+        InputState.Update(_input);
         CloseSelectMenu();
+
+        // Ctrl+wheel is reserved for the application (brush size, zoom and
+        // similar gestures). Skip the native scroll step and forward the raw
+        // wheel direction so a component handler can act on it.
+        if (InputState.Control)
+        {
+            Invoke(HitTest(_mouseX, _mouseY), "scroll", horizontal, vertical);
+            return;
+        }
 
         var box = HitTestBox(_mouseX, _mouseY);
         var scroll = FindScrollContainer(box, vertical, horizontal);
