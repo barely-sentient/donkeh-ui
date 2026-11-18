@@ -45,6 +45,18 @@ public sealed class DomHost
     private bool _syncQueued;
     private bool _syncing;
 
+    // Scratch reused by every sync. Only one sync runs at a time (guarded by
+    // _syncing), so a single set of buffers is enough and a steady-state sync
+    // allocates nothing beyond the patches that actually changed.
+    private readonly DomPatchBatch _batch = new();
+    private readonly HashSet<Node> _seen = [];
+    private readonly List<int> _rootChildIds = [];
+    private readonly List<Node> _removed = [];
+    private readonly List<List<int>> _childIdLists = [];
+    private readonly List<string> _eventNames = [];
+    private readonly Dictionary<string, string> _scratchAttributes = new(StringComparer.Ordinal);
+    private int _childListDepth;
+
     /// <summary>Creates a host bound to the browser JavaScript runtime.</summary>
     /// <param name="js">The Blazor JavaScript runtime.</param>
     public DomHost(IJSRuntime js)
@@ -304,34 +316,42 @@ public sealed class DomHost
             return;
         }
 
-        var batch = new DomPatchBatch();
-        var seen = new HashSet<Node>();
-        var rootChildren = new List<int>();
+        var batch = _batch;
+        batch.Patches.Clear();
 
+        var seen = _seen;
+        seen.Clear();
+
+        var rootChildren = _rootChildIds;
+        rootChildren.Clear();
+
+        _childListDepth = 0;
         Collect(_renderer.Root, rootChildren, seen, batch);
 
         if (!SequenceEqual(_rootChildren, rootChildren))
         {
-            _rootChildren = [.. rootChildren];
+            var children = rootChildren.ToArray();
+            _rootChildren = children;
             batch.Patches.Add(new DomPatch
             {
                 Op = "children",
                 Parent = 0,
-                Children = [.. rootChildren]
+                Children = [.. children]
             });
         }
 
-        List<Node>? removed = null;
+        var removed = _removed;
+        removed.Clear();
 
         foreach (var pair in _snapshots)
         {
             if (!seen.Contains(pair.Key))
             {
-                (removed ??= []).Add(pair.Key);
+                removed.Add(pair.Key);
             }
         }
 
-        if (removed is not null)
+        if (removed.Count > 0)
         {
             foreach (var node in removed)
             {
@@ -432,29 +452,29 @@ public sealed class DomHost
 
             if (!AttributesEqual(snapshot.Attrs, attributes))
             {
-                snapshot.Attrs = attributes;
+                // The scratch map is reused by the next element, so the patch and
+                // the snapshot need their own copy of the changed values.
+                var changed = new Dictionary<string, string>(attributes, StringComparer.Ordinal);
+                snapshot.Attrs = changed;
                 batch.Patches.Add(new DomPatch
                 {
                     Op = "attrs",
                     Id = id,
-                    Attrs = attributes
+                    Attrs = changed
                 });
             }
 
-            var events = elementNode
-                .EnumerateEventNames()
-                .Distinct(StringComparer.Ordinal)
-                .OrderBy(static name => name, StringComparer.Ordinal)
-                .ToList();
+            var events = CollectEventNames(elementNode);
 
             if (!EventsEqual(snapshot.Events, events))
             {
-                snapshot.Events = events;
+                var changed = new List<string>(events);
+                snapshot.Events = changed;
                 batch.Patches.Add(new DomPatch
                 {
                     Op = "events",
                     Id = id,
-                    Events = events
+                    Events = changed
                 });
             }
 
@@ -487,35 +507,53 @@ public sealed class DomHost
                 });
             }
 
-            var elementChildren = new List<int>();
+            var elementChildren = RentChildIds();
 
-            foreach (var child in elementNode.Children)
+            try
             {
-                if (child is Node childNode)
+                foreach (var child in elementNode.Children)
                 {
-                    Collect(childNode, elementChildren, seen, batch);
+                    if (child is Node childNode)
+                    {
+                        Collect(childNode, elementChildren, seen, batch);
+                    }
+                }
+
+                if (!SequenceEqual(snapshot.Children, elementChildren))
+                {
+                    var changed = elementChildren.ToArray();
+                    snapshot.Children = changed;
+                    batch.Patches.Add(new DomPatch
+                    {
+                        Op = "children",
+                        Id = id,
+                        Children = [.. changed]
+                    });
                 }
             }
-
-            if (!SequenceEqual(snapshot.Children, elementChildren))
+            finally
             {
-                snapshot.Children = [.. elementChildren];
-                batch.Patches.Add(new DomPatch
-                {
-                    Op = "children",
-                    Id = id,
-                    Children = [.. elementChildren]
-                });
+                ReturnChildIds();
             }
         }
 
         childIds.Add(id);
     }
 
-    /// <summary>Builds a full attribute map for an element.</summary>
-    private static Dictionary<string, string> BuildAttributes(ElementNode element)
+    /// <summary>
+    /// Fills the reusable scratch map with an element's current attributes.
+    /// </summary>
+    /// <param name="element">The element to read.</param>
+    /// <returns>The scratch map, valid until the next element is visited.</returns>
+    /// <remarks>
+    /// The map is only used for the comparison and is copied when a patch is
+    /// emitted, which keeps an unchanged element from allocating a dictionary on
+    /// every sync.
+    /// </remarks>
+    private Dictionary<string, string> BuildAttributes(ElementNode element)
     {
-        var attributes = new Dictionary<string, string>(StringComparer.Ordinal);
+        var attributes = _scratchAttributes;
+        attributes.Clear();
 
         foreach (var pair in element.EnumerateAttributes())
         {
@@ -524,6 +562,61 @@ public sealed class DomHost
 
         return attributes;
     }
+
+    /// <summary>
+    /// Collects an element's event names into the reusable scratch list, in
+    /// ordinal order.
+    /// </summary>
+    /// <param name="element">The element whose event names are wanted.</param>
+    /// <returns>The scratch list, valid until the next element is visited.</returns>
+    /// <remarks>
+    /// The event map is keyed by interned name id, so its names are already
+    /// distinct; only the ordering that the bridge relies on has to be applied.
+    /// The old LINQ pipeline allocated an iterator, a set, a buffer and the final
+    /// list for every element on every sync.
+    /// </remarks>
+    private List<string> CollectEventNames(ElementNode element)
+    {
+        var names = _eventNames;
+        names.Clear();
+
+        foreach (var name in element.EnumerateEventNames())
+        {
+            names.Add(name);
+        }
+
+        if (names.Count > 1)
+        {
+            names.Sort(StringComparer.Ordinal);
+        }
+
+        return names;
+    }
+
+    /// <summary>
+    /// Borrows a child-id list for one element, reusing the buffer assigned to the
+    /// current nesting depth.
+    /// </summary>
+    /// <returns>An empty list owned by the caller until <see cref="ReturnChildIds"/>.</returns>
+    /// <remarks>
+    /// A parent keeps filling its own list while its children recurse, so each
+    /// nesting depth needs a distinct buffer. The depth always returns to zero
+    /// when a sync finishes, which keeps the pool bounded by tree depth.
+    /// </remarks>
+    private List<int> RentChildIds()
+    {
+        if (_childListDepth == _childIdLists.Count)
+        {
+            _childIdLists.Add([]);
+        }
+
+        var ids = _childIdLists[_childListDepth++];
+        ids.Clear();
+        return ids;
+    }
+
+    /// <summary>Returns the buffer borrowed by <see cref="RentChildIds"/>.</summary>
+    private void ReturnChildIds() => _childListDepth--;
 
     /// <summary>Compares two attribute maps from the previous and current tree.</summary>
     private static bool AttributesEqual(

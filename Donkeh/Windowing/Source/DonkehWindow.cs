@@ -183,6 +183,16 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// <summary>The layout result the media box lists were built from.</summary>
     private LayoutResult? _mediaBoxesResult;
 
+    /// <summary>
+    /// The layout result currently being submitted, used by
+    /// <see cref="DrawCanvasAt"/> so the canvas callback can be a cached delegate
+    /// instead of a closure allocated on every frame.
+    /// </summary>
+    private LayoutResult? _submittingLayout;
+
+    /// <summary>Cached canvas callback passed to <see cref="GLRenderer.Submit(LayoutResult, Action{int, Rect})"/>.</summary>
+    private Action<int, Rect>? _drawCanvasCallback;
+
     /// <summary>The live app root as returned by <see cref="Renderer.Mount"/>.</summary>
     private Node? _root;
 
@@ -1751,37 +1761,64 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             return;
         }
 
-        _renderer.Submit(result, (index, rect) =>
+        // The callback reads the result being submitted from a field, so the
+        // delegate is allocated once instead of capturing a closure per frame.
+        var previous = _submittingLayout;
+        _submittingLayout = result;
+
+        try
         {
-            if ((uint)index >= (uint)result.Canvases.Count)
-            {
-                return;
-            }
+            _renderer.Submit(result, _drawCanvasCallback ??= DrawCanvasAt);
+        }
+        finally
+        {
+            _submittingLayout = previous;
+        }
+    }
 
-            var box = result.Canvases[index];
+    /// <summary>
+    /// Paints one canvas while the display list is being processed.
+    /// </summary>
+    /// <param name="index">Index into the submitted frame's canvas list.</param>
+    /// <param name="rect">The canvas border box in absolute CSS pixels.</param>
+    /// <remarks>
+    /// The renderer invokes this at the <see cref="InstructionOpCode.DrawCanvas"/>
+    /// marker, so the canvas joins the clip, opacity and transform scopes of its
+    /// ancestors. Faulty handlers are swallowed so one canvas cannot tear down
+    /// the frame; <see cref="CanvasContext.End"/> still balances any open scopes.
+    /// </remarks>
+    private void DrawCanvasAt(int index, Rect rect)
+    {
+        var result = _submittingLayout;
 
-            if (box.Node is not ElementNode element
-                || element.CanvasDrawHandler is not Action<CanvasContext> handler
-                || rect.IsEmpty)
-            {
-                return;
-            }
+        if (result is null || _renderer is null || (uint)index >= (uint)result.Canvases.Count)
+        {
+            return;
+        }
 
-            _canvasContext.Begin(_renderer, rect);
+        var box = result.Canvases[index];
 
-            try
-            {
-                handler(_canvasContext);
-            }
-            catch
-            {
-                // A faulty canvas must not tear down the frame.
-            }
-            finally
-            {
-                _canvasContext.End();
-            }
-        });
+        if (box.Node is not ElementNode element
+            || element.CanvasDrawHandler is not Action<CanvasContext> handler
+            || rect.IsEmpty)
+        {
+            return;
+        }
+
+        _canvasContext.Begin(_renderer, rect);
+
+        try
+        {
+            handler(_canvasContext);
+        }
+        catch
+        {
+            // A faulty canvas must not tear down the frame.
+        }
+        finally
+        {
+            _canvasContext.End();
+        }
     }
 
     /// <summary>

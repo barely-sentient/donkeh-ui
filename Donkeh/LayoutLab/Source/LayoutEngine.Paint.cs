@@ -101,16 +101,23 @@ public sealed partial class LayoutEngine
     /// </summary>
     /// <param name="root">Root of the laid-out box tree.</param>
     /// <remarks>
+    /// <para>
     /// Tree order, not paint order: the marker itself is emitted where the canvas
     /// is painted, which is what makes stacking contexts and z-index apply. The
     /// list is rebuilt for every layout and repaint because boxes are reused.
+    /// </para>
+    /// <para>
+    /// The depth-first stack is the engine's reusable <see cref="_canvasWalk"/>
+    /// scratch, so a repaint allocates nothing for the walk itself.
+    /// </para>
     /// </remarks>
     private void CollectCanvases(LayoutBox root)
     {
         _canvases.Clear();
         _canvasIndices.Clear();
 
-        var stack = new Stack<LayoutBox>();
+        var stack = _canvasWalk;
+        stack.Clear();
         stack.Push(root);
 
         while (stack.Count > 0)

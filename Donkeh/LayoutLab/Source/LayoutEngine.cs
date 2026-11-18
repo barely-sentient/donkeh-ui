@@ -102,6 +102,16 @@ public sealed partial class LayoutEngine
     private readonly Dictionary<LayoutBox, int> _canvasIndices = [];
 
     /// <summary>
+    /// Scratch depth-first stack for <see cref="CollectCanvases"/>. It is a field
+    /// rather than a local so the tree walk allocates nothing on the frame path.
+    /// </summary>
+    /// <remarks>
+    /// The walk is not re-entrant and always drains the stack before returning, so
+    /// the same instance can be reused by every layout and repaint.
+    /// </remarks>
+    private readonly Stack<LayoutBox> _canvasWalk = new();
+
+    /// <summary>
     /// Absolutely and fixed positioned boxes discovered while building the tree,
     /// in discovery order. They are laid out after normal flow by
     /// <see cref="ProcessAbsoluteBoxes"/>.

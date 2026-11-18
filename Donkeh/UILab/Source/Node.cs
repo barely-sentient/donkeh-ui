@@ -266,16 +266,9 @@ namespace Donkeh.UILab
 
             if (ClassIds.Length > 0)
             {
-                var names = new string[ClassIds.Length];
-
-                for (var i = 0; i < names.Length; i++)
-                {
-                    names[i] = InternTable.GetString(ClassIds[i]) ?? string.Empty;
-                }
-
                 yield return new KeyValuePair<string, string>(
                     "class",
-                    string.Join(' ', names));
+                    JoinClassNames(ClassIds));
             }
 
             for (var i = 0; i < Attributes.Length; i++)
@@ -285,6 +278,49 @@ namespace Donkeh.UILab
                     InternTable.GetString(attribute.NameId) ?? string.Empty,
                     InternTable.GetString(attribute.ValueId) ?? string.Empty);
             }
+        }
+
+        /// <summary>
+        /// Joins interned class ids into the whitespace-separated value a host
+        /// would otherwise have to assemble from a temporary string array.
+        /// </summary>
+        /// <param name="classIds">Interned class-name ids, in storage order.</param>
+        /// <returns>The names separated by single spaces.</returns>
+        /// <remarks>
+        /// The final length is computed first so the value is written once into a
+        /// single string, which avoids the intermediate <c>string[]</c> and the
+        /// enumerator <see cref="string.Join(char, string[])"/> would allocate.
+        /// Missing ids contribute an empty name, exactly as a <c>null</c> entry
+        /// would in a join.
+        /// </remarks>
+        private static string JoinClassNames(int[] classIds)
+        {
+            var length = classIds.Length - 1;
+
+            for (var i = 0; i < classIds.Length; i++)
+            {
+                length += (InternTable.GetString(classIds[i]) ?? string.Empty).Length;
+            }
+
+            return string.Create(
+                length,
+                classIds,
+                static (span, ids) =>
+                {
+                    var position = 0;
+
+                    for (var i = 0; i < ids.Length; i++)
+                    {
+                        if (i > 0)
+                        {
+                            span[position++] = ' ';
+                        }
+
+                        var name = InternTable.GetString(ids[i]) ?? string.Empty;
+                        name.AsSpan().CopyTo(span[position..]);
+                        position += name.Length;
+                    }
+                });
         }
 
         /// <summary>

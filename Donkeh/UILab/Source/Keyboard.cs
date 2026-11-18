@@ -108,17 +108,39 @@ namespace Donkeh.UILab
                 return key;
             }
 
-            var text = string.Empty;
+            // The length is known up front, so the chord is written once into a
+            // single string instead of building intermediate "Ctrl+" fragments.
+            var length = key.Length;
 
             foreach (var (modifier, name) in Order)
             {
                 if ((modifiers & modifier) != 0)
                 {
-                    text += name + "+";
+                    length += name.Length + 1;
                 }
             }
 
-            return text + key;
+            return string.Create(
+                length,
+                (Key: key, Modifiers: modifiers),
+                static (span, state) =>
+                {
+                    var position = 0;
+
+                    foreach (var (modifier, name) in Order)
+                    {
+                        if ((state.Modifiers & modifier) == 0)
+                        {
+                            continue;
+                        }
+
+                        name.AsSpan().CopyTo(span[position..]);
+                        position += name.Length;
+                        span[position++] = '+';
+                    }
+
+                    state.Key.AsSpan().CopyTo(span[position..]);
+                });
         }
     }
 }

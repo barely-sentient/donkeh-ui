@@ -95,9 +95,21 @@ namespace Donkeh.UILab
         /// </remarks>
         public static string Load(params Assembly[] assemblies)
         {
-            return string.Join(
-                "\n",
-                Sources(assemblies).Select(source => source.Css));
+            var sources = Sources(assemblies);
+
+            if (sources.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            var parts = new string[sources.Count];
+
+            for (var i = 0; i < parts.Length; i++)
+            {
+                parts[i] = sources[i].Css;
+            }
+
+            return string.Join("\n", parts);
         }
 
         /// <summary>

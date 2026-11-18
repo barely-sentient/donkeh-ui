@@ -474,10 +474,21 @@ public sealed class LayoutResult
         Stats = stats;
         HasAnimations = hasAnimations;
         HasLayoutAnimations = hasLayoutAnimations;
-        Canvases = snapshot && canvases is not null
-            ? new List<LayoutBox>(canvases)
-            : canvases ?? [];
+
+        // Most documents have no canvases, and a frame is built on every layout
+        // and repaint. Returning the shared empty array keeps those frames free
+        // of a per-frame copy; only a frame that actually has canvases pays for
+        // the snapshot.
+        Canvases = canvases is null || canvases.Count == 0
+            ? EmptyCanvases
+            : snapshot
+                ? new List<LayoutBox>(canvases)
+                : canvases;
     }
+
+    /// <summary>Shared empty canvas list for frames that contain no canvas elements.</summary>
+    /// <remarks>An array is used so the shared instance cannot be mutated by a cast.</remarks>
+    private static readonly LayoutBox[] EmptyCanvases = [];
 
     /// <summary>Copies the visible instructions into a new buffer.</summary>
     /// <param name="source">The buffer to copy; only the first <see cref="InstructionBuffer.Count"/> entries are read.</param>
@@ -525,7 +536,9 @@ public sealed class LayoutResult
     /// <remarks>
     /// Indexes in the display list address this list. It is copied when
     /// <see cref="LayoutOptions.SnapshotResults"/> is enabled and otherwise
-    /// aliases engine storage that is replaced by the next layout.
+    /// aliases engine storage that is replaced by the next layout. A frame with
+    /// no canvas elements exposes a shared empty list, so treat every instance
+    /// as read-only.
     /// </remarks>
     public IReadOnlyList<LayoutBox> Canvases { get; }
 
