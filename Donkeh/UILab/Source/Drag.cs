@@ -88,13 +88,13 @@ namespace Donkeh.UILab
     /// source when the interaction finishes.
     /// </para>
     /// <para>
-    /// <see cref="ClientX"/> and <see cref="ClientY"/> are window CSS pixels.
-    /// <see cref="LocalX"/> and <see cref="LocalY"/> are relative to the handled
+    /// <see cref="MouseEvent.ClientX"/> and <see cref="MouseEvent.ClientY"/> are window CSS pixels.
+    /// <see cref="MouseEvent.LocalX"/> and <see cref="MouseEvent.LocalY"/> are relative to the handled
     /// element's painted border box, so a timeline lane can map a drop position to
     /// time without knowing about scrolling.
     /// </para>
     /// </remarks>
-    public sealed class DragEvent
+    public class DragEvent : MouseEvent
     {
         internal DragEvent(
             string type,
@@ -102,46 +102,17 @@ namespace Donkeh.UILab
             float clientX,
             float clientY,
             ElementNode? source)
+            : base(type, clientX, clientY)
         {
-            Type = type;
             Data = data;
-            ClientX = clientX;
-            ClientY = clientY;
             Source = source;
         }
-
-        /// <summary>Gets the event name, such as <c>dragover</c> or <c>drop</c>.</summary>
-        public string Type { get; }
 
         /// <summary>Gets the payload shared by the whole drag operation.</summary>
         public DataTransfer Data { get; }
 
-        /// <summary>Gets the pointer X in window CSS pixels.</summary>
-        public float ClientX { get; }
-
-        /// <summary>Gets the pointer Y in window CSS pixels.</summary>
-        public float ClientY { get; }
-
-        /// <summary>
-        /// Gets the pointer X relative to the handled element's painted border box.
-        /// </summary>
-        public float LocalX { get; internal set; }
-
-        /// <summary>
-        /// Gets the pointer Y relative to the handled element's painted border box.
-        /// </summary>
-        public float LocalY { get; internal set; }
-
-        /// <summary>Gets the element whose handler is running, when known.</summary>
-        public ElementNode? Target { get; internal set; }
-
         /// <summary>Gets the element that started the drag.</summary>
         public ElementNode? Source { get; }
-
-        /// <summary>
-        /// Gets whether the current handler called <see cref="PreventDefault"/>.
-        /// </summary>
-        public bool DefaultPrevented { get; private set; }
 
         /// <summary>
         /// Gets or sets whether the drag should be abandoned.
@@ -152,11 +123,15 @@ namespace Donkeh.UILab
         /// </remarks>
         public bool Cancel { get; set; }
 
-        /// <summary>Marks the event as handled.</summary>
-        /// <remarks>
-        /// The host has no default drag action, so this is advisory. It lets an app
-        /// share logic between the desktop host and a browser bridge.
-        /// </remarks>
-        public void PreventDefault() => DefaultPrevented = true;
+        internal override bool TryInvoke(Delegate handler)
+        {
+            if (handler is Action<DragEvent> action)
+            {
+                action(this);
+                return true;
+            }
+
+            return base.TryInvoke(handler);
+        }
     }
 }

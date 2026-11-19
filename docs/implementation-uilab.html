@@ -56,6 +56,7 @@
             <div class="nav-group">
                 <span class="nav-label">Reference</span>
                 <a href="html-elements.html">HTML elements</a>
+                <a href="event-reference.html">Event reference</a>
                 <a href="css-support.html">CSS support</a>
             </div>
             <div class="nav-group">
@@ -314,18 +315,30 @@ AfterUpdate?.Invoke(); // one signal after a settled pass</code></pre>
         <h2 id="events-refs">Events and refs</h2>
         <p>
             Events are ordinary delegates stored in an element’s event map keyed by a
-            normalised lowercase name. <code>Props</code> exposes common handlers such as
+            normalised lowercase name. <code>Props</code> exposes simple handlers such as
             <code>OnClick</code>, <code>OnPointerDown</code>, <code>OnContextMenu</code>,
-            <code>OnInput</code> and <code>OnKeyDown</code>; arbitrary events can go through
-            <code>Attr(name, handler)</code>. Hosts mirror handler presence into their
-            own event system, but the delegate stays owned by the element.
+            <code>OnInput</code> and <code>OnKeyDown</code>, plus typed
+            <code>On…Event</code> variants such as <code>OnClickEvent</code> and
+            <code>OnKeyDownEvent</code>. Arbitrary events can go through
+            <code>On(name, handler)</code> or <code>Attr(name, handler)</code>. Hosts mirror
+            handler presence into their own event system, but the delegate stays owned by
+            the element.
+        </p>
+        <p>
+            Every host dispatch is represented by an <code>Event</code> subclass, even
+            when the payload is empty. <code>MouseEvent</code> adds window and
+            element-local coordinates, <code>KeyDownEvent</code> exposes the key and its
+            modifiers, <code>InputEvent</code> and <code>ChangeEvent</code> carry the
+            control value, and the media classes carry playback time. Typed handlers take
+            precedence over the simple delegate for the same event name.
         </p>
         <p>
             Pointer handlers receive element-local coordinates. A
             <code>ContextMenuEvent</code> also exposes the deepest clicked node as
             <code>Target</code>, the node whose handler is running as
             <code>CurrentTarget</code>, and the original pointer position in window CSS
-            pixels.
+            pixels. The complete event list lives in the
+            <a href="event-reference.html">event reference</a>.
         </p>
         <p>
             <code>Ref&lt;ElementNode&gt;</code> points at a mounted element and is cleared

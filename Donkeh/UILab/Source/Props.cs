@@ -175,14 +175,64 @@ namespace Donkeh.UILab
         public Action? OnClick { get; init; }
 
         /// <summary>
+        /// Gets or sets the handler for the <c>mousedown</c> event.
+        /// </summary>
+        public Action? OnMouseDown { get; init; }
+
+        /// <summary>
+        /// Gets or sets the handler for the <c>mouseup</c> event.
+        /// </summary>
+        public Action? OnMouseUp { get; init; }
+
+        /// <summary>
+        /// Gets or sets a click handler that receives the full event payload.
+        /// </summary>
+        /// <remarks>
+        /// This takes precedence over <see cref="OnClick"/> when both are set.
+        /// </remarks>
+        public Action<ClickEvent>? OnClickEvent { get; init; }
+
+        /// <summary>
+        /// Gets or sets a mousedown handler that receives the full event payload.
+        /// </summary>
+        /// <remarks>
+        /// This takes precedence over <see cref="OnMouseDown"/> when both are set.
+        /// </remarks>
+        public Action<MouseDownEvent>? OnMouseDownEvent { get; init; }
+
+        /// <summary>
+        /// Gets or sets a mouseup handler that receives the full event payload.
+        /// </summary>
+        /// <remarks>
+        /// This takes precedence over <see cref="OnMouseUp"/> when both are set.
+        /// </remarks>
+        public Action<MouseUpEvent>? OnMouseUpEvent { get; init; }
+
+        /// <summary>
         /// Gets or sets the handler for the <c>mouseover</c> event.
         /// </summary>
         public Action? OnMouseOver { get; init; }
 
         /// <summary>
+        /// Gets or sets a mouseover handler that receives the full event payload.
+        /// </summary>
+        /// <remarks>
+        /// This takes precedence over <see cref="OnMouseOver"/> when both are set.
+        /// </remarks>
+        public Action<MouseOverEvent>? OnMouseOverEvent { get; init; }
+
+        /// <summary>
         /// Gets or sets the handler for the <c>mouseout</c> event.
         /// </summary>
         public Action? OnMouseOut { get; init; }
+
+        /// <summary>
+        /// Gets or sets a mouseout handler that receives the full event payload.
+        /// </summary>
+        /// <remarks>
+        /// This takes precedence over <see cref="OnMouseOut"/> when both are set.
+        /// </remarks>
+        public Action<MouseOutEvent>? OnMouseOutEvent { get; init; }
 
         /// <summary>
         /// Gets or sets the handler for the <c>scroll</c> event.
@@ -196,10 +246,26 @@ namespace Donkeh.UILab
         public Action<float, float>? OnScroll { get; init; }
 
         /// <summary>
+        /// Gets or sets a scroll handler that receives the full event payload.
+        /// </summary>
+        /// <remarks>
+        /// This takes precedence over <see cref="OnScroll"/> when both are set.
+        /// </remarks>
+        public Action<ScrollEvent>? OnScrollEvent { get; init; }
+
+        /// <summary>
         /// Gets or sets the handler for the <c>paste</c> event. The handler receives
         /// the pasted text.
         /// </summary>
         public Action<string>? OnPaste { get; init; }
+
+        /// <summary>
+        /// Gets or sets a paste handler that receives the full event payload.
+        /// </summary>
+        /// <remarks>
+        /// This takes precedence over <see cref="OnPaste"/> when both are set.
+        /// </remarks>
+        public Action<PasteEvent>? OnPasteEvent { get; init; }
 
         /// <summary>
         /// Gets or sets the handler for the <c>pointerdown</c> event.
@@ -211,6 +277,14 @@ namespace Donkeh.UILab
         public Action<float, float>? OnPointerDown { get; init; }
 
         /// <summary>
+        /// Gets or sets a pointerdown handler that receives the full event payload.
+        /// </summary>
+        /// <remarks>
+        /// This takes precedence over <see cref="OnPointerDown"/> when both are set.
+        /// </remarks>
+        public Action<PointerDownEvent>? OnPointerDownEvent { get; init; }
+
+        /// <summary>
         /// Gets or sets the handler for the <c>pointermove</c> event.
         /// </summary>
         /// <remarks>
@@ -218,6 +292,14 @@ namespace Donkeh.UILab
         /// painted border box, not the window.
         /// </remarks>
         public Action<float, float>? OnPointerMove { get; init; }
+
+        /// <summary>
+        /// Gets or sets a pointermove handler that receives the full event payload.
+        /// </summary>
+        /// <remarks>
+        /// This takes precedence over <see cref="OnPointerMove"/> when both are set.
+        /// </remarks>
+        public Action<PointerMoveEvent>? OnPointerMoveEvent { get; init; }
 
         /// <summary>
         /// Gets or sets the handler for the <c>pointerup</c> event.
@@ -229,12 +311,20 @@ namespace Donkeh.UILab
         public Action<float, float>? OnPointerUp { get; init; }
 
         /// <summary>
+        /// Gets or sets a pointerup handler that receives the full event payload.
+        /// </summary>
+        /// <remarks>
+        /// This takes precedence over <see cref="OnPointerUp"/> when both are set.
+        /// </remarks>
+        public Action<PointerUpEvent>? OnPointerUpEvent { get; init; }
+
+        /// <summary>
         /// Gets or sets the handler for the host's right-button context-menu event.
         /// </summary>
         /// <remarks>
         /// The event carries the deepest element under the pointer
-        /// (<see cref="ContextMenuEvent.Target"/>), the element that owns the
-        /// handler (<see cref="ContextMenuEvent.CurrentTarget"/>) and the pointer
+        /// (<see cref="Event.Target"/>), the element that owns the
+        /// handler (<see cref="Event.CurrentTarget"/>) and the pointer
         /// position both in window and element-local coordinates. Attach the
         /// handler to a container to treat its children as one context-menu area.
         /// </remarks>
@@ -289,15 +379,39 @@ namespace Donkeh.UILab
         public Action<string>? OnInput { get; init; }
 
         /// <summary>
+        /// Gets or sets an input handler that receives the full event payload.
+        /// </summary>
+        /// <remarks>
+        /// This takes precedence over <see cref="OnInput"/> when both are set.
+        /// </remarks>
+        public Action<InputEvent>? OnInputEvent { get; init; }
+
+        /// <summary>
         /// Gets or sets the handler for the <c>change</c> event. The handler receives
         /// the committed value.
         /// </summary>
         public Action<string>? OnChange { get; init; }
 
         /// <summary>
+        /// Gets or sets a change handler that receives the full event payload.
+        /// </summary>
+        /// <remarks>
+        /// This takes precedence over <see cref="OnChange"/> when both are set.
+        /// </remarks>
+        public Action<ChangeEvent>? OnChangeEvent { get; init; }
+
+        /// <summary>
         /// Gets or sets the handler for the <c>submit</c> event.
         /// </summary>
         public Action? OnSubmit { get; init; }
+
+        /// <summary>
+        /// Gets or sets a submit handler that receives the full event payload.
+        /// </summary>
+        /// <remarks>
+        /// This takes precedence over <see cref="OnSubmit"/> when both are set.
+        /// </remarks>
+        public Action<SubmitEvent>? OnSubmitEvent { get; init; }
 
         /// <summary>
         /// Gets or sets the handler for the <c>keydown</c> event. The handler
@@ -309,14 +423,38 @@ namespace Donkeh.UILab
         public Action<string>? OnKeyDown { get; init; }
 
         /// <summary>
+        /// Gets or sets a keydown handler that receives the full event payload.
+        /// </summary>
+        /// <remarks>
+        /// This takes precedence over <see cref="OnKeyDown"/> when both are set.
+        /// </remarks>
+        public Action<KeyDownEvent>? OnKeyDownEvent { get; init; }
+
+        /// <summary>
         /// Gets or sets the handler for the <c>focus</c> event.
         /// </summary>
         public Action? OnFocus { get; init; }
 
         /// <summary>
+        /// Gets or sets a focus handler that receives the full event payload.
+        /// </summary>
+        /// <remarks>
+        /// This takes precedence over <see cref="OnFocus"/> when both are set.
+        /// </remarks>
+        public Action<FocusEvent>? OnFocusEvent { get; init; }
+
+        /// <summary>
         /// Gets or sets the handler for the <c>blur</c> event.
         /// </summary>
         public Action? OnBlur { get; init; }
+
+        /// <summary>
+        /// Gets or sets a blur handler that receives the full event payload.
+        /// </summary>
+        /// <remarks>
+        /// This takes precedence over <see cref="OnBlur"/> when both are set.
+        /// </remarks>
+        public Action<BlurEvent>? OnBlurEvent { get; init; }
 
         /// <summary>
         /// Handler invoked by the host for a <c>canvas</c> element, receiving a
@@ -365,17 +503,35 @@ namespace Donkeh.UILab
         /// <summary>Handler for the <c>play</c> event of an <c>audio</c> element.</summary>
         public Action? OnPlay { get; init; }
 
+        /// <summary>Play handler that receives the full event payload.</summary>
+        /// <remarks>This takes precedence over <see cref="OnPlay"/> when both are set.</remarks>
+        public Action<PlayEvent>? OnPlayEvent { get; init; }
+
         /// <summary>Handler for the <c>pause</c> event of an <c>audio</c> element.</summary>
         public Action? OnPause { get; init; }
 
+        /// <summary>Pause handler that receives the full event payload.</summary>
+        /// <remarks>This takes precedence over <see cref="OnPause"/> when both are set.</remarks>
+        public Action<PauseEvent>? OnPauseEvent { get; init; }
+
         /// <summary>Handler for the <c>ended</c> event of an <c>audio</c> element.</summary>
         public Action? OnEnded { get; init; }
+
+        /// <summary>Ended handler that receives the full event payload.</summary>
+        /// <remarks>This takes precedence over <see cref="OnEnded"/> when both are set.</remarks>
+        public Action<EndedEvent>? OnEndedEvent { get; init; }
 
         /// <summary>
         /// Handler for the <c>timeupdate</c> event of an <c>audio</c> element. The
         /// argument is the current playback position in seconds.
         /// </summary>
         public Action<float>? OnTimeUpdate { get; init; }
+
+        /// <summary>Timeupdate handler that receives the full event payload.</summary>
+        /// <remarks>
+        /// This takes precedence over <see cref="OnTimeUpdate"/> when both are set.
+        /// </remarks>
+        public Action<TimeUpdateEvent>? OnTimeUpdateEvent { get; init; }
 
         /// <summary>
         /// Handler invoked when an <c>audio</c> element's player has been created.

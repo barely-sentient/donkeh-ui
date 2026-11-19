@@ -1,0 +1,538 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Event reference — Donkeh</title>
+    <meta name="description" content="Every event dispatched by Donkeh, its handler property, event class, payload and host support.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/donkeh-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+                <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+                <a href="routing.html">Routing and setPage</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Reference</span>
+                <a href="html-elements.html">HTML elements</a>
+                <a href="event-reference.html">Event reference</a>
+                <a href="css-support.html">CSS support</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Primitives</span>
+                <a href="image.html">Image</a>
+                <a href="video.html">Video</a>
+                <a href="canvas.html">Canvas</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Implementation for Nerds</span>
+                <a href="implementation.html">Overview</a>
+                <a class="nav-sub" href="implementation-parser.html">Parser</a>
+                <a class="nav-sub" href="implementation-data.html">Data</a>
+                <a class="nav-sub" href="implementation-dataengine.html">DataEngine</a>
+                <a class="nav-sub" href="implementation-layoutlab.html">LayoutLab</a>
+                <a class="nav-sub" href="implementation-uilab.html">UILab</a>
+                <a class="nav-sub" href="implementation-hosting.html">Hosting</a>
+                <a class="nav-sub" href="implementation-windowing.html">Windowing</a>
+                <a class="nav-sub" href="implementation-android.html">Android</a>
+                <a class="nav-sub" href="implementation-browser.html">Browser</a>
+                <a class="nav-sub" href="implementation-inspector.html">Inspector</a>
+                <a class="nav-sub" href="implementation-cli.html">CLI tool</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/donkeh-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Reference <span>/</span> Event reference</div>
+        <h1>Event reference</h1>
+        <p class="lead">
+            Every host-dispatched event is represented by an event class. Simple
+            delegates remain available for compact handlers, while typed
+            <code>On…Event</code> properties and the matching element helpers receive
+            the full event object with its target, coordinates, value or key data.
+        </p>
+
+        <div class="callout note">
+            <strong>Event classes are additive</strong>
+            Existing handlers such as <code>OnClick</code>, <code>OnInput</code>,
+            <code>OnScroll</code> and <code>OnKeyDown</code> keep their simple
+            signatures. When a typed handler and a simple handler are both set for the
+            same event, the typed handler wins.
+        </div>
+
+        <h2 id="model">The event object</h2>
+        <p>
+            <code>Event</code> is the base class for every dispatched event. It carries
+            the data every handler can rely on, and concrete subclasses add payload
+            specific to the event family.
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Member</th><th>Meaning</th></tr></thead>
+                <tbody>
+                    <tr><td><code>Type</code></td><td>The normalised event name, for example <code>click</code> or <code>pointerdown</code>.</td></tr>
+                    <tr><td><code>Target</code></td><td>The deepest element involved in the interaction.</td></tr>
+                    <tr><td><code>CurrentTarget</code></td><td>The element whose handler is running. It may be an ancestor when the event bubbles to the nearest handler.</td></tr>
+                    <tr><td><code>DefaultPrevented</code></td><td>Set when the handler calls <code>PreventDefault()</code>.</td></tr>
+                    <tr><td><code>PreventDefault()</code></td><td>Marks the event as handled. Hosts with no built-in default action treat this as advisory.</td></tr>
+                    <tr><td><code>StopPropagation()</code></td><td>Records that the handler does not want the event to travel further. Donkeh already invokes only the nearest handler.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Event class</th><th>Extends</th><th>Adds</th></tr></thead>
+                <tbody>
+                    <tr><td><code>Event</code></td><td>—</td><td>Type, target, current target and default handling.</td></tr>
+                    <tr><td><code>MouseEvent</code></td><td><code>Event</code></td><td><code>ClientX</code>, <code>ClientY</code>, <code>LocalX</code>, <code>LocalY</code>, <code>Button</code>, <code>Modifiers</code>.</td></tr>
+                    <tr><td><code>ClickEvent</code>, <code>MouseDownEvent</code>, <code>MouseUpEvent</code>, <code>MouseOverEvent</code>, <code>MouseOutEvent</code></td><td><code>MouseEvent</code></td><td>Event-specific classes for the mouse family.</td></tr>
+                    <tr><td><code>PointerEvent</code></td><td><code>MouseEvent</code></td><td>The same position data, typed separately so pointer fields can grow.</td></tr>
+                    <tr><td><code>PointerDownEvent</code>, <code>PointerMoveEvent</code>, <code>PointerUpEvent</code></td><td><code>PointerEvent</code></td><td>Concrete pointer phases.</td></tr>
+                    <tr><td><code>ScrollEvent</code></td><td><code>Event</code></td><td><code>DeltaX</code>, <code>DeltaY</code> and <code>Modifiers</code>.</td></tr>
+                    <tr><td><code>InputEvent</code>, <code>ChangeEvent</code></td><td><code>Event</code></td><td><code>Value</code>, the current or committed control text.</td></tr>
+                    <tr><td><code>PasteEvent</code></td><td><code>Event</code></td><td><code>Text</code>, the pasted text.</td></tr>
+                    <tr><td><code>SubmitEvent</code></td><td><code>Event</code></td><td>No extra fields yet.</td></tr>
+                    <tr><td><code>KeyDownEvent</code></td><td><code>Event</code></td><td><code>Key</code>, <code>Modifiers</code> and the formatted <code>Chord</code>.</td></tr>
+                    <tr><td><code>FocusEvent</code>, <code>BlurEvent</code></td><td><code>Event</code></td><td>No extra fields yet.</td></tr>
+                    <tr><td><code>MediaEvent</code></td><td><code>Event</code></td><td><code>Time</code>, the playback position in seconds.</td></tr>
+                    <tr><td><code>PlayEvent</code>, <code>PauseEvent</code>, <code>EndedEvent</code>, <code>TimeUpdateEvent</code></td><td><code>MediaEvent</code></td><td>Concrete playback phases.</td></tr>
+                    <tr><td><code>ContextMenuEvent</code></td><td><code>MouseEvent</code></td><td><code>X</code>, <code>Y</code>, <code>WindowX</code>, <code>WindowY</code> and the clicked <code>Target</code>.</td></tr>
+                    <tr><td><code>DragEvent</code></td><td><code>MouseEvent</code></td><td><code>Data</code>, <code>Source</code> and <code>Cancel</code>.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="registering">Registering handlers</h2>
+        <p>
+            There are four equivalent entry points. Typed properties and element helpers
+            let the compiler infer the event class; <code>On</code> and <code>Attr.On</code>
+            accept any delegate shape.
+        </p>
+
+        <div class="code" data-label="Four handler styles">
+<pre><code>using static Donkeh.UILab._;
+using static Donkeh.UILab.HtmlHelper;
+
+// Typed property: the lambda receives a ClickEvent.
+Button(new Props
+{
+    OnClickEvent = click => Console.WriteLine($"click at {click.LocalX}, {click.LocalY}")
+}, Text("Save"));
+
+// Typed element helper.
+H("button", Text("Cancel"))
+    .OnClick(click => Console.WriteLine(click.Type));
+
+// Simple handler for handlers that need no payload.
+H("button", Text("Close")).OnClick(() => Close());
+
+// Arbitrary event name. The delegate can be any shape the host dispatches.
+H("div").On("click", new Action&lt;ClickEvent&gt;(
+    click => Console.WriteLine(click.Target?.Key)));</code></pre>
+        </div>
+
+        <p>
+            Event names are normalised: <code>onClick</code>, <code>onclick</code> and
+            <code>click</code> all address the same event. Each element stores one
+            handler per event name, so registering the same name again replaces the
+            previous delegate rather than adding a second listener.
+        </p>
+
+        <h2 id="events">All dispatched events</h2>
+        <p>
+            The table below is the complete set of events Donkeh dispatches into the
+            tree. An event that is not listed can still be registered with
+            <code>On</code>; it simply has no host dispatcher unless a custom host
+            raises it.
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Event</th><th>Typed handler</th><th>Simple handler</th><th>Event class</th><th>Payload</th></tr></thead>
+                <tbody>
+                    <tr><td><code>click</code></td><td><code>OnClickEvent</code></td><td><code>OnClick</code></td><td><code>ClickEvent</code></td><td>Pointer position, button and modifiers.</td></tr>
+                    <tr><td><code>mousedown</code></td><td><code>OnMouseDownEvent</code></td><td><code>OnMouseDown</code></td><td><code>MouseDownEvent</code></td><td>Pointer position, button and modifiers.</td></tr>
+                    <tr><td><code>mouseup</code></td><td><code>OnMouseUpEvent</code></td><td><code>OnMouseUp</code></td><td><code>MouseUpEvent</code></td><td>Pointer position, button and modifiers.</td></tr>
+                    <tr><td><code>mouseover</code></td><td><code>OnMouseOverEvent</code></td><td><code>OnMouseOver</code></td><td><code>MouseOverEvent</code></td><td>Pointer position and modifiers.</td></tr>
+                    <tr><td><code>mouseout</code></td><td><code>OnMouseOutEvent</code></td><td><code>OnMouseOut</code></td><td><code>MouseOutEvent</code></td><td>Pointer position and modifiers.</td></tr>
+                    <tr><td><code>pointerdown</code></td><td><code>OnPointerDownEvent</code></td><td><code>OnPointerDown</code></td><td><code>PointerDownEvent</code></td><td>Window and element-local coordinates.</td></tr>
+                    <tr><td><code>pointermove</code></td><td><code>OnPointerMoveEvent</code></td><td><code>OnPointerMove</code></td><td><code>PointerMoveEvent</code></td><td>Window and element-local coordinates.</td></tr>
+                    <tr><td><code>pointerup</code></td><td><code>OnPointerUpEvent</code></td><td><code>OnPointerUp</code></td><td><code>PointerUpEvent</code></td><td>Window and element-local coordinates.</td></tr>
+                    <tr><td><code>scroll</code></td><td><code>OnScrollEvent</code></td><td><code>OnScroll</code></td><td><code>ScrollEvent</code></td><td>Applied <code>DeltaX</code> and <code>DeltaY</code> in CSS pixels.</td></tr>
+                    <tr><td><code>contextmenu</code></td><td><code>OnContextMenu</code></td><td>—</td><td><code>ContextMenuEvent</code></td><td>Clicked target, handling target, local and window coordinates.</td></tr>
+                    <tr><td><code>dragstart</code></td><td><code>OnDragStart</code></td><td>—</td><td><code>DragEvent</code></td><td>Shared <code>DataTransfer</code>, source, coordinates and <code>Cancel</code>.</td></tr>
+                    <tr><td><code>drag</code></td><td><code>OnDrag</code></td><td>—</td><td><code>DragEvent</code></td><td>Shared <code>DataTransfer</code>, source and coordinates.</td></tr>
+                    <tr><td><code>dragenter</code></td><td><code>OnDragEnter</code></td><td>—</td><td><code>DragEvent</code></td><td>Shared <code>DataTransfer</code>, source and coordinates.</td></tr>
+                    <tr><td><code>dragover</code></td><td><code>OnDragOver</code></td><td>—</td><td><code>DragEvent</code></td><td>Shared <code>DataTransfer</code>, source and coordinates.</td></tr>
+                    <tr><td><code>dragleave</code></td><td><code>OnDragLeave</code></td><td>—</td><td><code>DragEvent</code></td><td>Shared <code>DataTransfer</code>, source and coordinates.</td></tr>
+                    <tr><td><code>drop</code></td><td><code>OnDrop</code></td><td>—</td><td><code>DragEvent</code></td><td>Shared <code>DataTransfer</code>, source and coordinates.</td></tr>
+                    <tr><td><code>dragend</code></td><td><code>OnDragEnd</code></td><td>—</td><td><code>DragEvent</code></td><td>Shared <code>DataTransfer</code>, source and coordinates.</td></tr>
+                    <tr><td><code>keydown</code></td><td><code>OnKeyDownEvent</code></td><td><code>OnKeyDown</code></td><td><code>KeyDownEvent</code></td><td>Key name, modifier flags and formatted chord.</td></tr>
+                    <tr><td><code>input</code></td><td><code>OnInputEvent</code></td><td><code>OnInput</code></td><td><code>InputEvent</code></td><td>Current control text.</td></tr>
+                    <tr><td><code>change</code></td><td><code>OnChangeEvent</code></td><td><code>OnChange</code></td><td><code>ChangeEvent</code></td><td>Committed control value.</td></tr>
+                    <tr><td><code>submit</code></td><td><code>OnSubmitEvent</code></td><td><code>OnSubmit</code></td><td><code>SubmitEvent</code></td><td>No extra fields. Browser host only.</td></tr>
+                    <tr><td><code>paste</code></td><td><code>OnPasteEvent</code></td><td><code>OnPaste</code></td><td><code>PasteEvent</code></td><td>Pasted text.</td></tr>
+                    <tr><td><code>focus</code></td><td><code>OnFocusEvent</code></td><td><code>OnFocus</code></td><td><code>FocusEvent</code></td><td>No extra fields.</td></tr>
+                    <tr><td><code>blur</code></td><td><code>OnBlurEvent</code></td><td><code>OnBlur</code></td><td><code>BlurEvent</code></td><td>No extra fields.</td></tr>
+                    <tr><td><code>play</code></td><td><code>OnPlayEvent</code></td><td><code>OnPlay</code></td><td><code>PlayEvent</code></td><td>Playback position in <code>Time</code>.</td></tr>
+                    <tr><td><code>pause</code></td><td><code>OnPauseEvent</code></td><td><code>OnPause</code></td><td><code>PauseEvent</code></td><td>Playback position in <code>Time</code>.</td></tr>
+                    <tr><td><code>ended</code></td><td><code>OnEndedEvent</code></td><td><code>OnEnded</code></td><td><code>EndedEvent</code></td><td>Playback position in <code>Time</code>.</td></tr>
+                    <tr><td><code>timeupdate</code></td><td><code>OnTimeUpdateEvent</code></td><td><code>OnTimeUpdate</code></td><td><code>TimeUpdateEvent</code></td><td>Current playback position in seconds.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="mouse">Mouse and pointer events</h2>
+        <p>
+            Mouse handlers receive window coordinates in <code>ClientX</code> and
+            <code>ClientY</code>, and coordinates relative to the handling element in
+            <code>LocalX</code> and <code>LocalY</code>. The legacy
+            <code>OnPointerDown</code>, <code>OnPointerMove</code> and
+            <code>OnPointerUp</code> delegates receive the local pair directly.
+        </p>
+        <p>
+            A <code>click</code> is raised when a primary-button press and release land
+            on the same element without crossing the drag threshold. Disabled elements
+            do not raise it. <code>mousedown</code> is raised when the press starts;
+            <code>mouseup</code> is raised on release, including when the pointer moved
+            away. <code>mouseover</code> and <code>mouseout</code> track hover changes
+            for the whole ancestor chain.
+        </p>
+        <p>
+            Pointer events follow the pressed pointer. <code>pointermove</code> and
+            <code>pointerup</code> are delivered to the element that captured the
+            pointer, which keeps drags stable when the pointer leaves the element.
+            Touch input is translated into the same pointer events by the desktop and
+            Android hosts. The browser bridge raises <code>pointerup</code> for a
+            cancelled pointer. When a <code>pointerdown</code> handler captures the
+            pointer, the mouse press and release are not also dispatched for that
+            gesture, so choose one family per interaction.
+        </p>
+
+        <div class="code" data-label="Pointer drag">
+<pre><code>var surface = H("div", new Props
+{
+    ClassName = "surface",
+    OnPointerDownEvent = down =>
+    {
+        Console.WriteLine($"pressed at {down.LocalX}, {down.LocalY}");
+    },
+    OnPointerMoveEvent = move =>
+    {
+        Console.WriteLine($"moved by {move.ClientX}, {move.ClientY}");
+    },
+    OnPointerUpEvent = up =>
+    {
+        Console.WriteLine($"released at {up.LocalX}, {up.LocalY}");
+    }
+});</code></pre>
+        </div>
+
+        <h3 id="context-menu">Context menu</h3>
+        <p>
+            <code>contextmenu</code> is the one mouse-family event whose simple
+            signature is already an event object. Attach
+            <code>OnContextMenu</code> to a container to treat its children as one
+            menu area.
+        </p>
+
+        <div class="code" data-label="Context menu">
+<pre><code>Div(new Props
+{
+    ClassName = "file-list",
+    OnContextMenu = menu =>
+    {
+        OpenMenu(menu.Target?.Key, menu.WindowX, menu.WindowY);
+        menu.PreventDefault();
+    }
+}, rows);</code></pre>
+        </div>
+
+        <h2 id="keyboard">Keyboard, focus and text events</h2>
+        <p>
+            <code>keydown</code> is delivered to the focused element. The simple
+            handler receives the formatted chord, while <code>KeyDownEvent</code>
+            exposes the key on its own and the modifier flags separately.
+        </p>
+
+        <div class="code" data-label="Keyboard shortcut">
+<pre><code>H("input", new Props
+{
+    ClassName = "search",
+    OnKeyDownEvent = key =>
+    {
+        if (key.Key == "Escape")
+        {
+            ClearSearch();
+        }
+        else if (key.Modifiers == KeyModifiers.Control && key.Key == "K")
+        {
+            OpenCommandPalette();
+        }
+    }
+});</code></pre>
+        </div>
+
+        <p>
+            <code>input</code> fires while a text control changes and carries the
+            current text. <code>change</code> fires when the value is committed: on
+            Enter or blur for text controls, when a checkbox, radio, range or select
+            value is finalised. <code>paste</code> carries the pasted text. On the
+            desktop and Android hosts, a paste handler owns the edit and the host does
+            not also insert the text; the browser bridge prevents the native paste for
+            the same reason.
+        </p>
+        <p>
+            <code>focus</code> is delivered to the element that gained focus.
+            <code>blur</code> is delivered when focus moves away. The browser bridge
+            listens to <code>focusin</code> and <code>focusout</code> internally and
+            maps them to these two names, so application code uses one set of events on
+            every host.
+        </p>
+
+        <div class="callout warning">
+            <strong>Submit is a browser event</strong>
+            The browser host forwards native <code>submit</code> events. The desktop
+            and Android hosts do not perform native form submission, so call the same
+            function from a submit button's <code>click</code> handler or from
+            <code>keydown</code> when a text field receives Enter.
+        </div>
+
+        <h2 id="scroll">Scroll events</h2>
+        <p>
+            <code>scroll</code> reports the distance in CSS pixels that was actually
+            applied, positive when scrolling right or down. The event targets the
+            element under the pointer when a wheel scroll is applied and bubbles to the
+            nearest ancestor with a handler. On the desktop host, Ctrl+wheel is
+            forwarded with the raw wheel direction so an application can implement
+            zoom or brush size instead of scrolling the document.
+        </p>
+
+        <div class="code" data-label="Scroll payload">
+<pre><code>H("div", new Props
+{
+    ClassName = "scroller",
+    OnScrollEvent = scroll =>
+    {
+        Console.WriteLine($"moved {scroll.DeltaX}px across and {scroll.DeltaY}px down");
+    }
+});</code></pre>
+        </div>
+
+        <h2 id="drag">Drag and drop</h2>
+        <p>
+            A drag starts on the nearest ancestor with
+            <code>Draggable = true</code> after the pointer moves past a small
+            threshold. Every event in one drag shares the same
+            <code>DataTransfer</code>. Write a payload in <code>dragstart</code> and
+            read it in <code>drop</code>.
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Event</th><th>When it fires</th></tr></thead>
+                <tbody>
+                    <tr><td><code>dragstart</code></td><td>The pointer moves past the drag threshold on a draggable source. Set <code>Cancel</code> to abandon the drag.</td></tr>
+                    <tr><td><code>drag</code></td><td>The pointer moves during an active drag, on the source.</td></tr>
+                    <tr><td><code>dragenter</code></td><td>The pointer first enters a potential drop target.</td></tr>
+                    <tr><td><code>dragover</code></td><td>The pointer moves within a potential drop target. Set <code>Data.DropEffect</code> to <code>none</code> to show refusal.</td></tr>
+                    <tr><td><code>dragleave</code></td><td>The pointer leaves a potential drop target.</td></tr>
+                    <tr><td><code>drop</code></td><td>The pointer is released over a target that handles the drag.</td></tr>
+                    <tr><td><code>dragend</code></td><td>The drag finishes, whether or not a drop was accepted.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="code" data-label="Drag and drop">
+<pre><code>H("li", new Props
+{
+    Key = file.Id,
+    Draggable = true,
+    OnDragStart = drag =>
+    {
+        drag.Data.SetData("application/x-file-id", file.Id);
+        drag.Data.EffectAllowed = "move";
+    }
+}, Text(file.Name));
+
+H("div", new Props
+{
+    ClassName = "drop-zone",
+    OnDragOver = drag =>
+    {
+        drag.Data.DropEffect = drag.Data.HasData("application/x-file-id")
+            ? "move"
+            : "none";
+    },
+    OnDrop = drop =>
+    {
+        var id = drop.Data.GetData("application/x-file-id");
+        if (id is not null)
+        {
+            MoveFile(id, drop.LocalX, drop.LocalY);
+        }
+    }
+});</code></pre>
+        </div>
+
+        <p>
+            <code>DragEvent.Data</code> is a mutable <code>DataTransfer</code> shared by
+            the whole interaction. Formats are arbitrary strings; use a reverse-DNS
+            media type for private data and <code>text/plain</code> for a readable
+            fallback. <code>EffectAllowed</code> and <code>DropEffect</code> are
+            descriptive on the native hosts.
+        </p>
+
+        <h2 id="media">Media events</h2>
+        <p>
+            <code>audio</code> and <code>video</code> elements raise
+            <code>play</code>, <code>pause</code>, <code>ended</code> and
+            <code>timeupdate</code>. The media event classes expose the playback
+            position in seconds. <code>OnAudioReady</code> and
+            <code>OnVideoReady</code> are lifecycle callbacks, not DOM events: they run
+            once when the window-side player has been created.
+        </p>
+
+        <div class="code" data-label="Media playback">
+<pre><code>Video(new Props
+{
+    Src = "media/intro.mp4",
+    Controls = true,
+    OnPlayEvent = play => Console.WriteLine($"playing from {play.Time}s"),
+    OnTimeUpdateEvent = update => SeekBar.Value = update.Time,
+    OnEndedEvent = ended => ShowReplayButton()
+});</code></pre>
+        </div>
+
+        <h2 id="hosts">Host support</h2>
+        <p>
+            The virtual event surface is the same on every host. A few families are
+            produced by different platform mechanisms, and one is browser-only.
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Family</th><th>Desktop and Android</th><th>Browser</th></tr></thead>
+                <tbody>
+                    <tr><td><code>click</code>, <code>mousedown</code>, <code>mouseup</code>, <code>mouseover</code>, <code>mouseout</code></td><td>Yes, from the native pointer pipeline.</td><td>Yes, delegated from DOM mouse events.</td></tr>
+                    <tr><td><code>pointerdown</code>, <code>pointermove</code>, <code>pointerup</code></td><td>Yes; touch is translated into pointer events.</td><td>Yes; <code>pointercancel</code> is reported as <code>pointerup</code>.</td></tr>
+                    <tr><td><code>scroll</code></td><td>Yes, from wheel and scrollbar drags.</td><td>Yes, from the element's scroll offset delta.</td></tr>
+                    <tr><td><code>contextmenu</code></td><td>Yes, from a right-button press.</td><td>Yes, from the DOM context-menu event.</td></tr>
+                    <tr><td>Drag family</td><td>Yes, with <code>dragstart</code> from a draggable ancestor.</td><td>Not forwarded by the bridge yet.</td></tr>
+                    <tr><td><code>keydown</code>, <code>input</code>, <code>change</code>, <code>paste</code></td><td>Yes, from the focused control.</td><td>Yes, delegated from DOM events.</td></tr>
+                    <tr><td><code>focus</code>, <code>blur</code></td><td>Yes, from the window focus model.</td><td>Yes, mapped from <code>focusin</code> and <code>focusout</code>.</td></tr>
+                    <tr><td><code>submit</code></td><td>No native form submission.</td><td>Yes, from the DOM submit event.</td></tr>
+                    <tr><td><code>play</code>, <code>pause</code>, <code>ended</code>, <code>timeupdate</code></td><td>Yes, from the window media players.</td><td>Yes, from native media elements.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="not-exposed">Events that are not exposed</h2>
+        <p>
+            These browser events have no Donkeh dispatcher. Registering a handler for
+            one is still legal, but no built-in host will raise it.
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Event</th><th>Use instead</th></tr></thead>
+                <tbody>
+                    <tr><td><code>mousemove</code></td><td><code>pointermove</code></td></tr>
+                    <tr><td><code>keyup</code>, <code>keypress</code></td><td><code>keydown</code></td></tr>
+                    <tr><td><code>dblclick</code></td><td>Track click timing in a <code>click</code> handler.</td></tr>
+                    <tr><td><code>wheel</code></td><td><code>scroll</code>; Ctrl+wheel is forwarded as a scroll with the raw direction.</td></tr>
+                    <tr><td><code>touchstart</code>, <code>touchmove</code>, <code>touchend</code></td><td>Pointer and mouse events; touch is translated by the native hosts.</td></tr>
+                    <tr><td><code>focusin</code>, <code>focusout</code></td><td><code>focus</code> and <code>blur</code>.</td></tr>
+                    <tr><td><code>pointercancel</code></td><td><code>pointerup</code> on the browser host.</td></tr>
+                    <tr><td><code>beforeinput</code>, <code>select</code></td><td><code>input</code> and <code>change</code>.</td></tr>
+                    <tr><td><code>load</code>, <code>error</code>, <code>resize</code></td><td>Host lifecycle and media player callbacks.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="bubbling">Dispatch and bubbling</h2>
+        <p>
+            Event dispatch walks from the hit element up through its ancestors and
+            invokes only the first matching handler. There is no capture phase and no
+            listener list, so an event never fires twice for one element. Registering a
+            handler for a container therefore acts as a delegating handler for its
+            children, and <code>Target</code> identifies which child was involved.
+        </p>
+        <p>
+            Handler exceptions are contained. A throwing application handler cannot
+            tear down the frame loop, which also means a mistake in a handler is silent
+            rather than fatal.
+        </p>
+
+        <div class="page-nav">
+            <a class="prev" href="html-elements.html"><span>Previous</span>HTML elements</a>
+            <a class="next" href="css-support.html"><span>Next</span>CSS support</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh — CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/donkeh-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>

@@ -68,6 +68,7 @@ dotnet watch --project test-container run
 - [Creating a component](https://barely-sentient.github.io/donkeh-ui/creating-a-component.html)
 - [Routing and setPage](https://barely-sentient.github.io/donkeh-ui/routing.html)
 - [HTML elements](https://barely-sentient.github.io/donkeh-ui/html-elements.html)
+- [Event reference](https://barely-sentient.github.io/donkeh-ui/event-reference.html)
 - [CSS support](https://barely-sentient.github.io/donkeh-ui/css-support.html)
 - [Using hooks](https://barely-sentient.github.io/donkeh-ui/using-hooks.html)
 - [Inspector overview](https://barely-sentient.github.io/donkeh-ui/inspector.html)

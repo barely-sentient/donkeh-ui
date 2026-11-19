@@ -56,6 +56,7 @@
             <div class="nav-group">
                 <span class="nav-label">Reference</span>
                 <a href="html-elements.html">HTML elements</a>
+                <a href="event-reference.html">Event reference</a>
                 <a href="css-support.html">CSS support</a>
             </div>
             <div class="nav-group">
@@ -143,6 +144,14 @@ Div(new() { ClassName = "card" },
             when false or null. Entries in <code>Attributes</code> are applied after the
             dedicated properties. A <code>class</code> entry adds tokens to
             <code>ClassName</code>; an <code>id</code> entry replaces <code>Id</code>.
+        </p>
+
+        <p>
+            Event handlers are props as well. Simple properties such as
+            <code>OnClick</code> and <code>OnInput</code> receive only the useful value,
+            while the <code>On…Event</code> variants receive the full event object. See
+            the <a href="event-reference.html">event reference</a> for every dispatched
+            event, its class and its payload.
         </p>
 
         <div class="code" data-label="Attributes">
@@ -269,7 +278,7 @@ window.Run(root, styles);</code></pre>
 
         <div class="page-nav">
             <a class="prev" href="routing.html"><span>Previous</span>Routing and setPage</a>
-            <a class="next" href="css-support.html"><span>Next</span>CSS support</a>
+            <a class="next" href="event-reference.html"><span>Next</span>Event reference</a>
         </div>
 
         <footer class="page-footer">

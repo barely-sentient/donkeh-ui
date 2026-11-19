@@ -468,42 +468,92 @@ namespace Donkeh.UILab
                 }
             }
 
-            if (props.OnClick is { } onClick)
+            if (props.OnClickEvent is { } onClickEvent)
+            {
+                On("click", onClickEvent);
+            }
+            else if (props.OnClick is { } onClick)
             {
                 On("click", onClick);
             }
 
-            if (props.OnMouseOver is { } onMouseOver)
+            if (props.OnMouseDownEvent is { } onMouseDownEvent)
+            {
+                On("mousedown", onMouseDownEvent);
+            }
+            else if (props.OnMouseDown is { } onMouseDown)
+            {
+                On("mousedown", onMouseDown);
+            }
+
+            if (props.OnMouseUpEvent is { } onMouseUpEvent)
+            {
+                On("mouseup", onMouseUpEvent);
+            }
+            else if (props.OnMouseUp is { } onMouseUp)
+            {
+                On("mouseup", onMouseUp);
+            }
+
+            if (props.OnMouseOverEvent is { } onMouseOverEvent)
+            {
+                On("mouseover", onMouseOverEvent);
+            }
+            else if (props.OnMouseOver is { } onMouseOver)
             {
                 On("mouseover", onMouseOver);
             }
 
-            if (props.OnMouseOut is { } onMouseOut)
+            if (props.OnMouseOutEvent is { } onMouseOutEvent)
+            {
+                On("mouseout", onMouseOutEvent);
+            }
+            else if (props.OnMouseOut is { } onMouseOut)
             {
                 On("mouseout", onMouseOut);
             }
 
-            if (props.OnScroll is { } onScroll)
+            if (props.OnScrollEvent is { } onScrollEvent)
+            {
+                On("scroll", onScrollEvent);
+            }
+            else if (props.OnScroll is { } onScroll)
             {
                 On("scroll", onScroll);
             }
 
-            if (props.OnPaste is { } onPaste)
+            if (props.OnPasteEvent is { } onPasteEvent)
+            {
+                On("paste", onPasteEvent);
+            }
+            else if (props.OnPaste is { } onPaste)
             {
                 On("paste", onPaste);
             }
 
-            if (props.OnPointerDown is { } onPointerDown)
+            if (props.OnPointerDownEvent is { } onPointerDownEvent)
+            {
+                On("pointerdown", onPointerDownEvent);
+            }
+            else if (props.OnPointerDown is { } onPointerDown)
             {
                 On("pointerdown", onPointerDown);
             }
 
-            if (props.OnPointerMove is { } onPointerMove)
+            if (props.OnPointerMoveEvent is { } onPointerMoveEvent)
+            {
+                On("pointermove", onPointerMoveEvent);
+            }
+            else if (props.OnPointerMove is { } onPointerMove)
             {
                 On("pointermove", onPointerMove);
             }
 
-            if (props.OnPointerUp is { } onPointerUp)
+            if (props.OnPointerUpEvent is { } onPointerUpEvent)
+            {
+                On("pointerup", onPointerUpEvent);
+            }
+            else if (props.OnPointerUp is { } onPointerUp)
             {
                 On("pointerup", onPointerUp);
             }
@@ -548,32 +598,56 @@ namespace Donkeh.UILab
                 On("drop", onDrop);
             }
 
-            if (props.OnInput is { } onInput)
+            if (props.OnInputEvent is { } onInputEvent)
+            {
+                On("input", onInputEvent);
+            }
+            else if (props.OnInput is { } onInput)
             {
                 On("input", onInput);
             }
 
-            if (props.OnChange is { } onChange)
+            if (props.OnChangeEvent is { } onChangeEvent)
+            {
+                On("change", onChangeEvent);
+            }
+            else if (props.OnChange is { } onChange)
             {
                 On("change", onChange);
             }
 
-            if (props.OnSubmit is { } onSubmit)
+            if (props.OnSubmitEvent is { } onSubmitEvent)
+            {
+                On("submit", onSubmitEvent);
+            }
+            else if (props.OnSubmit is { } onSubmit)
             {
                 On("submit", onSubmit);
             }
 
-            if (props.OnKeyDown is { } onKeyDown)
+            if (props.OnKeyDownEvent is { } onKeyDownEvent)
+            {
+                On("keydown", onKeyDownEvent);
+            }
+            else if (props.OnKeyDown is { } onKeyDown)
             {
                 On("keydown", onKeyDown);
             }
 
-            if (props.OnFocus is { } onFocus)
+            if (props.OnFocusEvent is { } onFocusEvent)
+            {
+                On("focus", onFocusEvent);
+            }
+            else if (props.OnFocus is { } onFocus)
             {
                 On("focus", onFocus);
             }
 
-            if (props.OnBlur is { } onBlur)
+            if (props.OnBlurEvent is { } onBlurEvent)
+            {
+                On("blur", onBlurEvent);
+            }
+            else if (props.OnBlur is { } onBlur)
             {
                 On("blur", onBlur);
             }
@@ -618,22 +692,38 @@ namespace Donkeh.UILab
                 AddStringAttribute("playbackrate", playbackRate.ToString(CultureInfo.InvariantCulture));
             }
 
-            if (props.OnPlay is { } onPlay)
+            if (props.OnPlayEvent is { } onPlayEvent)
+            {
+                On("play", onPlayEvent);
+            }
+            else if (props.OnPlay is { } onPlay)
             {
                 On("play", onPlay);
             }
 
-            if (props.OnPause is { } onPause)
+            if (props.OnPauseEvent is { } onPauseEvent)
+            {
+                On("pause", onPauseEvent);
+            }
+            else if (props.OnPause is { } onPause)
             {
                 On("pause", onPause);
             }
 
-            if (props.OnEnded is { } onEnded)
+            if (props.OnEndedEvent is { } onEndedEvent)
+            {
+                On("ended", onEndedEvent);
+            }
+            else if (props.OnEnded is { } onEnded)
             {
                 On("ended", onEnded);
             }
 
-            if (props.OnTimeUpdate is { } onTimeUpdate)
+            if (props.OnTimeUpdateEvent is { } onTimeUpdateEvent)
+            {
+                On("timeupdate", onTimeUpdateEvent);
+            }
+            else if (props.OnTimeUpdate is { } onTimeUpdate)
             {
                 On("timeupdate", onTimeUpdate);
             }
@@ -858,20 +948,90 @@ namespace Donkeh.UILab
         /// <returns>This element, so calls can be chained.</returns>
         public ElementNode OnClick(Action handler) => On("click", handler);
 
+        /// <summary>Registers a click handler that receives the full event payload.</summary>
+        /// <param name="handler">The handler to invoke on click.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnClick(Action<ClickEvent> handler) => On("click", handler);
+
+        /// <summary>Registers a parameterless mousedown handler.</summary>
+        /// <param name="handler">The handler to invoke when a button is pressed.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnMouseDown(Action handler) => On("mousedown", handler);
+
+        /// <summary>Registers a mousedown handler that receives the full event payload.</summary>
+        /// <param name="handler">The handler to invoke when a button is pressed.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnMouseDown(Action<MouseDownEvent> handler) => On("mousedown", handler);
+
+        /// <summary>Registers a parameterless mouseup handler.</summary>
+        /// <param name="handler">The handler to invoke when a button is released.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnMouseUp(Action handler) => On("mouseup", handler);
+
+        /// <summary>Registers a mouseup handler that receives the full event payload.</summary>
+        /// <param name="handler">The handler to invoke when a button is released.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnMouseUp(Action<MouseUpEvent> handler) => On("mouseup", handler);
+
+        /// <summary>Registers a parameterless mouseover handler.</summary>
+        /// <param name="handler">The handler to invoke when the pointer enters.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnMouseOver(Action handler) => On("mouseover", handler);
+
+        /// <summary>Registers a mouseover handler that receives the full event payload.</summary>
+        /// <param name="handler">The handler to invoke when the pointer enters.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnMouseOver(Action<MouseOverEvent> handler) => On("mouseover", handler);
+
+        /// <summary>Registers a parameterless mouseout handler.</summary>
+        /// <param name="handler">The handler to invoke when the pointer leaves.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnMouseOut(Action handler) => On("mouseout", handler);
+
+        /// <summary>Registers a mouseout handler that receives the full event payload.</summary>
+        /// <param name="handler">The handler to invoke when the pointer leaves.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnMouseOut(Action<MouseOutEvent> handler) => On("mouseout", handler);
+
         /// <summary>Registers an input handler that receives the current value.</summary>
         /// <param name="handler">The handler to invoke when the input value changes.</param>
         /// <returns>This element, so calls can be chained.</returns>
         public ElementNode OnInput(Action<string> handler) => On("input", handler);
+
+        /// <summary>Registers an input handler that receives the full event payload.</summary>
+        /// <param name="handler">The handler to invoke when the input value changes.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnInput(Action<InputEvent> handler) => On("input", handler);
 
         /// <summary>Registers a change handler that receives the current value.</summary>
         /// <param name="handler">The handler to invoke when the value is committed.</param>
         /// <returns>This element, so calls can be chained.</returns>
         public ElementNode OnChange(Action<string> handler) => On("change", handler);
 
+        /// <summary>Registers a change handler that receives the full event payload.</summary>
+        /// <param name="handler">The handler to invoke when the value is committed.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnChange(Action<ChangeEvent> handler) => On("change", handler);
+
+        /// <summary>Registers a paste handler that receives the pasted text.</summary>
+        /// <param name="handler">The handler to invoke when text is pasted.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnPaste(Action<string> handler) => On("paste", handler);
+
+        /// <summary>Registers a paste handler that receives the full event payload.</summary>
+        /// <param name="handler">The handler to invoke when text is pasted.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnPaste(Action<PasteEvent> handler) => On("paste", handler);
+
         /// <summary>Registers a parameterless submit handler.</summary>
         /// <param name="handler">The handler to invoke on submit.</param>
         /// <returns>This element, so calls can be chained.</returns>
         public ElementNode OnSubmit(Action handler) => On("submit", handler);
+
+        /// <summary>Registers a submit handler that receives the full event payload.</summary>
+        /// <param name="handler">The handler to invoke on submit.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnSubmit(Action<SubmitEvent> handler) => On("submit", handler);
 
         /// <summary>
         /// Registers a key-down handler that receives the key name, prefixed with
@@ -880,6 +1040,112 @@ namespace Donkeh.UILab
         /// <param name="handler">The handler to invoke when a key is pressed.</param>
         /// <returns>This element, so calls can be chained.</returns>
         public ElementNode OnKeyDown(Action<string> handler) => On("keydown", handler);
+
+        /// <summary>Registers a key-down handler that receives the full event payload.</summary>
+        /// <param name="handler">The handler to invoke when a key is pressed.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnKeyDown(Action<KeyDownEvent> handler) => On("keydown", handler);
+
+        /// <summary>Registers a parameterless focus handler.</summary>
+        /// <param name="handler">The handler to invoke when the element gains focus.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnFocus(Action handler) => On("focus", handler);
+
+        /// <summary>Registers a focus handler that receives the full event payload.</summary>
+        /// <param name="handler">The handler to invoke when the element gains focus.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnFocus(Action<FocusEvent> handler) => On("focus", handler);
+
+        /// <summary>Registers a parameterless blur handler.</summary>
+        /// <param name="handler">The handler to invoke when the element loses focus.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnBlur(Action handler) => On("blur", handler);
+
+        /// <summary>Registers a blur handler that receives the full event payload.</summary>
+        /// <param name="handler">The handler to invoke when the element loses focus.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnBlur(Action<BlurEvent> handler) => On("blur", handler);
+
+        /// <summary>Registers a scroll handler that receives the applied scroll deltas.</summary>
+        /// <param name="handler">The handler to invoke when the element scrolls.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnScroll(Action<float, float> handler) => On("scroll", handler);
+
+        /// <summary>Registers a scroll handler that receives the full event payload.</summary>
+        /// <param name="handler">The handler to invoke when the element scrolls.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnScroll(Action<ScrollEvent> handler) => On("scroll", handler);
+
+        /// <summary>Registers a pointer-down handler that receives local coordinates.</summary>
+        /// <param name="handler">The handler to invoke when a pointer contacts the element.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnPointerDown(Action<float, float> handler) => On("pointerdown", handler);
+
+        /// <summary>Registers a pointer-down handler that receives the full event payload.</summary>
+        /// <param name="handler">The handler to invoke when a pointer contacts the element.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnPointerDown(Action<PointerDownEvent> handler) => On("pointerdown", handler);
+
+        /// <summary>Registers a pointer-move handler that receives local coordinates.</summary>
+        /// <param name="handler">The handler to invoke while the pointer moves.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnPointerMove(Action<float, float> handler) => On("pointermove", handler);
+
+        /// <summary>Registers a pointer-move handler that receives the full event payload.</summary>
+        /// <param name="handler">The handler to invoke while the pointer moves.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnPointerMove(Action<PointerMoveEvent> handler) => On("pointermove", handler);
+
+        /// <summary>Registers a pointer-up handler that receives local coordinates.</summary>
+        /// <param name="handler">The handler to invoke when a pointer contact ends.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnPointerUp(Action<float, float> handler) => On("pointerup", handler);
+
+        /// <summary>Registers a pointer-up handler that receives the full event payload.</summary>
+        /// <param name="handler">The handler to invoke when a pointer contact ends.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnPointerUp(Action<PointerUpEvent> handler) => On("pointerup", handler);
+
+        /// <summary>Registers a media play handler.</summary>
+        /// <param name="handler">The handler to invoke when playback starts.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnPlay(Action handler) => On("play", handler);
+
+        /// <summary>Registers a media play handler that receives the full event payload.</summary>
+        /// <param name="handler">The handler to invoke when playback starts.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnPlay(Action<PlayEvent> handler) => On("play", handler);
+
+        /// <summary>Registers a media pause handler.</summary>
+        /// <param name="handler">The handler to invoke when playback pauses.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnPause(Action handler) => On("pause", handler);
+
+        /// <summary>Registers a media pause handler that receives the full event payload.</summary>
+        /// <param name="handler">The handler to invoke when playback pauses.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnPause(Action<PauseEvent> handler) => On("pause", handler);
+
+        /// <summary>Registers a media ended handler.</summary>
+        /// <param name="handler">The handler to invoke when playback ends.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnEnded(Action handler) => On("ended", handler);
+
+        /// <summary>Registers a media ended handler that receives the full event payload.</summary>
+        /// <param name="handler">The handler to invoke when playback ends.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnEnded(Action<EndedEvent> handler) => On("ended", handler);
+
+        /// <summary>Registers a media timeupdate handler.</summary>
+        /// <param name="handler">The handler to invoke as playback advances.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnTimeUpdate(Action<float> handler) => On("timeupdate", handler);
+
+        /// <summary>Registers a media timeupdate handler that receives the full event payload.</summary>
+        /// <param name="handler">The handler to invoke as playback advances.</param>
+        /// <returns>This element, so calls can be chained.</returns>
+        public ElementNode OnTimeUpdate(Action<TimeUpdateEvent> handler) => On("timeupdate", handler);
+
 
         /// <summary>
         /// Binds a ref to this element. The ref is set when the element mounts and

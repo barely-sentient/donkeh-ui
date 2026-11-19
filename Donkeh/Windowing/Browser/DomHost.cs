@@ -144,79 +144,138 @@ public sealed class DomHost
             targetNode = handlerNode;
         }
 
+        var target = targetNode as ElementNode ?? handler;
+        var pointerX = (float)x;
+        var pointerY = (float)y;
+        var eventModifiers = (KeyModifiers)modifiers;
+
         switch (eventName)
         {
             case "click":
-                InvokeAction(handler, "click");
+                InvokeMouseEvent(handler, target, new ClickEvent(pointerX, pointerY, pointerX, pointerY, 0, eventModifiers));
+                break;
+
+            case "mousedown":
+                InvokeMouseEvent(handler, target, new MouseDownEvent(pointerX, pointerY, pointerX, pointerY, 0, eventModifiers));
+                break;
+
+            case "mouseup":
+                InvokeMouseEvent(handler, target, new MouseUpEvent(pointerX, pointerY, pointerX, pointerY, 0, eventModifiers));
                 break;
 
             case "mouseover":
+                InvokeMouseEvent(handler, target, new MouseOverEvent(pointerX, pointerY, pointerX, pointerY, eventModifiers));
+                break;
+
             case "mouseout":
+                InvokeMouseEvent(handler, target, new MouseOutEvent(pointerX, pointerY, pointerX, pointerY, eventModifiers));
+                break;
+
             case "focus":
+                InvokeEvent(handler, target, new FocusEvent());
+                break;
+
             case "blur":
+                InvokeEvent(handler, target, new BlurEvent());
+                break;
+
             case "submit":
+                InvokeEvent(handler, target, new SubmitEvent());
+                break;
+
             case "play":
+                InvokeEvent(handler, target, new PlayEvent());
+                break;
+
             case "pause":
+                InvokeEvent(handler, target, new PauseEvent());
+                break;
+
             case "ended":
-                InvokeAction(handler, eventName);
+                InvokeEvent(handler, target, new EndedEvent());
                 break;
 
             case "pointerdown":
+                InvokeCoordinateEvent(
+                    handler,
+                    target,
+                    new PointerDownEvent(pointerX, pointerY, pointerX, pointerY, 0, eventModifiers),
+                    pointerX,
+                    pointerY);
+                break;
+
             case "pointermove":
+                InvokeCoordinateEvent(
+                    handler,
+                    target,
+                    new PointerMoveEvent(pointerX, pointerY, pointerX, pointerY, -1, eventModifiers),
+                    pointerX,
+                    pointerY);
+                break;
+
             case "pointerup":
+                InvokeCoordinateEvent(
+                    handler,
+                    target,
+                    new PointerUpEvent(pointerX, pointerY, pointerX, pointerY, 0, eventModifiers),
+                    pointerX,
+                    pointerY);
+                break;
+
             case "scroll":
-                InvokePointer(handler, eventName, (float)x, (float)y);
+                InvokeCoordinateEvent(
+                    handler,
+                    target,
+                    new ScrollEvent(pointerX, pointerY, eventModifiers),
+                    pointerX,
+                    pointerY);
                 break;
 
             case "contextmenu":
-                InvokeContextMenu(handler, targetNode, (float)x, (float)y);
+                InvokeContextMenu(handler, target, pointerX, pointerY, eventModifiers);
                 break;
 
             case "input":
-                if (targetNode is ElementNode inputTarget)
+                if (target is ElementNode inputTarget)
                 {
                     ApplyControlState(inputTarget, text);
                 }
 
-                InvokeString(handler, "input", text ?? string.Empty);
+                InvokeEvent(handler, target, new InputEvent(text ?? string.Empty), text ?? string.Empty);
                 break;
 
             case "change":
-                if (targetNode is ElementNode changeTarget)
+                if (target is ElementNode changeTarget)
                 {
                     ApplyControlState(changeTarget, text);
                 }
 
-                InvokeString(handler, "change", text ?? string.Empty);
+                InvokeEvent(handler, target, new ChangeEvent(text ?? string.Empty), text ?? string.Empty);
                 break;
 
             case "paste":
-                InvokeString(handler, "paste", text ?? string.Empty);
+                InvokeEvent(handler, target, new PasteEvent(text ?? string.Empty), text ?? string.Empty);
                 break;
 
             case "keydown":
                 var key = MapKey(text);
-                InvokeString(handler, "keydown", KeyChord.Format(key, (KeyModifiers)modifiers));
+                var chord = KeyChord.Format(key, eventModifiers);
+                InvokeEvent(handler, target, new KeyDownEvent(key, eventModifiers, chord));
 
                 // Desktop commits an edit and raises change on Enter even when a
                 // keydown handler also runs, so the browser path does the same.
                 if (key is "Enter" or "NumpadEnter"
-                    && targetNode is ElementNode keyTarget
+                    && target is ElementNode keyTarget
                     && IsTextControl(keyTarget))
                 {
                     ApplyControlState(keyTarget, value);
-                    InvokeString(keyTarget, "change", value ?? string.Empty);
+                    InvokeEvent(keyTarget, keyTarget, new ChangeEvent(value ?? string.Empty), value ?? string.Empty);
                 }
 
                 break;
 
             case "timeupdate":
-                if (handler.TryGetEventHandler("timeupdate", out var timeHandler)
-                    && timeHandler is Action<float> timeAction)
-                {
-                    InvokeSafely(() => timeAction((float)x));
-                }
-
+                InvokeTimeEvent(handler, target, new TimeUpdateEvent(pointerX));
                 break;
         }
 
@@ -743,40 +802,35 @@ public sealed class DomHost
         return element.TryGetAttribute(name, out var value) ? value : null;
     }
 
-    /// <summary>Invokes a parameterless handler.</summary>
-    private static void InvokeAction(ElementNode element, string eventName)
+    /// <summary>Invokes a handler with a concrete event payload and an optional string value.</summary>
+    private static void InvokeEvent(ElementNode currentTarget, ElementNode target, Event uiEvent, string? value = null)
     {
-        if (!element.TryGetEventHandler(eventName, out var handler) || handler is null)
+        if (!currentTarget.TryGetEventHandler(uiEvent.Type, out var handler) || handler is null)
         {
             return;
         }
 
+        uiEvent.Target = target;
+        uiEvent.CurrentTarget = currentTarget;
+
         InvokeSafely(() =>
         {
+            if (uiEvent.TryInvoke(handler))
+            {
+                return;
+            }
+
             if (handler is Action action)
             {
                 action();
             }
-            else
+            else if (value is not null && handler is Action<string> stringAction)
+            {
+                stringAction(value);
+            }
+            else if (value is null)
             {
                 handler.DynamicInvoke();
-            }
-        });
-    }
-
-    /// <summary>Invokes a handler that receives one string.</summary>
-    private static void InvokeString(ElementNode element, string eventName, string value)
-    {
-        if (!element.TryGetEventHandler(eventName, out var handler) || handler is null)
-        {
-            return;
-        }
-
-        InvokeSafely(() =>
-        {
-            if (handler is Action<string> action)
-            {
-                action(value);
             }
             else
             {
@@ -785,16 +839,35 @@ public sealed class DomHost
         });
     }
 
-    /// <summary>Invokes a handler that receives two floats.</summary>
-    private static void InvokePointer(ElementNode element, string eventName, float x, float y)
+    /// <summary>Invokes a mouse handler with client and element-local coordinates.</summary>
+    private static void InvokeMouseEvent(ElementNode currentTarget, ElementNode target, MouseEvent uiEvent)
     {
-        if (!element.TryGetEventHandler(eventName, out var handler) || handler is null)
+        InvokeEvent(currentTarget, target, uiEvent);
+    }
+
+    /// <summary>Invokes a pointer or scroll handler that also accepts two floats.</summary>
+    private static void InvokeCoordinateEvent(
+        ElementNode currentTarget,
+        ElementNode target,
+        Event uiEvent,
+        float x,
+        float y)
+    {
+        if (!currentTarget.TryGetEventHandler(uiEvent.Type, out var handler) || handler is null)
         {
             return;
         }
 
+        uiEvent.Target = target;
+        uiEvent.CurrentTarget = currentTarget;
+
         InvokeSafely(() =>
         {
+            if (uiEvent.TryInvoke(handler))
+            {
+                return;
+            }
+
             if (handler is Action<float, float> action)
             {
                 action(x, y);
@@ -806,34 +879,75 @@ public sealed class DomHost
         });
     }
 
+    /// <summary>Invokes a media timeupdate handler.</summary>
+    private static void InvokeTimeEvent(ElementNode currentTarget, ElementNode target, TimeUpdateEvent uiEvent)
+    {
+        if (!currentTarget.TryGetEventHandler("timeupdate", out var handler) || handler is null)
+        {
+            return;
+        }
+
+        uiEvent.Target = target;
+        uiEvent.CurrentTarget = currentTarget;
+
+        InvokeSafely(() =>
+        {
+            if (uiEvent.TryInvoke(handler))
+            {
+                return;
+            }
+
+            if (handler is Action<float> action)
+            {
+                action(uiEvent.Time);
+            }
+            else
+            {
+                handler.DynamicInvoke(uiEvent.Time);
+            }
+        });
+    }
+
     /// <summary>Invokes a right-button context-menu handler with its target node.</summary>
     /// <param name="currentTarget">The virtual element that owns the handler.</param>
     /// <param name="targetNode">The deepest virtual node under the DOM event target.</param>
     /// <param name="x">Event-local X coordinate.</param>
     /// <param name="y">Event-local Y coordinate.</param>
+    /// <param name="modifiers">The modifier keys held during the event.</param>
     /// <remarks>
     /// The browser bridge reports element-local coordinates, so they are used for
     /// both the local and window positions. The desktop and Android hosts provide
     /// true window coordinates.
     /// </remarks>
-    private static void InvokeContextMenu(ElementNode currentTarget, Node targetNode, float x, float y)
+    private static void InvokeContextMenu(
+        ElementNode currentTarget,
+        Node targetNode,
+        float x,
+        float y,
+        KeyModifiers modifiers)
     {
-        if (!currentTarget.TryGetEventHandler("contextmenu", out var handler)
-            || handler is not (Action<ContextMenuEvent> or Action<float, float>))
+        if (!currentTarget.TryGetEventHandler("contextmenu", out var handler) || handler is null)
         {
             return;
         }
 
         InvokeSafely(() =>
         {
-            if (handler is Action<ContextMenuEvent> action)
+            var target = targetNode as ElementNode ?? currentTarget;
+            var contextMenuEvent = new ContextMenuEvent(target, currentTarget, x, y, x, y, modifiers);
+
+            if (contextMenuEvent.TryInvoke(handler))
             {
-                var target = targetNode as ElementNode ?? currentTarget;
-                action(new ContextMenuEvent(target, currentTarget, x, y, x, y));
+                return;
             }
-            else if (handler is Action<float, float> legacy)
+
+            if (handler is Action<float, float> legacy)
             {
                 legacy(x, y);
+            }
+            else
+            {
+                handler.DynamicInvoke(x, y);
             }
         });
     }

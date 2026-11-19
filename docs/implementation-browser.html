@@ -56,6 +56,7 @@
             <div class="nav-group">
                 <span class="nav-label">Reference</span>
                 <a href="html-elements.html">HTML elements</a>
+                <a href="event-reference.html">Event reference</a>
                 <a href="css-support.html">CSS support</a>
             </div>
             <div class="nav-group">
@@ -239,11 +240,14 @@ await host.RunAsync();</code></pre>
         <p>
             <code>DomHost.HandleEventAsync</code> resolves both ids, updates control state
             for input/change/Enter and invokes the same delegate shapes as the desktop
-            host: parameterless actions, string handlers and two-float pointer handlers.
-            Browser key names are mapped to the desktop names: <code>Space</code>,
-            <code>Left</code>, <code>Right</code>, <code>Up</code>, <code>Down</code>,
-            <code>Escape</code> and single letters. A throwing handler is contained, as it
-            is on desktop.
+            host: typed event-class handlers, parameterless actions, string handlers and
+            two-float pointer handlers. Each callback builds the matching
+            <code>Event</code> subclass, so a browser handler sees the same
+            <code>ClickEvent</code>, <code>KeyDownEvent</code> or <code>ScrollEvent</code>
+            as a native one. Browser key names are mapped to the desktop names:
+            <code>Space</code>, <code>Left</code>, <code>Right</code>, <code>Up</code>,
+            <code>Down</code>, <code>Escape</code> and single letters. A throwing handler
+            is contained, as it is on desktop.
         </p>
 
         <p>

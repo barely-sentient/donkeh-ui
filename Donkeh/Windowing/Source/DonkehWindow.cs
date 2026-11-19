@@ -1586,12 +1586,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             {
                 _needsPaint = true;
 
-                if (element.TryGetEventHandler("timeupdate", out var handler)
-                    && handler is Action<float> timeUpdate)
-                {
-                    try { timeUpdate(player.Time); }
-                    catch { }
-                }
+                InvokeTimeUpdate(element, player.Time);
             }
         }
 
@@ -1703,12 +1698,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             {
                 _needsPaint = true;
 
-                if (element.TryGetEventHandler("timeupdate", out var handler)
-                    && handler is Action<float> timeUpdate)
-                {
-                    try { timeUpdate(player.Time); }
-                    catch { }
-                }
+                InvokeTimeUpdate(element, player.Time);
             }
         }
 
@@ -7139,7 +7129,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         // the same keydown delegate fires on desktop and in the browser. Modifiers
         // are folded into the key text, which keeps the delegate a plain string
         // while still letting a handler tell Ctrl+C from C.
-        Invoke(_focused, "keydown", KeyChord.Format(key.ToString(), modifiers));
+        Invoke(_focused, "keydown", KeyChord.Format(key.ToString(), modifiers), modifiers);
 
         if (key == Key.V && control && IsTextControl(_focused))
         {
@@ -7784,9 +7774,32 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             _caretIndex = _editText?.Length ?? 0;
             ResetCaretBlink();
 
-            if (element.TryGetEventHandler("focus", out var handler) && handler is Action action)
+            if (element.TryGetEventHandler("focus", out var handler) && handler is not null)
             {
-                action();
+                var focusEvent = new FocusEvent
+                {
+                    Target = element,
+                    CurrentTarget = element
+                };
+
+                try
+                {
+                    if (!focusEvent.TryInvoke(handler))
+                    {
+                        if (handler is Action action)
+                        {
+                            action();
+                        }
+                        else
+                        {
+                            handler.DynamicInvoke();
+                        }
+                    }
+                }
+                catch
+                {
+                    // A host event must not tear down the frame loop.
+                }
             }
         }
         else
@@ -8045,7 +8058,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// Hover is stored on the whole ancestor chain because CSS <c>:hover</c> matches
     /// every ancestor of the pointed element, not just the leaf. A no-op move keeps
     /// the previous chain. Both events are dispatched through
-    /// <see cref="Invoke(ElementNode?, string, string?)"/>, which walks up to the
+    /// <see cref="Invoke(ElementNode?, string, string?, KeyModifiers)"/>, which walks up to the
     /// nearest handler.
     /// </remarks>
     private void SetHovered(ElementNode? element)
@@ -8133,13 +8146,33 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         {
             if (node is ElementNode current
                 && current.TryGetEventHandler(eventName, out var handler)
-                && handler is Action<float, float>)
+                && handler is not null
+                && IsPointerHandler(eventName, handler))
             {
                 return current;
             }
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Reports whether a delegate has the shape a pointer dispatcher can invoke.
+    /// </summary>
+    private static bool IsPointerHandler(string eventName, Delegate handler)
+    {
+        if (handler is Action<float, float> or Action<PointerEvent> or Action<MouseEvent> or Action<Event>)
+        {
+            return true;
+        }
+
+        return eventName switch
+        {
+            "pointerdown" => handler is Action<PointerDownEvent>,
+            "pointermove" => handler is Action<PointerMoveEvent>,
+            "pointerup" => handler is Action<PointerUpEvent>,
+            _ => false
+        };
     }
 
     /// <summary>
@@ -8158,7 +8191,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     private void InvokePointer(ElementNode target, string eventName, float x, float y)
     {
         if (!target.TryGetEventHandler(eventName, out var handler)
-            || handler is not Action<float, float> action)
+            || handler is null)
         {
             return;
         }
@@ -8171,7 +8204,41 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         }
 
         var painted = PaintedBorderBox(box);
-        action(x - painted.X, y - painted.Y);
+        var modifiers = CurrentInputModifiers();
+        var localX = x - painted.X;
+        var localY = y - painted.Y;
+
+        PointerEvent pointerEvent = eventName switch
+        {
+            "pointerdown" => new PointerDownEvent(x, y, localX, localY, 0, modifiers),
+            "pointermove" => new PointerMoveEvent(x, y, localX, localY, modifiers: modifiers),
+            "pointerup" => new PointerUpEvent(x, y, localX, localY, 0, modifiers),
+            _ => new PointerEvent(eventName, x, y, localX, localY, 0, modifiers)
+        };
+
+        pointerEvent.Target = target;
+        pointerEvent.CurrentTarget = target;
+
+        try
+        {
+            if (pointerEvent.TryInvoke(handler))
+            {
+                return;
+            }
+
+            if (handler is Action<float, float> action)
+            {
+                action(localX, localY);
+            }
+            else
+            {
+                handler.DynamicInvoke(localX, localY);
+            }
+        }
+        catch
+        {
+            // A host event must not tear down the frame loop.
+        }
     }
 
     /// <summary>
@@ -8192,7 +8259,10 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         {
             if (node is ElementNode current
                 && current.TryGetEventHandler("contextmenu", out var candidate)
-                && candidate is Action<ContextMenuEvent> or Action<float, float>)
+                && candidate is Action<ContextMenuEvent>
+                    or Action<float, float>
+                    or Action<MouseEvent>
+                    or Action<Event>)
             {
                 handler = candidate;
                 return current;
@@ -8226,14 +8296,29 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         }
 
         var painted = PaintedBorderBox(box);
+        var localX = x - painted.X;
+        var localY = y - painted.Y;
+        var contextMenuEvent = new ContextMenuEvent(target, currentTarget, localX, localY, x, y, CurrentInputModifiers());
 
-        if (handler is Action<ContextMenuEvent> action)
+        try
         {
-            action(new ContextMenuEvent(target, currentTarget, x - painted.X, y - painted.Y, x, y));
+            if (contextMenuEvent.TryInvoke(handler))
+            {
+                return;
+            }
+
+            if (handler is Action<float, float> legacy)
+            {
+                legacy(localX, localY);
+            }
+            else
+            {
+                handler.DynamicInvoke(localX, localY);
+            }
         }
-        else if (handler is Action<float, float> legacy)
+        catch
         {
-            legacy(x - painted.X, y - painted.Y);
+            // A host event must not tear down the frame loop.
         }
     }
 
@@ -8265,7 +8350,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         {
             if (node is ElementNode current
                 && current.TryGetEventHandler(eventName, out var handler)
-                && handler is Action<DragEvent>)
+                && handler is Action<DragEvent> or Action<MouseEvent> or Action<Event>)
             {
                 return current;
             }
@@ -8291,12 +8376,13 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         {
             if (node is not ElementNode current
                 || !current.TryGetEventHandler(eventName, out var handler)
-                || handler is not Action<DragEvent> action)
+                || handler is null)
             {
                 continue;
             }
 
             dragEvent.Target = current;
+            dragEvent.CurrentTarget = current;
             var layout = LayoutFor(current);
 
             if (layout is not null && layout.TryGetBox(current, out var box))
@@ -8313,7 +8399,10 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
 
             try
             {
-                action(dragEvent);
+                if (!dragEvent.TryInvoke(handler))
+                {
+                    handler.DynamicInvoke(dragEvent);
+                }
             }
             catch
             {
@@ -8321,6 +8410,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             }
 
             return;
+
         }
     }
 
@@ -8868,6 +8958,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// Optional payload passed to string handlers; <see langword="null"/> invokes a
     /// parameterless handler instead.
     /// </param>
+    /// <param name="modifiers">The modifier keys held when a key event is dispatched.</param>
     /// <remarks>
     /// <para>
     /// Bubbling is modelled by walking parents and invoking only the first handler
@@ -8880,7 +8971,11 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// tear down the frame loop. The trade-off is that a bug in a handler is silent.
     /// </para>
     /// </remarks>
-    private static void Invoke(ElementNode? element, string eventName, string? value = null)
+    private void Invoke(
+        ElementNode? element,
+        string eventName,
+        string? value = null,
+        KeyModifiers modifiers = KeyModifiers.None)
     {
         IgniteSupportedDomNode? node = element;
 
@@ -8892,6 +8987,14 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             {
                 try
                 {
+                    var uiEvent = CreateEvent(eventName, value, modifiers);
+                    PrepareEvent(uiEvent, element, current);
+
+                    if (uiEvent.TryInvoke(handler))
+                    {
+                        return;
+                    }
+
                     if (handler is Action action)
                     {
                         action();
@@ -8922,6 +9025,120 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     }
 
     /// <summary>
+    /// Creates the concrete payload for a named event.
+    /// </summary>
+    private Event CreateEvent(string eventName, string? value, KeyModifiers modifiers)
+    {
+        var mouseModifiers = modifiers == KeyModifiers.None
+            ? CurrentInputModifiers()
+            : modifiers;
+
+        return eventName switch
+        {
+            "click" => new ClickEvent(_mouseX, _mouseY, 0, 0, 0, mouseModifiers),
+            "mousedown" => new MouseDownEvent(_mouseX, _mouseY, 0, 0, 0, mouseModifiers),
+            "mouseup" => new MouseUpEvent(_mouseX, _mouseY, 0, 0, 0, mouseModifiers),
+            "mouseover" => new MouseOverEvent(_mouseX, _mouseY, 0, 0, mouseModifiers),
+            "mouseout" => new MouseOutEvent(_mouseX, _mouseY, 0, 0, mouseModifiers),
+            "input" => new InputEvent(value ?? string.Empty),
+            "change" => new ChangeEvent(value ?? string.Empty),
+            "paste" => new PasteEvent(value ?? string.Empty),
+            "submit" => new SubmitEvent(),
+            "keydown" => new KeyDownEvent(value ?? string.Empty, modifiers, value),
+            "focus" => new FocusEvent(),
+            "blur" => new BlurEvent(),
+            "play" => new PlayEvent(),
+            "pause" => new PauseEvent(),
+            "ended" => new EndedEvent(),
+            _ => new Event(eventName)
+        };
+    }
+
+    /// <summary>
+    /// Fills in the target chain and element-local pointer coordinates.
+    /// </summary>
+    private void PrepareEvent(Event uiEvent, ElementNode? target, ElementNode currentTarget)
+    {
+        uiEvent.Target = target;
+        uiEvent.CurrentTarget = currentTarget;
+
+        if (uiEvent is not MouseEvent mouse)
+        {
+            return;
+        }
+
+        var layout = LayoutFor(currentTarget);
+
+        if (layout is not null && layout.TryGetBox(currentTarget, out var box))
+        {
+            var painted = PaintedBorderBox(box);
+            mouse.LocalX = _mouseX - painted.X;
+            mouse.LocalY = _mouseY - painted.Y;
+        }
+    }
+
+    /// <summary>Reads the current pointer modifiers from the input snapshot.</summary>
+    private static KeyModifiers CurrentInputModifiers()
+    {
+        var modifiers = KeyModifiers.None;
+
+        if (InputState.Control)
+        {
+            modifiers |= KeyModifiers.Control;
+        }
+
+        if (InputState.Shift)
+        {
+            modifiers |= KeyModifiers.Shift;
+        }
+
+        if (InputState.Alt)
+        {
+            modifiers |= KeyModifiers.Alt;
+        }
+
+        return modifiers;
+    }
+
+    /// <summary>
+    /// Dispatches a media <c>timeupdate</c> event with its playback position.
+    /// </summary>
+    private static void InvokeTimeUpdate(ElementNode element, float time)
+    {
+        if (!element.TryGetEventHandler("timeupdate", out var handler) || handler is null)
+        {
+            return;
+        }
+
+        var timeUpdateEvent = new TimeUpdateEvent(time)
+        {
+            Target = element,
+            CurrentTarget = element
+        };
+
+        try
+        {
+            if (timeUpdateEvent.TryInvoke(handler))
+            {
+                return;
+            }
+
+            if (handler is Action<float> action)
+            {
+                action(time);
+            }
+            else
+            {
+                handler.DynamicInvoke(time);
+            }
+        }
+        catch
+        {
+            // A host event must not tear down the frame loop.
+        }
+    }
+
+    /// <summary>
     /// Dispatches a DOM-style event carrying two numeric values to the nearest
     /// handler at or above an element.
     /// </summary>
@@ -8931,11 +9148,11 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// <param name="y">The second value, typically a vertical delta.</param>
     /// <remarks>
     /// The parent walk and exception handling match the other
-    /// <see cref="Invoke(ElementNode?, string, string?)"/> overload: only the nearest
+    /// <see cref="Invoke(ElementNode?, string, string?, KeyModifiers)"/> overload: only the nearest
     /// handler runs, so an event never fires twice, and a throwing handler cannot
     /// tear down the frame loop.
     /// </remarks>
-    private static void Invoke(ElementNode? element, string eventName, float x, float y)
+    private void Invoke(ElementNode? element, string eventName, float x, float y)
     {
         IgniteSupportedDomNode? node = element;
 
@@ -8947,6 +9164,18 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             {
                 try
                 {
+                    var uiEvent = eventName == "scroll"
+                        ? new ScrollEvent(x, y, CurrentInputModifiers())
+                        : new Event(eventName);
+
+                    uiEvent.Target = element;
+                    uiEvent.CurrentTarget = current;
+
+                    if (uiEvent.TryInvoke(handler))
+                    {
+                        return;
+                    }
+
                     if (handler is Action<float, float> action)
                     {
                         action(x, y);

@@ -21,6 +21,8 @@ export function init(containerId, ref) {
     dotNetRef = ref;
 
     root.addEventListener("click", onClick);
+    root.addEventListener("mousedown", onMouseDown);
+    root.addEventListener("mouseup", onMouseUp);
     root.addEventListener("mouseover", onMouseOver);
     root.addEventListener("mouseout", onMouseOut);
     root.addEventListener("contextmenu", onContextMenu);
@@ -321,7 +323,27 @@ function onClick(event) {
         event.preventDefault();
     }
 
-    call(handler, target, "click", 0, 0, null, null);
+    const point = localPoint(handler, event);
+    call(handler, target, "click", point.x, point.y, null, null, modifiersOf(event));
+}
+
+function onMouseDown(event) {
+    dispatchMouse(event, "mousedown");
+}
+
+function onMouseUp(event) {
+    dispatchMouse(event, "mouseup");
+}
+
+function dispatchMouse(event, type) {
+    const target = asElement(event.target);
+    if (!target) return;
+
+    const handler = nearestHandlerElement(target, type);
+    if (!handler) return;
+
+    const point = localPoint(handler, event);
+    call(handler, target, type, point.x, point.y, null, null, modifiersOf(event));
 }
 
 function onMouseOver(event) {
@@ -341,7 +363,7 @@ function onContextMenu(event) {
 
     event.preventDefault();
     const point = localPoint(handler, event);
-    call(handler, target, "contextmenu", point.x, point.y, null, null);
+    call(handler, target, "contextmenu", point.x, point.y, null, null, modifiersOf(event));
 }
 
 function onPointerDown(event) {
@@ -360,21 +382,21 @@ function onPointerDown(event) {
     }
 
     const point = localPoint(handler, event);
-    call(handler, target, "pointerdown", point.x, point.y, null, null);
+    call(handler, target, "pointerdown", point.x, point.y, null, null, modifiersOf(event));
 }
 
 function onPointerMove(event) {
     if (!pointerTarget) return;
 
     const point = localPoint(pointerTarget, event);
-    call(pointerTarget, pointerTarget, "pointermove", point.x, point.y, null, null);
+    call(pointerTarget, pointerTarget, "pointermove", point.x, point.y, null, null, modifiersOf(event));
 }
 
 function onPointerUp(event) {
     if (!pointerTarget) return;
 
     const point = localPoint(pointerTarget, event);
-    call(pointerTarget, pointerTarget, "pointerup", point.x, point.y, null, null);
+    call(pointerTarget, pointerTarget, "pointerup", point.x, point.y, null, null, modifiersOf(event));
     pointerTarget = null;
 }
 
@@ -420,11 +442,7 @@ function onKeyDown(event) {
     const handler = nearestHandlerElement(target, "keydown");
     const textControl = isTextControl(target);
 
-    // Bit-for-bit the KeyModifiers values the desktop host builds.
-    const modifiers = (event.ctrlKey ? 1 : 0)
-        | (event.shiftKey ? 2 : 0)
-        | (event.altKey ? 4 : 0)
-        | (event.metaKey ? 8 : 0);
+    const modifiers = modifiersOf(event);
 
     if (handler || (textControl && event.key === "Enter")) {
         call(handler || target, target, "keydown", 0, 0, event.key, readValue(target), modifiers);
@@ -467,7 +485,18 @@ function dispatchSimple(event, type) {
     if (!target) return;
 
     const handler = nearestHandlerElement(target, type);
-    if (handler) call(handler, target, type, 0, 0, null, null);
+    if (!handler) return;
+
+    const point = localPoint(handler, event);
+    call(handler, target, type, point.x, point.y, null, null, modifiersOf(event));
+}
+
+function modifiersOf(event) {
+    // Bit-for-bit the KeyModifiers values the desktop host builds.
+    return (event.ctrlKey ? 1 : 0)
+        | (event.shiftKey ? 2 : 0)
+        | (event.altKey ? 4 : 0)
+        | (event.metaKey ? 8 : 0);
 }
 
 function call(handler, target, type, x, y, text, value, modifiers = 0) {
