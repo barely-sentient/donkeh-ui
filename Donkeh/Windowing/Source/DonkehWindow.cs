@@ -499,6 +499,9 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// <summary>Caret offset into <see cref="_editText"/>, in UTF-16 code units.</summary>
     private int _caretIndex;
 
+    /// <summary>Persistent custom colours shown by the native colour chooser.</summary>
+    private readonly uint[] _colorDialogCustomColors = new uint[16];
+
     /// <summary>
     /// Horizontal caret position to preserve while moving between visual lines
     /// with Up and Down, or <see langword="null"/> when the next vertical move
@@ -2835,24 +2838,43 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             case "input":
             {
                 var type = GetAttribute(element, "type");
-                if (type is "checkbox" or "radio" or "range" or "color" or "file")
+                if (type is "checkbox" or "radio" or "range" or "color")
                 {
                     return null;
                 }
 
-                if (ReferenceEquals(element, _focused))
+                if (type == "file")
+                {
+                    var fileName = GetAttribute(element, "value");
+                    return string.IsNullOrEmpty(fileName)
+                        ? "No file chosen"
+                        : Path.GetFileName(fileName);
+                }
+
+                if (IsTextControl(element) && ReferenceEquals(element, _focused))
                 {
                     // Browsers keep the placeholder visible while the control is
                     // focused but still empty. Besides matching that behaviour,
                     // it keeps the text run (and therefore the line box height)
                     // in place instead of collapsing the input on focus.
-                    return string.IsNullOrEmpty(_editText)
-                        ? GetAttribute(element, "placeholder") ?? string.Empty
-                        : _editText;
+                    if (string.IsNullOrEmpty(_editText))
+                    {
+                        return GetAttribute(element, "placeholder") ?? string.Empty;
+                    }
+
+                    return type == "password" ? MaskPassword(_editText) : _editText;
                 }
 
                 var value = GetAttribute(element, "value");
-                return string.IsNullOrEmpty(value) ? GetAttribute(element, "placeholder") : value;
+
+                if (string.IsNullOrEmpty(value))
+                {
+                    return GetAttribute(element, "placeholder");
+                }
+
+                // Non-text inputs (submit, reset, button) keep their label when
+                // focused; only text controls have an edit buffer.
+                return type == "password" ? MaskPassword(value) : value;
             }
 
             case "textarea":
@@ -2894,6 +2916,9 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
                 return element.TextContent;
         }
     }
+
+    /// <summary>Masks a password value with the same bullet Chrome paints.</summary>
+    private static string MaskPassword(string value) => new('\u2022', value.Length);
 
     /// <summary>
     /// Placeholder text colour, in the engine's packed 0xAARRGGBB form, chosen to
@@ -4591,6 +4616,14 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
                 {
                     PaintRange(box, instructions, constants, element);
                 }
+                else if (type == "color")
+                {
+                    PaintColorSwatch(box, instructions, constants, element);
+                }
+                else if (type == "file")
+                {
+                    PaintFileControl(box, instructions, constants);
+                }
 
                 break;
             }
@@ -5319,6 +5352,102 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             var radius = constants.AddRadius(CornerRadius.All(MathF.Max(2, rect.Width * 0.2f)));
             instructions.AddDrawRoundedRect(rect, accent, checked((ushort)radius));
         }
+    }
+
+    /// <summary>
+    /// Paints the colour swatch inside an <c>input[type=color]</c>.
+    /// </summary>
+    /// <param name="box">The input's layout box.</param>
+    /// <param name="instructions">Display list to append to.</param>
+    /// <param name="constants">Constant pool for the swatch radius.</param>
+    /// <param name="element">The input, read for its <c>value</c>.</param>
+    /// <remarks>
+    /// Native colour inputs draw a small inset rectangle over the button face.
+    /// Without this pass the control would only show its CSS border and surface.
+    /// </remarks>
+    private static void PaintColorSwatch(
+        LayoutBox box,
+        InstructionBuffer instructions,
+        ConstantPool constants,
+        ElementNode element)
+    {
+        var rect = PaintedContentBox(box);
+
+        if (rect.IsEmpty)
+        {
+            var border = PaintedBorderBox(box);
+            rect = border.Deflate(
+                box.Style.BorderWidth.Top.Value,
+                box.Style.BorderWidth.Right.Value,
+                box.Style.BorderWidth.Bottom.Value,
+                box.Style.BorderWidth.Left.Value);
+        }
+
+        if (rect.IsEmpty)
+        {
+            return;
+        }
+
+        var inset = MathF.Min(2, MathF.Min(rect.Width, rect.Height) * 0.1f);
+        var swatch = rect.Deflate(inset, inset, inset, inset);
+
+        if (swatch.IsEmpty)
+        {
+            swatch = rect;
+        }
+
+        var value = GetAttribute(element, "value");
+        var color = CssColor.TryParse(value, CssColor.Black, out var parsed)
+            ? parsed
+            : CssColor.Black;
+        var radius = constants.AddRadius(CornerRadius.All(1));
+        instructions.AddDrawRoundedRect(swatch, color, checked((ushort)radius));
+    }
+
+    /// <summary>
+    /// Paints Chrome's "Choose File" button inside an <c>input[type=file]</c>.
+    /// </summary>
+    /// <param name="box">The file input's layout box.</param>
+    /// <param name="instructions">Display list to append to.</param>
+    /// <param name="constants">Constant pool for the button radius and label.</param>
+    /// <remarks>
+    /// The filename text is supplied by the text provider and starts after the
+    /// stylesheet's left padding. This painter supplies the button segment, which
+    /// a plain CSS background cannot separate from the filename.
+    /// </remarks>
+    private void PaintFileControl(
+        LayoutBox box,
+        InstructionBuffer instructions,
+        ConstantPool constants)
+    {
+        var border = PaintedBorderBox(box);
+
+        if (border.IsEmpty)
+        {
+            return;
+        }
+
+        var color = box.Style.Color == ComputedStyle.CurrentColor
+            ? 0xFF000000u
+            : box.Style.Color;
+        var textStyle = GetControlTextStyle(box, color);
+        const string label = "Choose File";
+        var labelWidth = _measurer.Measure(label, in textStyle).Width;
+        var buttonWidth = MathF.Min(border.Width, MathF.Max(84, labelWidth + 12));
+        var button = new Rect(border.X, border.Y, buttonWidth, border.Height);
+        var radius = constants.AddRadius(CornerRadius.All(2));
+        instructions.AddDrawRoundedRect(button, 0xFF767676, checked((ushort)radius));
+
+        var inner = button.Deflate(1, 1, 1, 1);
+        var innerRadius = constants.AddRadius(CornerRadius.All(1));
+        instructions.AddDrawRoundedRect(inner, 0xFFF0F0F0, checked((ushort)innerRadius));
+
+        var textId = constants.AddText(label, textStyle);
+        var textX = button.X + MathF.Max(0, (button.Width - labelWidth) * 0.5f);
+        var textY = button.Y + MathF.Max(0, (button.Height - textStyle.LineHeight) * 0.5f);
+        instructions.Add(Instruction.DrawText(
+            new Rect(textX, textY, labelWidth, textStyle.LineHeight),
+            textId));
     }
 
     /// <summary>
@@ -6689,6 +6818,18 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
 
             Invoke(_pressed, "click");
 
+            if (_pressed.Tag == "input" && GetAttribute(_pressed, "type") is "color" or "file")
+            {
+                if (GetAttribute(_pressed, "type") == "color")
+                {
+                    PickColor(_pressed);
+                }
+                else
+                {
+                    PickFile(_pressed);
+                }
+            }
+
             if (_pressed.Tag is "input" or "textarea" or "select")
             {
                 Focus(_pressed);
@@ -6770,6 +6911,67 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             Invoke(element, "change");
             _needsLayout = true;
         }
+    }
+
+    /// <summary>
+    /// Opens the native colour chooser for an <c>input[type=color]</c> and
+    /// commits the selected value.
+    /// </summary>
+    /// <param name="element">The colour input that was clicked.</param>
+    /// <remarks>
+    /// The value is stored as a lower-case <c>#rrggbb</c> attribute, matching the
+    /// DOM representation Chrome exposes. <c>input</c> and <c>change</c> are
+    /// dispatched so an app can observe the edit like any other form control.
+    /// </remarks>
+    private void PickColor(ElementNode element)
+    {
+        if (element.TryGetAttribute("disabled", out var ignoredDisabled))
+        {
+            return;
+        }
+
+        var initial = ColorDialog.ToColorRef(GetAttribute(element, "value"));
+        var hwnd = NativeWindow?.Native?.Win32?.Hwnd ?? IntPtr.Zero;
+
+        if (!ColorDialog.TryPick(hwnd, initial, _colorDialogCustomColors, out var selected))
+        {
+            return;
+        }
+
+        var hex = ColorDialog.Apply(element, selected);
+        _needsLayout = true;
+        Invoke(element, "input", hex);
+        Invoke(element, "change", hex);
+    }
+
+    /// <summary>
+    /// Opens the native file chooser for an <c>input[type=file]</c> and commits
+    /// the selected path.
+    /// </summary>
+    /// <param name="element">The file input that was clicked.</param>
+    /// <remarks>
+    /// The full path is stored in <c>value</c> so the app can read it, while the
+    /// control displays only the file name like a browser does. <c>input</c> and
+    /// <c>change</c> are dispatched after selection.
+    /// </remarks>
+    private void PickFile(ElementNode element)
+    {
+        if (element.TryGetAttribute("disabled", out var ignoredDisabled))
+        {
+            return;
+        }
+
+        var hwnd = NativeWindow?.Native?.Win32?.Hwnd ?? IntPtr.Zero;
+
+        if (!FileDialog.TryPickFile(hwnd, out var path))
+        {
+            return;
+        }
+
+        var fileName = FileDialog.Apply(element, path);
+        _needsLayout = true;
+        Invoke(element, "input", fileName);
+        Invoke(element, "change", fileName);
     }
 
     /// <summary>
@@ -8100,6 +8302,11 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// </remarks>
     private void CascadeEdit(ElementNode element)
     {
+        if (!IsTextControl(element))
+        {
+            return;
+        }
+
         if (string.Equals(element.Tag, "textarea", StringComparison.OrdinalIgnoreCase))
         {
             element.TextContent = _editText;
@@ -8129,6 +8336,11 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// </remarks>
     private void CommitEdit(ElementNode element)
     {
+        if (!IsTextControl(element))
+        {
+            return;
+        }
+
         if (string.Equals(element.Tag, "textarea", StringComparison.OrdinalIgnoreCase))
         {
             element.TextContent = _editText;
@@ -8234,8 +8446,11 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             CloseSelectMenu();
         }
 
+        // Text controls always show their focus affordance (a caret), and the
+        // host marks them focus-visible because browsers keep the ring while
+        // typing. Buttons and checkboxes only show it for keyboard focus.
         var visible = focusVisible
-            || element is not null && element.Tag is "input" or "textarea";
+            || element is not null && IsTextControl(element);
 
         var wasTextControl = _focused is not null && IsTextControl(_focused);
 

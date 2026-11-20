@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <DonkehDesktop>true</DonkehDesktop>
+    </PropertyGroup>
+
+    <Import Project="..\Build\Donkeh.props" />
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFrameworks>$(DonkehTargetFrameworks)</TargetFrameworks>
+        <RootNamespace>Donkeh.HtmlElementsDemo</RootNamespace>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <IsPackable>false</IsPackable>
+        <LangVersion>latest</LangVersion>
+    </PropertyGroup>
+
+    <Import Project="..\Build\Donkeh.targets" />
+
+</Project>

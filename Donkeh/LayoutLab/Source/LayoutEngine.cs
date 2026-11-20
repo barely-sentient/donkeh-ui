@@ -2258,9 +2258,18 @@ public sealed partial class LayoutEngine
 
         if (float.IsFinite(width))
         {
+            // A definite width is already in the box's own sizing model. Adding
+            // the edges again would turn a border-box inline-block into a
+            // content-box one when it is measured for an inline line.
             content = width;
+            var definite = style.BoxSizing == BoxSizing.BorderBox
+                ? width
+                : width + padding.Horizontal + border.Horizontal;
+            box.IntrinsicWidth = definite;
+            return definite;
         }
-        else if (_options.IntrinsicSizeProvider?.Invoke(box.Node) is { } intrinsic)
+
+        if (_options.IntrinsicSizeProvider?.Invoke(box.Node) is { } intrinsic)
         {
             content = intrinsic.Width;
         }
@@ -2408,8 +2417,14 @@ public sealed partial class LayoutEngine
         if (float.IsFinite(width))
         {
             content = width;
+            var definite = style.BoxSizing == BoxSizing.BorderBox
+                ? width
+                : width + padding.Horizontal + border.Horizontal;
+            box.IntrinsicMinWidth = definite;
+            return definite;
         }
-        else if (_options.IntrinsicSizeProvider?.Invoke(box.Node) is { } intrinsic)
+
+        if (_options.IntrinsicSizeProvider?.Invoke(box.Node) is { } intrinsic)
         {
             content = intrinsic.Width;
         }

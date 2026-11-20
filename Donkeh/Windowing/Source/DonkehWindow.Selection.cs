@@ -413,7 +413,10 @@ public sealed partial class DonkehWindow
     /// </remarks>
     private static bool IsNonSelectableTag(ElementNode element)
     {
-        return element.Tag is "select" or "option" or "textarea";
+        // Buttons, inputs and the select family are interactive chrome, not
+        // prose. Their labels are excluded from document selection so dragging
+        // across a toolbar cannot paint a highlight over a button.
+        return element.Tag is "select" or "option" or "textarea" or "input" or "button";
     }
 
     /// <summary>
@@ -1534,11 +1537,11 @@ public sealed partial class DonkehWindow
 
         // Only touch lines that can contribute to the painted clip. This keeps
         // selecting a very large textarea proportional to what is visible
-        // instead of the whole buffer.
+        // instead of the whole buffer. Line Y values are relative to the text
+        // origin, so the clip must be shifted into the same space first.
         if (clipRect is { } visible)
         {
-            firstLine = FirstLineAtOrAfter(lines, visible.Y);
-            lastLine = FirstLineAfter(lines, visible.Bottom);
+            (firstLine, lastLine) = GetVisibleSelectionLines(lines, visible, originY);
         }
 
         for (var i = firstLine; i < lastLine; i++)
@@ -1574,6 +1577,31 @@ public sealed partial class DonkehWindow
 
             instructions.AddDrawRect(rect, SelectionHighlightColor(box.Style));
         }
+    }
+
+    /// <summary>
+    /// Returns the range of visual lines that can contribute to a painted clip.
+    /// </summary>
+    /// <param name="lines">Visual lines, with <c>Y</c> relative to the text origin.</param>
+    /// <param name="clip">Clip rectangle in painted absolute pixels.</param>
+    /// <param name="originY">Painted Y of the text origin.</param>
+    /// <returns>The half-open line range to paint.</returns>
+    /// <remarks>
+    /// Line Y values are relative to the text origin while the clip is absolute, so
+    /// the clip has to be shifted into text-local space before the binary search.
+    /// Comparing the two spaces directly makes a control selection at a scrolled
+    /// position skip every line and paint no highlight.
+    /// </remarks>
+    internal static (int First, int Last) GetVisibleSelectionLines(
+        TextLine[] lines,
+        Rect clip,
+        float originY)
+    {
+        var localTop = clip.Y - originY;
+        var localBottom = clip.Bottom - originY;
+        return (
+            FirstLineAtOrAfter(lines, localTop),
+            FirstLineAfter(lines, localBottom));
     }
 
     /// <summary>Finds the first line whose bottom edge reaches a Y coordinate.</summary>

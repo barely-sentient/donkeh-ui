@@ -1189,15 +1189,27 @@ public sealed class ComponentTestHarness
             {
                 var type = GetAttribute(element, "type");
 
-                if (type is "checkbox" or "radio" or "range" or "color" or "file")
+                if (type is "checkbox" or "radio" or "range" or "color")
                 {
                     return null;
                 }
 
+                if (type == "file")
+                {
+                    var fileName = GetAttribute(element, "value");
+                    return string.IsNullOrEmpty(fileName)
+                        ? "No file chosen"
+                        : Path.GetFileName(fileName);
+                }
+
                 var value = GetAttribute(element, "value");
-                return string.IsNullOrEmpty(value)
-                    ? GetAttribute(element, "placeholder")
-                    : value;
+
+                if (string.IsNullOrEmpty(value))
+                {
+                    return GetAttribute(element, "placeholder");
+                }
+
+                return type == "password" ? MaskPassword(value) : value;
             }
 
             case "textarea":
@@ -1301,4 +1313,6 @@ public sealed class ComponentTestHarness
 
     private static string? GetAttribute(ElementNode element, string name) =>
         element.TryGetAttribute(name, out var value) ? value : null;
+
+    private static string MaskPassword(string value) => new('\u2022', value.Length);
 }

@@ -529,7 +529,7 @@ namespace Donkeh.Data
         /// selector lists and combinators inside the argument, so the matcher has
         /// no backtracking to do and cannot mis-handle a complex negation.
         /// </remarks>
-        private static bool MatchesSimpleCompound(
+        private bool MatchesSimpleCompound(
             ReadOnlySpan<Token> tokens,
             IgniteSupportedDomNode node)
         {
@@ -578,9 +578,23 @@ namespace Donkeh.Data
                         break;
 
                     case TokenKind.LeftSquareBracket:
-                        // Attribute arguments are not used by the built-in
-                        // components and would need the full filter parser.
-                        return false;
+                        // Attribute selectors inside :not() need the same
+                        // presence/operator handling as a normal compound.
+                        // Selectors such as :not([controls]) and :not([open])
+                        // are common in user-agent sheets.
+                        if (!SelectorAnalysis.TryParseAttributeFilter(
+                                tokens,
+                                i,
+                                tokens.Length,
+                                out var close,
+                                out var filter)
+                            || !MatchesAttribute(filter, node))
+                        {
+                            return false;
+                        }
+
+                        i = close;
+                        break;
 
                     case TokenKind.PseudoClass:
                         // Pseudo classes inside a :not() argument still have to
@@ -623,7 +637,7 @@ namespace Donkeh.Data
         /// Unknown kinds return <see langword="false"/>; they should never be stored
         /// because analysis marks such selectors unmatchable.
         /// </remarks>
-        private static bool MatchesPseudo(
+        private bool MatchesPseudo(
             in PseudoRecord pseudo,
             ReadOnlySpan<Token> selectorTokens,
             IgniteSupportedDomNode node)

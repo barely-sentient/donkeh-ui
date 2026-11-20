@@ -394,7 +394,7 @@ namespace Donkeh.Data.Dom
         /// <param name="close">Receives the index of the closing <c>]</c>.</param>
         /// <param name="filter">Receives the parsed filter on success.</param>
         /// <returns><see langword="true"/> when the filter was fully understood.</returns>
-        private static bool TryParseAttributeFilter(
+        internal static bool TryParseAttributeFilter(
             ReadOnlySpan<Token> selector,
             int open,
             int end,
