@@ -319,6 +319,81 @@ public class StyleResolutionTests
     }
 
     [Fact]
+    public void CaretColorResolvesAutoAndExplicitColours()
+    {
+        var auto = TestSupport.Style("caret-color: auto");
+        Assert.Equal(ComputedStyle.CurrentColor, auto.CaretColor);
+
+        var explicitColor = TestSupport.Style("color: #112233; caret-color: #ff0000");
+        Assert.Equal(0xFFFF0000u, explicitColor.CaretColor);
+
+        var current = TestSupport.Style("color: #112233; caret-color: currentColor");
+        Assert.Equal(0xFF112233u, current.CaretColor);
+    }
+
+    [Fact]
+    public void CaretColorInheritsLikeTextColour()
+    {
+        var table = TestSupport.Build(
+            "#root { caret-color: #ff0000 } #child { color: #00ff00 }");
+        var root = TestSupport.Node("div", "root");
+        var child = TestSupport.Node("div", "child");
+        root.Children = [child];
+
+        var style = TestSupport.Box(TestSupport.Layout(table, root), child).Style;
+        Assert.Equal(0xFFFF0000u, style.CaretColor);
+    }
+
+    [Fact]
+    public void SelectionPseudoElementStoresHighlightColoursOnTheElement()
+    {
+        var table = TestSupport.Build(
+            "#root { color: #112233 } " +
+            "#root::selection { background-color: #ff0000; color: #ffffff; }");
+        var root = TestSupport.Node("div", "root");
+
+        var style = TestSupport.Box(TestSupport.Layout(table, root), root).Style;
+        Assert.Equal(0xFFFF0000u, style.SelectionBackgroundColor);
+        Assert.Equal(0xFFFFFFFFu, style.SelectionTextColor);
+        Assert.Equal(0xFF112233u, style.Color);
+    }
+
+    [Fact]
+    public void SelectionPseudoElementLeavesUndeclaredChannelsAtTheDefault()
+    {
+        var table = TestSupport.Build("#root::selection { background-color: red; }");
+        var root = TestSupport.Node("div", "root");
+
+        var style = TestSupport.Box(TestSupport.Layout(table, root), root).Style;
+        Assert.Equal(0xFFFF0000u, style.SelectionBackgroundColor);
+        Assert.Equal(ComputedStyle.CurrentColor, style.SelectionTextColor);
+    }
+
+    [Fact]
+    public void UniversalSelectionRuleAppliesToEveryElement()
+    {
+        var table = TestSupport.Build(
+            "::selection { background-color: #abcdef; } " +
+            "#root { color: #000000; }");
+        var root = TestSupport.Node("div", "root");
+
+        var style = TestSupport.Box(TestSupport.Layout(table, root), root).Style;
+        Assert.Equal(0xFFABCDEFu, style.SelectionBackgroundColor);
+    }
+
+    [Fact]
+    public void ScopedSelectionRuleBeatsTheUniversalDefault()
+    {
+        var table = TestSupport.Build(
+            "::selection { background-color: #abcdef; } " +
+            "#root::selection { background-color: #ff0000; }");
+        var root = TestSupport.Node("div", "root");
+
+        var style = TestSupport.Box(TestSupport.Layout(table, root), root).Style;
+        Assert.Equal(0xFFFF0000u, style.SelectionBackgroundColor);
+    }
+
+    [Fact]
     public void BackgroundShorthandResetsAndThenAppliesItsParts()
     {
         var style = TestSupport.Style(

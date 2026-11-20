@@ -87,6 +87,38 @@ public sealed class ScrollbarLayoutTests
     }
 
     [Fact]
+    public void TextOverflowContributesToTheScrollableExtent()
+    {
+        var root = TestSupport.Node("div", "root", text: new string('x', 40));
+        var result = TestSupport.Layout(
+            TestSupport.Build(
+                "#root { overflow-x: auto; width: 100px; height: 20px; "
+                + "white-space: nowrap; font-size: 10px; }"),
+            root,
+            TestSupport.Options(100, 100));
+        var box = TestSupport.Box(result, root);
+
+        Assert.True(box.ScrollWidth > box.ClientWidth);
+        Assert.True(ScrollbarLayout.TryGetHorizontal(box, out _));
+    }
+
+    [Fact]
+    public void WrappedTextOverflowContributesToVerticalScroll()
+    {
+        var root = TestSupport.Node("div", "root", text: "one\ntwo\nthree\nfour\nfive");
+        var result = TestSupport.Layout(
+            TestSupport.Build(
+                "#root { overflow-y: auto; width: 100px; height: 30px; "
+                + "white-space: pre-wrap; font-size: 10px; }"),
+            root,
+            TestSupport.Options(100, 100));
+        var box = TestSupport.Box(result, root);
+
+        Assert.True(box.ScrollHeight > box.ClientHeight);
+        Assert.True(ScrollbarLayout.TryGetVertical(box, out _));
+    }
+
+    [Fact]
     public void DraggingWithoutThumbTravelKeepsTheStartOffset()
     {
         var metrics = new ScrollbarMetrics(

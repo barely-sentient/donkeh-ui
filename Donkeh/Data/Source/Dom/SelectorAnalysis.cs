@@ -330,9 +330,10 @@ namespace Donkeh.Data.Dom
                     case TokenKind.PseudoElement:
                         typeCount++;
 
-                        // Only ::before and ::after generate boxes, and a
-                        // pseudo-element must be the subject (the final token).
-                        // Every other pseudo-element remains unmatchable.
+                        // Only ::before and ::after generate boxes. ::selection
+                        // does not generate a box but is still matchable so its
+                        // colour declarations can be collected on the element.
+                        // A pseudo-element must be the subject (the final token).
                         var pseudoName = InternTable.GetString(token.InternedId);
                         var isSubject = i == end - 1;
 
@@ -343,6 +344,10 @@ namespace Donkeh.Data.Dom
                         else if (isSubject && pseudoName is "::after" or ":after")
                         {
                             pseudoElement = PseudoElementKind.After;
+                        }
+                        else if (isSubject && pseudoName is "::selection" or ":selection")
+                        {
+                            pseudoElement = PseudoElementKind.Selection;
                         }
                         else
                         {

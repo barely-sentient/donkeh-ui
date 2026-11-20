@@ -160,6 +160,7 @@ public sealed partial class StyleResolver
     private static bool IsInheritedProperty(CssProperty property)
     {
         return property is CssProperty.Color
+            or CssProperty.CaretColor
             or CssProperty.FontFamily
             or CssProperty.FontSize
             or CssProperty.FontWeight
@@ -296,6 +297,7 @@ public sealed partial class StyleResolver
                 dest.BackgroundFixed = source.BackgroundFixed;
                 break;
             case CssProperty.BackgroundColor: dest.BackgroundColor = source.BackgroundColor; break;
+            case CssProperty.CaretColor: dest.CaretColor = source.CaretColor; break;
             case CssProperty.BackgroundImage: dest.BackgroundImages = source.BackgroundImages; break;
             case CssProperty.BackgroundSize:
                 dest.BackgroundWidth = source.BackgroundWidth;

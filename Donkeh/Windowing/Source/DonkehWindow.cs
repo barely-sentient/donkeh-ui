@@ -499,6 +499,13 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// <summary>Caret offset into <see cref="_editText"/>, in UTF-16 code units.</summary>
     private int _caretIndex;
 
+    /// <summary>
+    /// Horizontal caret position to preserve while moving between visual lines
+    /// with Up and Down, or <see langword="null"/> when the next vertical move
+    /// should start from the current caret.
+    /// </summary>
+    private float? _caretDesiredX;
+
     /// <summary>Cached caret target element.</summary>
     private ElementNode? _caretCacheElement;
 
@@ -517,6 +524,12 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// <summary>Cached caret rectangle in window CSS pixels.</summary>
     private Rect _caretCacheRect;
 
+    /// <summary>Horizontal control scroll the cached caret was projected with.</summary>
+    private float _caretCacheScrollX;
+
+    /// <summary>Vertical control scroll the cached caret was projected with.</summary>
+    private float _caretCacheScrollY;
+
     /// <summary>Whether the caret cache fields hold a usable rectangle.</summary>
     private bool _caretCacheValid;
 
@@ -534,6 +547,15 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
 
     /// <summary>Highlighted row in the open dropdown; <c>-1</c> when no row is hovered.</summary>
     private int _openSelectHover = -1;
+
+    /// <summary>Characters typed into a focused select for incremental matching.</summary>
+    private string _selectTypeAhead = string.Empty;
+
+    /// <summary>Timestamp of the last type-ahead character, in stopwatch ticks.</summary>
+    private long _selectTypeAheadTicks;
+
+    /// <summary>How long a select type-ahead prefix stays alive.</summary>
+    private const double SelectTypeAheadSeconds = 1.0;
 
     /// <summary>
     /// Root length context of the most recent app layout, used to resolve lengths.
@@ -2085,6 +2107,17 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             _needsDevToolsPaint = false;
             _cachedLayoutBoxCount = CountLayoutBoxes(_layoutResult.Root);
             _cachedNodeCount = CountNodes(_appRoot);
+
+            // A text edit changes the scrollable extent, so keep a long value
+            // scrolled to the caret using the fresh metrics. A scroll change only
+            // needs a new display list, not another box tree.
+            EnsureCaretVisible();
+
+            if (_needsPaint)
+            {
+                _layoutResult = _layoutEngine!.Repaint(_layoutResult, options);
+                _needsPaint = false;
+            }
         }
         else if (_needsAnimatedPaint && _layoutResult is not null)
         {
@@ -3046,6 +3079,73 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         Invoke(select, "change", options[index].TextContent ?? GetAttribute(options[index], "value") ?? string.Empty);
     }
 
+    /// <summary>
+    /// Implements the browser select shortcut where typing a prefix jumps to the
+    /// matching option.
+    /// </summary>
+    /// <param name="select">The focused select.</param>
+    /// <param name="character">The typed character.</param>
+    /// <remarks>
+    /// Characters typed within one second build a prefix. If no option starts
+    /// with the full prefix, the first option starting with the latest character
+    /// is used, so typing <c>b</c> then <c>a</c> can still land on
+    /// <c>Banana</c>. An open dropdown moves its highlight without committing;
+    /// a closed select commits the option and dispatches <c>change</c>.
+    /// </remarks>
+    private void TypeAheadSelect(ElementNode select, char character)
+    {
+        var now = Stopwatch.GetTimestamp();
+        var elapsed = (now - _selectTypeAheadTicks) / (double)Stopwatch.Frequency;
+
+        _selectTypeAhead = elapsed <= SelectTypeAheadSeconds
+            ? _selectTypeAhead + character
+            : character.ToString();
+        _selectTypeAheadTicks = now;
+
+        var options = FindOptions(select);
+        var index = FindOptionByPrefix(options, _selectTypeAhead);
+
+        if (index < 0 && _selectTypeAhead.Length > 1)
+        {
+            index = FindOptionByPrefix(options, _selectTypeAhead[^1].ToString());
+        }
+
+        if (index < 0)
+        {
+            return;
+        }
+
+        if (ReferenceEquals(_openSelect, select))
+        {
+            _openSelectHover = index;
+        }
+        else
+        {
+            SelectOption(select, index);
+        }
+    }
+
+    /// <summary>Finds the first option whose label starts with a prefix.</summary>
+    /// <param name="options">Options in document order.</param>
+    /// <param name="prefix">Case-insensitive prefix.</param>
+    /// <returns>The option index, or <c>-1</c> when nothing matches.</returns>
+    private static int FindOptionByPrefix(List<ElementNode> options, string prefix)
+    {
+        for (var i = 0; i < options.Count; i++)
+        {
+            var label = options[i].TextContent
+                ?? GetAttribute(options[i], "value")
+                ?? string.Empty;
+
+            if (label.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
     /// <summary>Geometry of an open dropdown, in window CSS pixels.</summary>
     /// <param name="Menu">The full menu rectangle, including its padding.</param>
     /// <param name="RowHeight">Height of one option row.</param>
@@ -3460,9 +3560,20 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             return;
         }
 
-        var color = box.Style.Color == ComputedStyle.CurrentColor
-            ? 0xFF212529u
-            : box.Style.Color;
+        var color = box.Style.CaretColor;
+
+        if (color == ComputedStyle.CurrentColor)
+        {
+            color = box.Style.Color == ComputedStyle.CurrentColor
+                ? 0xFF212529u
+                : box.Style.Color;
+        }
+
+        // caret-color: transparent is the CSS way to hide the caret entirely.
+        if ((color & 0xFF000000u) == 0)
+        {
+            return;
+        }
 
         overlay.AddDrawRect(caret, color);
     }
@@ -3665,22 +3776,22 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     }
 
     /// <summary>
-    /// Moves the caret of a text control to the character boundary nearest a
-    /// pointer X coordinate, and restarts the blink cycle.
+    /// Moves the caret of a text control to the character boundary nearest the
+    /// pointer, and restarts the blink cycle.
     /// </summary>
     /// <param name="element">The control whose caret moves.</param>
     /// <param name="x">Pointer X in window CSS pixels.</param>
     /// <remarks>
     /// <para>
-    /// Single-line inputs walk text elements (respecting surrogate pairs) and stop
-    /// at the first boundary whose measured prefix is already right of the pointer,
-    /// so placement snaps left rather than to the globally closest boundary.
+    /// Both single-line inputs and textareas map the point through the same
+    /// laid-out lines used for painting, so clicking a wrapped line, a scrolled
+    /// textarea or an input with padding lands exactly where the glyph was
+    /// clicked. The pointer Y is read from the last move event.
     /// </para>
     /// <para>
-    /// A <c>textarea</c> first derives the line from the last known pointer Y, then
-    /// measures every prefix and keeps the boundary on that line whose trailing edge
-    /// is closest to the pointer. This is O(n) text layouts per click and is
-    /// intended for the click path only.
+    /// The trailing edge of the clicked line is treated as the caret when the
+    /// pointer is past the text, which is what makes clicking the empty area to
+    /// the right of a short value place the caret at the end.
     /// </para>
     /// </remarks>
     private void PlaceCaretFromPoint(ElementNode element, float x)
@@ -3694,6 +3805,8 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             return;
         }
 
+        _caretDesiredX = null;
+
         var text = _editText ?? string.Empty;
 
         if (text.Length == 0)
@@ -3703,100 +3816,302 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             return;
         }
 
+        // A freshly focused control may still have the previous frame's text
+        // block: an empty input shows its placeholder, for example. Always
+        // measure the live buffer so the click is never mapped to the
+        // placeholder string.
+        var lines = LayoutControlText(box, text);
+
+        if (lines is null || lines.Lines.Length == 0)
+        {
+            _caretIndex = 0;
+            ResetCaretBlink();
+            return;
+        }
+
+        var starts = LineStarts(text, lines.Lines);
+        _caretIndex = Math.Clamp(
+            HitTestTextLines(box, lines.Lines, starts, lines.Style, x, _mouseY),
+            0,
+            text.Length);
+        ResetCaretBlink();
+    }
+
+    /// <summary>
+    /// Lays out a text control's working text with the same settings the layout
+    /// engine used for its box.
+    /// </summary>
+    /// <param name="box">The control's layout box.</param>
+    /// <param name="text">The working edit buffer.</param>
+    /// <returns>The wrapped layout, or <see langword="null"/> for an empty buffer.</returns>
+    /// <remarks>
+    /// This is the fallback used on the click path when the box still describes
+    /// the previous frame. It mirrors the argument order of the layout engine's
+    /// control text pass so wrapping and caret hit testing agree.
+    /// </remarks>
+    private TextLayout? LayoutControlText(LayoutBox box, string text)
+    {
+        if (text.Length == 0)
+        {
+            return null;
+        }
+
         var color = box.Style.Color == ComputedStyle.CurrentColor
             ? 0xFF212529u
             : box.Style.Color;
-        var textStyle = GetControlTextStyle(box, color);
-        var (originX, originY) = ContentOrigin(box);
-        var contentWidth = MathF.Max(0, box.ContentBox.Width);
+        var style = GetControlTextStyle(box, color);
 
-        if (element.Tag == "textarea")
+        return TextLayoutEngine.Layout(
+            text,
+            in style,
+            _measurer,
+            MathF.Max(0, box.ContentBox.Width),
+            box.Style.WhiteSpace,
+            box.Style.OverflowWrap,
+            box.Style.WebkitLineClamp,
+            box.Style.TextOverflow);
+    }
+
+    /// <summary>
+    /// Moves the caret one visual line up or down in a <c>textarea</c>, keeping
+    /// the preferred horizontal position across short lines.
+    /// </summary>
+    /// <param name="down">
+    /// <see langword="true"/> to move down, <see langword="false"/> to move up.
+    /// </param>
+    /// <param name="extend">
+    /// <see langword="true"/> to extend the selection, as Shift+Up/Down does.
+    /// </param>
+    /// <returns>
+    /// <see langword="true"/> when the key belongs to a textarea and was consumed,
+    /// even if the caret did not move because it was already on the first or last
+    /// line.
+    /// </returns>
+    /// <remarks>
+    /// Moving past the first line places the caret at the start of the buffer and
+    /// moving past the last line places it at the end, matching browser
+    /// textareas. Single-line inputs do not handle Up or Down, so the key keeps
+    /// its normal meaning outside the control.
+    /// </remarks>
+    private bool MoveCaretVertically(bool down, bool extend)
+    {
+        if (_focused is null
+            || _focused.Tag != "textarea"
+            || _editText is not { } text)
         {
-            var layout = TextLayoutEngine.Layout(
-                text,
-                in textStyle,
-                _measurer,
-                contentWidth,
-                box.Style.WhiteSpace,
-                box.Style.OverflowWrap,
-                box.Style.WebkitLineClamp,
-                box.Style.TextOverflow);
+            return false;
+        }
 
-            if (layout.Lines.Length == 0)
-            {
-                _caretIndex = 0;
-                ResetCaretBlink();
-                return;
-            }
+        var boxLayout = LayoutFor(_focused);
 
-            var lineHeight = MathF.Max(1, textStyle.LineHeight);
-            var line = Math.Clamp(
-                (int)MathF.Floor((_mouseY - originY) / lineHeight),
-                0,
-                layout.Lines.Length - 1);
-            var best = 0;
-            var bestDistance = float.MaxValue;
+        if (boxLayout is null || !boxLayout.TryGetBox(_focused, out var box))
+        {
+            return false;
+        }
 
-            var index = 0;
+        if (text.Length == 0)
+        {
+            _caretIndex = 0;
+            _caretDesiredX = 0;
+            ResetCaretBlink();
+            return true;
+        }
 
-            while (true)
-            {
-                var prefix = TextLayoutEngine.Layout(
-                    text[..index],
-                    in textStyle,
-                    _measurer,
-                    contentWidth,
-                    box.Style.WhiteSpace,
-                    box.Style.OverflowWrap,
-                    box.Style.WebkitLineClamp,
-                    box.Style.TextOverflow);
+        var color = box.Style.Color == ComputedStyle.CurrentColor
+            ? 0xFF212529u
+            : box.Style.Color;
+        var style = GetControlTextStyle(box, color);
+        var contentWidth = MathF.Max(0, box.ContentBox.Width);
+        var index = Math.Clamp(_caretIndex, 0, text.Length);
+        var prefix = TextLayoutEngine.Layout(
+            text[..index],
+            in style,
+            _measurer,
+            contentWidth,
+            box.Style.WhiteSpace,
+            box.Style.OverflowWrap,
+            box.Style.WebkitLineClamp,
+            box.Style.TextOverflow);
+        var currentLine = prefix.Lines.Length > 0 ? prefix.Lines.Length - 1 : 0;
+        var currentX = prefix.Lines.Length > 0
+            ? prefix.Lines[^1].X + prefix.Lines[^1].Width
+            : 0;
+        var desiredX = _caretDesiredX ?? currentX;
+        var layout = TextLayoutEngine.Layout(
+            text,
+            in style,
+            _measurer,
+            contentWidth,
+            box.Style.WhiteSpace,
+            box.Style.OverflowWrap,
+            box.Style.WebkitLineClamp,
+            box.Style.TextOverflow);
 
-                if (prefix.Lines.Length > 0 && prefix.Lines.Length - 1 == line)
-                {
-                    var candidate = prefix.Lines[^1];
-                    var distance = MathF.Abs(originX + candidate.X + candidate.Width - x);
+        if (layout.Lines.Length == 0)
+        {
+            _caretIndex = 0;
+            ResetCaretBlink();
+            return true;
+        }
 
-                    if (distance < bestDistance)
-                    {
-                        bestDistance = distance;
-                        best = index;
-                    }
-                }
+        var targetLine = currentLine + (down ? 1 : -1);
+        int target;
 
-                // NextTextElement clamps at the text length, so the end offset
-                // must be evaluated once and then the search must stop.
-                if (index >= text.Length)
-                {
-                    break;
-                }
-
-                index = NextTextElement(text, index);
-            }
-
-            _caretIndex = best;
+        if (targetLine < 0)
+        {
+            target = 0;
+        }
+        else if (targetLine >= layout.Lines.Length)
+        {
+            target = text.Length;
         }
         else
         {
-            var target = x - originX;
-            var index = 0;
-
-            while (index < text.Length)
-            {
-                var next = NextTextElement(text, index);
-                var width = _measurer.Measure(text.AsSpan(0, next), in textStyle).Width;
-
-                if (width > target)
-                {
-                    break;
-                }
-
-                index = next;
-            }
-
-            _caretIndex = index;
+            var line = layout.Lines[targetLine];
+            var starts = LineStarts(text, layout.Lines);
+            target = Math.Clamp(
+                starts[targetLine] + OffsetInLine(line.Text, desiredX - line.X, in style),
+                0,
+                text.Length);
         }
 
-        ResetCaretBlink();
+        _caretDesiredX = desiredX;
+
+        if (extend)
+        {
+            ExtendControlSelection(target);
+        }
+        else
+        {
+            _caretIndex = target;
+            ClearControlSelectionForCaretMove();
+            ResetCaretBlink();
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Moves the caret to the start or end of its current visual line in a
+    /// <c>textarea</c>.
+    /// </summary>
+    /// <param name="toEnd">
+    /// <see langword="true"/> for End, <see langword="false"/> for Home.
+    /// </param>
+    /// <param name="extend">
+    /// <see langword="true"/> to extend the selection, as Shift+Home/End does.
+    /// </param>
+    /// <returns>
+    /// <see langword="true"/> when a textarea consumed the key.
+    /// </returns>
+    /// <remarks>
+    /// Ctrl+Home and Ctrl+End continue to reach the start and end of the whole
+    /// buffer through the normal Home/End path; this helper only implements the
+    /// unmodified per-line behaviour.
+    /// </remarks>
+    private bool MoveCaretToLineEdge(bool toEnd, bool extend)
+    {
+        if (_focused is null
+            || _focused.Tag != "textarea"
+            || _editText is not { } text)
+        {
+            return false;
+        }
+
+        var boxLayout = LayoutFor(_focused);
+
+        if (boxLayout is null || !boxLayout.TryGetBox(_focused, out var box))
+        {
+            return false;
+        }
+
+        _caretDesiredX = null;
+
+        if (text.Length == 0)
+        {
+            if (extend)
+            {
+                ExtendControlSelection(0);
+            }
+            else
+            {
+                _caretIndex = 0;
+                ClearControlSelectionForCaretMove();
+                ResetCaretBlink();
+            }
+
+            return true;
+        }
+
+        var color = box.Style.Color == ComputedStyle.CurrentColor
+            ? 0xFF212529u
+            : box.Style.Color;
+        var style = GetControlTextStyle(box, color);
+        var contentWidth = MathF.Max(0, box.ContentBox.Width);
+        var index = Math.Clamp(_caretIndex, 0, text.Length);
+        var prefix = TextLayoutEngine.Layout(
+            text[..index],
+            in style,
+            _measurer,
+            contentWidth,
+            box.Style.WhiteSpace,
+            box.Style.OverflowWrap,
+            box.Style.WebkitLineClamp,
+            box.Style.TextOverflow);
+        var currentLine = prefix.Lines.Length > 0 ? prefix.Lines.Length - 1 : 0;
+        var layout = TextLayoutEngine.Layout(
+            text,
+            in style,
+            _measurer,
+            contentWidth,
+            box.Style.WhiteSpace,
+            box.Style.OverflowWrap,
+            box.Style.WebkitLineClamp,
+            box.Style.TextOverflow);
+
+        if (layout.Lines.Length == 0)
+        {
+            _caretIndex = 0;
+            ClearControlSelectionForCaretMove();
+            ResetCaretBlink();
+            return true;
+        }
+
+        currentLine = Math.Clamp(currentLine, 0, layout.Lines.Length - 1);
+        var starts = LineStarts(text, layout.Lines);
+        var line = layout.Lines[currentLine];
+        var target = toEnd
+            ? Math.Min(text.Length, starts[currentLine] + line.Text.Length)
+            : Math.Min(text.Length, starts[currentLine]);
+
+        if (extend)
+        {
+            ExtendControlSelection(target);
+        }
+        else
+        {
+            _caretIndex = target;
+            ClearControlSelectionForCaretMove();
+            ResetCaretBlink();
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Collapses a control selection when a caret-only navigation key is used.
+    /// </summary>
+    /// <remarks>
+    /// Up, Down, Home and End without Shift move the caret and discard a
+    /// selection, exactly as browsers do. The caret has already been positioned by
+    /// the caller.
+    /// </remarks>
+    private void ClearControlSelectionForCaretMove()
+    {
+        if (_selection is { IsControl: true })
+        {
+            ClearSelection();
+        }
     }
 
     /// <summary>
@@ -3841,13 +4156,17 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
 
         var text = _editText ?? string.Empty;
         var index = Math.Clamp(_caretIndex, 0, text.Length);
+        var scrollX = box.IsScrollContainer ? box.ScrollOffsetX : 0;
+        var scrollY = box.IsScrollContainer ? box.ScrollOffsetY : 0;
 
         if (_caretCacheValid
             && ReferenceEquals(_caretCacheElement, _focused)
             && ReferenceEquals(_caretCacheText, text)
             && _caretCacheIndex == index
             && ReferenceEquals(_caretCacheLayout, boxLayout)
-            && _caretCacheRevision == _focused.Revision)
+            && _caretCacheRevision == _focused.Revision
+            && _caretCacheScrollX == scrollX
+            && _caretCacheScrollY == scrollY)
         {
             caret = _caretCacheRect;
             return true;
@@ -3858,6 +4177,8 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             : box.Style.Color;
         var textStyle = GetControlTextStyle(box, color);
         var (originX, originY) = ContentOrigin(box);
+        originX -= scrollX;
+        originY -= scrollY;
         var contentWidth = MathF.Max(0, box.ContentBox.Width);
         var contentHeight = MathF.Max(0, box.ContentBox.Height);
         var lineHeight = box.Style.ResolveLineHeight(in _lengthContext);
@@ -3917,6 +4238,8 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         _caretCacheIndex = index;
         _caretCacheLayout = boxLayout;
         _caretCacheRevision = _focused.Revision;
+        _caretCacheScrollX = scrollX;
+        _caretCacheScrollY = scrollY;
         _caretCacheRect = caret;
         _caretCacheValid = true;
         return true;
@@ -4272,6 +4595,10 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
                 break;
             }
 
+            case "select":
+                PaintSelectIndicator(box, instructions);
+                break;
+
             case "progress":
             case "meter":
                 PaintProgress(box, instructions, constants, element);
@@ -4281,6 +4608,57 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             case "video":
                 PaintMediaControls(box, element, instructions, constants);
                 break;
+        }
+    }
+
+    /// <summary>
+    /// Draws the small downward chevron on a closed <c>select</c>.
+    /// </summary>
+    /// <param name="box">The select's layout box.</param>
+    /// <param name="instructions">Display list to append to.</param>
+    /// <remarks>
+    /// Browsers reserve space on the inline end of a select for a platform
+    /// indicator. The default stylesheet reserves that padding; this painter
+    /// supplies the arrow itself. The indicator follows the control's text colour
+    /// and stays inside the border box, so rounded or custom-styled selects keep
+    /// working.
+    /// </remarks>
+    private static void PaintSelectIndicator(
+        LayoutBox box,
+        InstructionBuffer instructions)
+    {
+        var rect = PaintedBorderBox(box);
+
+        if (rect.Width <= 0 || rect.Height <= 0)
+        {
+            return;
+        }
+
+        var width = MathF.Max(6, MathF.Min(10, rect.Height * 0.5f));
+        var height = MathF.Max(4, width * 0.6f);
+        var centerX = rect.Right - width * 0.5f - 6;
+        var top = rect.Y + (rect.Height - height) * 0.5f;
+        var color = box.Style.Color == ComputedStyle.CurrentColor
+            ? 0xFF212529u
+            : box.Style.Color;
+
+        // A four-step triangle avoids depending on a chevron glyph being present
+        // in the resolved font while still reading as a native dropdown arrow.
+        const int steps = 4;
+        var stepHeight = height / steps;
+
+        for (var i = 0; i < steps; i++)
+        {
+            var stepWidth = width * (steps - i) / steps;
+
+            if (stepWidth <= 0)
+            {
+                continue;
+            }
+
+            instructions.AddDrawRect(
+                new Rect(centerX - stepWidth * 0.5f, top + i * stepHeight, stepWidth, stepHeight),
+                color);
         }
     }
 
@@ -7146,6 +7524,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
 
                 text = NormalizeEditText(_focused, text);
                 DeleteControlSelectionCore();
+                _caretDesiredX = null;
                 _editText ??= string.Empty;
                 _caretIndex = Math.Clamp(_caretIndex, 0, _editText.Length);
                 _editText = _editText.Insert(_caretIndex, text);
@@ -7192,6 +7571,24 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
                         {
                             SelectOption(_focused, _openSelectHover);
                             CloseSelectMenu();
+                        }
+                    }
+
+                    return;
+
+                case Key.Home:
+                case Key.End:
+                    if (options.Count > 0)
+                    {
+                        var index = key == Key.Home ? 0 : options.Count - 1;
+
+                        if (_openSelect is null)
+                        {
+                            SelectOption(_focused, index);
+                        }
+                        else
+                        {
+                            _openSelectHover = index;
                         }
                     }
 
@@ -7257,7 +7654,18 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
 
         switch (key)
         {
+            case Key.Up:
+            case Key.Down:
+                if (!control && MoveCaretVertically(key == Key.Down, shift))
+                {
+                    return;
+                }
+
+                break;
+
             case Key.Backspace:
+                _caretDesiredX = null;
+
                 if (HasControlSelection)
                 {
                     if (DeleteControlSelectionCore())
@@ -7280,6 +7688,8 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
                 break;
 
             case Key.Delete:
+                _caretDesiredX = null;
+
                 if (HasControlSelection)
                 {
                     if (DeleteControlSelectionCore())
@@ -7302,6 +7712,8 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
 
             case Key.Left:
             case Key.Right:
+                _caretDesiredX = null;
+
                 if (IsTextControl(_focused) && _editText is { } editText)
                 {
                     var current = Math.Clamp(_caretIndex, 0, editText.Length);
@@ -7348,6 +7760,13 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
                 break;
 
             case Key.Home:
+                if (!control && MoveCaretToLineEdge(toEnd: false, shift))
+                {
+                    return;
+                }
+
+                _caretDesiredX = null;
+
                 if (IsTextControl(_focused) && shift)
                 {
                     ExtendControlSelection(0);
@@ -7362,6 +7781,13 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
                 break;
 
             case Key.End:
+                if (!control && MoveCaretToLineEdge(toEnd: true, shift))
+                {
+                    return;
+                }
+
+                _caretDesiredX = null;
+
                 if (IsTextControl(_focused) && shift)
                 {
                     ExtendControlSelection(_editText?.Length ?? 0);
@@ -7483,7 +7909,13 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             return;
         }
 
-        if (_focused.Tag is "select" or "button" or "a")
+        if (_focused.Tag == "select")
+        {
+            TypeAheadSelect(_focused, character);
+            return;
+        }
+
+        if (_focused.Tag is "button" or "a")
         {
             return;
         }
@@ -7519,6 +7951,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         }
 
         DeleteControlSelectionCore();
+        _caretDesiredX = null;
         _editText ??= string.Empty;
         _caretIndex = Math.Clamp(_caretIndex, 0, _editText.Length);
         _editText = _editText.Insert(_caretIndex, character.ToString());
@@ -7535,6 +7968,103 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     private void ResetCaretBlink()
     {
         _caretBlinkStart = Stopwatch.GetTimestamp();
+        EnsureCaretVisible();
+    }
+
+    /// <summary>
+    /// Scrolls a focused control just enough to keep the caret inside its content
+    /// box.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Single-line inputs scroll horizontally and textareas scroll in both
+    /// directions, which is what makes a long value usable when the caret moves
+    /// with the arrow keys. The calculation uses the same wrapped layout as the
+    /// caret painter, so soft-wrapped lines are handled.
+    /// </para>
+    /// <para>
+    /// Runs only for scroll containers. A control with visible overflow shows its
+    /// full value and needs no adjustment. Offsets are clamped to the engine's
+    /// scroll metrics so the caret can never scroll past the content.
+    /// </para>
+    /// </remarks>
+    private void EnsureCaretVisible()
+    {
+        if (_focused is null
+            || !IsTextControl(_focused)
+            || _editText is not { } text
+            || LayoutFor(_focused) is not { } layout
+            || !layout.TryGetBox(_focused, out var box)
+            || !box.IsScrollContainer)
+        {
+            return;
+        }
+
+        var color = box.Style.Color == ComputedStyle.CurrentColor
+            ? 0xFF212529u
+            : box.Style.Color;
+        var style = GetControlTextStyle(box, color);
+        var contentWidth = MathF.Max(0, box.ContentBox.Width);
+        var contentHeight = MathF.Max(0, box.ContentBox.Height);
+        var index = Math.Clamp(_caretIndex, 0, text.Length);
+        var lineHeight = MathF.Max(1, style.LineHeight);
+        var caretX = 0f;
+        var caretY = 0f;
+        var caretHeight = lineHeight;
+
+        if (text.Length > 0)
+        {
+            var prefix = TextLayoutEngine.Layout(
+                text[..index],
+                in style,
+                _measurer,
+                contentWidth,
+                box.Style.WhiteSpace,
+                box.Style.OverflowWrap,
+                box.Style.WebkitLineClamp,
+                box.Style.TextOverflow);
+
+            if (prefix.Lines.Length > 0)
+            {
+                var line = prefix.Lines[^1];
+                caretX = line.X + line.Width;
+                caretY = line.Y;
+                caretHeight = line.Height;
+            }
+        }
+
+        var caretWidth = MathF.Max(1, style.FontSize * 0.07f);
+        var scrollX = box.ScrollOffsetX;
+        var scrollY = box.ScrollOffsetY;
+
+        if (caretX < scrollX)
+        {
+            scrollX = MathF.Max(0, caretX - 1);
+        }
+        else if (caretX + caretWidth > scrollX + contentWidth)
+        {
+            scrollX = caretX + caretWidth - contentWidth + 1;
+        }
+
+        if (caretY < scrollY)
+        {
+            scrollY = MathF.Max(0, caretY - 1);
+        }
+        else if (caretY + caretHeight > scrollY + contentHeight)
+        {
+            scrollY = caretY + caretHeight - contentHeight + 1;
+        }
+
+        var maxX = MathF.Max(0, box.ScrollWidth - box.ClientWidth);
+        var maxY = MathF.Max(0, box.ScrollHeight - box.ClientHeight);
+        scrollX = Math.Clamp(scrollX, 0, maxX);
+        scrollY = Math.Clamp(scrollY, 0, maxY);
+
+        if (MathF.Abs(scrollX - box.ScrollOffsetX) > 0.01f
+            || MathF.Abs(scrollY - box.ScrollOffsetY) > 0.01f)
+        {
+            SetScrollOffset(box.Node, scrollX, scrollY);
+        }
     }
 
     /// <summary>
@@ -7772,6 +8302,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
                     GetAttribute(element, "value") ?? element.TextContent ?? string.Empty)
                 : null;
             _caretIndex = _editText?.Length ?? 0;
+            _caretDesiredX = null;
             ResetCaretBlink();
 
             if (element.TryGetEventHandler("focus", out var handler) && handler is not null)
@@ -7806,6 +8337,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         {
             _editText = null;
             _caretIndex = 0;
+            _caretDesiredX = null;
         }
 
         _interactionVersion++;

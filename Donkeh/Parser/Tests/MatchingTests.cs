@@ -166,6 +166,36 @@ public class MatchingTests
     }
 
     [Fact]
+    public void BareSelectionPseudoElementMatchesEveryElement()
+    {
+        var table = Build("::selection { background-color: red; }");
+        var node = new IgniteSupportedDomNode { TagName = "div" };
+
+        Assert.Empty(table.MatchRules(node));
+        Assert.Equal(
+            "red",
+            Value(Assert.Single(
+                table.MatchRules(node, null, PseudoElementKind.Selection))));
+        Assert.Empty(table.MatchRules(node, null, PseudoElementKind.Before));
+    }
+
+    [Fact]
+    public void ScopedSelectionRulesUseTheOriginatingElementSelector()
+    {
+        var table = Build(
+            ".btn::selection { background-color: red; }" +
+            ".other::selection { background-color: blue; }");
+
+        var node = new IgniteSupportedDomNode { TagName = "div" };
+        node.AddClass("btn");
+
+        Assert.Equal(
+            "red",
+            Value(Assert.Single(
+                table.MatchRules(node, null, PseudoElementKind.Selection))));
+    }
+
+    [Fact]
     public void OnlyReturnsRulesOfMatchingSelectors()
     {
         var table = Build(".a { color: a; margin: 1px; } .b { color: b; padding: 2px; }");

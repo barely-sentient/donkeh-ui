@@ -204,6 +204,39 @@ public sealed class ComputedStyle
     /// <summary>Gets or sets the computed text colour as packed ARGB; inherited by <see cref="CopyInheritedFrom"/>.</summary>
     public uint Color { get; set; } = CssColor.Black;
 
+    /// <summary>
+    /// Gets or sets the colour of the text insertion caret, or
+    /// <see cref="CurrentColor"/> for <c>caret-color: auto</c>.
+    /// </summary>
+    /// <remarks>
+    /// Inherited like every other text colour. A transparent value hides the caret,
+    /// matching browsers.
+    /// </remarks>
+    public uint CaretColor { get; set; } = CurrentColor;
+
+    /// <summary>
+    /// Gets or sets the background colour painted behind selected text, or
+    /// <see cref="CurrentColor"/> when no <c>::selection</c> rule applies.
+    /// </summary>
+    /// <remarks>
+    /// Resolved from the <c>::selection</c> pseudo-element rather than from the
+    /// element itself. Selection rules are matched alongside the element's own
+    /// rules, but only their <c>background-color</c> (and <c>background</c>
+    /// shorthand) is retained here.
+    /// </remarks>
+    public uint SelectionBackgroundColor { get; set; } = CurrentColor;
+
+    /// <summary>
+    /// Gets or sets the foreground colour for selected text, or
+    /// <see cref="CurrentColor"/> when no <c>::selection</c> rule applies.
+    /// </summary>
+    /// <remarks>
+    /// Stored for hosts that paint selection text themselves. The built-in painter
+    /// keeps the element's normal glyph colour and only paints a highlight behind
+    /// the text.
+    /// </remarks>
+    public uint SelectionTextColor { get; set; } = CurrentColor;
+
     /// <summary>Gets or sets the background colour as packed ARGB.</summary>
     public uint BackgroundColor { get; set; } = CssColor.Transparent;
 
@@ -712,6 +745,7 @@ public sealed class ComputedStyle
     private void CopyInheritedScalarsFrom(ComputedStyle parent)
     {
         Color = parent.Color;
+        CaretColor = parent.CaretColor;
         FontFamily = parent.FontFamily;
         FontSize = parent.FontSize;
         FontWeight = parent.FontWeight;
@@ -988,6 +1022,9 @@ public sealed class ComputedStyle
         OutlineStyle = source.OutlineStyle;
         OutlineColor = source.OutlineColor;
         OutlineOffset = source.OutlineOffset;
+        CaretColor = source.CaretColor;
+        SelectionBackgroundColor = source.SelectionBackgroundColor;
+        SelectionTextColor = source.SelectionTextColor;
         ObjectFit = source.ObjectFit;
         TableLayout = source.TableLayout;
         BorderCollapse = source.BorderCollapse;

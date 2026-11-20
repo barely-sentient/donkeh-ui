@@ -61,6 +61,9 @@ namespace Donkeh.Data
     /// <summary>Whether any selector targets the <c>::after</c> pseudo-element.</summary>
     private bool _hasAfterPseudo;
 
+    /// <summary>Whether any selector targets the <c>::selection</c> pseudo-element.</summary>
+    private bool _hasSelectionPseudo;
+
     /// <summary>Whether any selector contains a <c>:hover</c> pseudo-class.</summary>
     private bool _hasHoverRules;
         private readonly List<Rule> _rules;
@@ -227,12 +230,14 @@ namespace Donkeh.Data
         /// </returns>
         /// <remarks>
         /// Layout uses this to skip the selector-matching pipeline for
-        /// <c>::before</c>/<c>::after</c> on stylesheets that never declare them.
+        /// <c>::before</c>/<c>::after</c>, and style resolution uses it to skip
+        /// <c>::selection</c>, on stylesheets that never declare them.
         /// </remarks>
         public bool HasPseudoElement(PseudoElementKind kind) => kind switch
         {
             PseudoElementKind.Before => _hasBeforePseudo,
             PseudoElementKind.After => _hasAfterPseudo,
+            PseudoElementKind.Selection => _hasSelectionPseudo,
             _ => false
         };
 
@@ -489,12 +494,21 @@ namespace Donkeh.Data
             // candidate index must use the last real compound token instead.
             var discriminatorIndex = selector.Length - 1;
 
-            while (discriminatorIndex > 0 && selector[discriminatorIndex].Kind == TokenKind.PseudoElement)
+            while (discriminatorIndex >= 0 && selector[discriminatorIndex].Kind == TokenKind.PseudoElement)
             {
                 discriminatorIndex--;
             }
 
-            var discriminator = NormalizeDiscriminator(selector[discriminatorIndex]);
+            // A selector made only of a pseudo-element, such as ::selection,
+            // applies to every element. Index it under the universal selector
+            // bucket so CollectCandidates can find it.
+            var discriminator = discriminatorIndex >= 0
+                ? NormalizeDiscriminator(selector[discriminatorIndex])
+                : new Token
+                {
+                    Kind = TokenKind.Asterisk,
+                    InternedId = UniversalSelectorId
+                };
             var tokenOffset = AppendSelectorTokens(selector);
 
             for (var i = 0; i < selector.Length; i++)
@@ -569,6 +583,10 @@ namespace Donkeh.Data
             else if (pseudoElement == PseudoElementKind.After)
             {
                 _hasAfterPseudo = true;
+            }
+            else if (pseudoElement == PseudoElementKind.Selection)
+            {
+                _hasSelectionPseudo = true;
             }
 
             // Both lists are parallel to _selectors.

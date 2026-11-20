@@ -164,6 +164,8 @@ public enum CssProperty : ushort
     BackgroundAttachment,
     /// <summary><c>color</c>.</summary>
     Color,
+    /// <summary><c>caret-color</c>; <c>auto</c> or a colour.</summary>
+    CaretColor,
     /// <summary><c>font</c>; shorthand for family, size, weight, style and line height.</summary>
     Font,
     /// <summary><c>font-family</c>.</summary>
@@ -501,6 +503,7 @@ public static class CssPropertyIds
             ("background-origin", CssProperty.BackgroundOrigin),
             ("background-attachment", CssProperty.BackgroundAttachment),
             ("color", CssProperty.Color),
+            ("caret-color", CssProperty.CaretColor),
             ("font", CssProperty.Font),
             ("font-family", CssProperty.FontFamily),
             ("font-size", CssProperty.FontSize),

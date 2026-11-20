@@ -327,6 +327,69 @@ public sealed partial class StyleResolver
     }
 
     /// <summary>
+    /// Applies the colour declarations of matched <c>::selection</c> rules to an
+    /// element's computed style.
+    /// </summary>
+    /// <param name="style">The originating element's style, updated in place.</param>
+    /// <param name="matches">The <c>::selection</c> rules that matched the element.</param>
+    /// <remarks>
+    /// <para>
+    /// Only <c>color</c> and the background colour are retained. Other declarations
+    /// are parsed by the normal machinery but discarded with the temporary probe
+    /// style, because <c>::selection</c> does not generate a box.
+    /// </para>
+    /// <para>
+    /// The probe inherits from <paramref name="style"/> so <c>currentColor</c>,
+    /// <c>var()</c> and relative colours behave as they would in a real
+    /// pseudo-element. A field is only copied when a matching declaration exists,
+    /// leaving the engine's default highlight in place when a rule declares just
+    /// one of the two colours.
+    /// </para>
+    /// </remarks>
+    internal void ResolveSelection(ComputedStyle style, ReadOnlySpan<MatchedRule> matches)
+    {
+        if (matches.Length == 0)
+        {
+            return;
+        }
+
+        var probe = new ComputedStyle();
+        probe.CopyInheritedFromShared(style);
+        CollectCustomProperties(probe, matches);
+        probe.RefreshCustomPropertyHash();
+        ApplyMatches(probe, style, matches, important: false);
+        ApplyMatches(probe, style, matches, important: true);
+
+        var hasBackground = false;
+        var hasTextColor = false;
+
+        for (var i = 0; i < matches.Length; i++)
+        {
+            switch (CssPropertyIds.Get(matches[i].Rule.PropertyId))
+            {
+                case CssProperty.Background:
+                case CssProperty.BackgroundColor:
+                    hasBackground = true;
+                    break;
+
+                case CssProperty.Color:
+                    hasTextColor = true;
+                    break;
+            }
+        }
+
+        if (hasBackground)
+        {
+            style.SelectionBackgroundColor = probe.BackgroundColor;
+        }
+
+        if (hasTextColor)
+        {
+            style.SelectionTextColor = probe.Color;
+        }
+    }
+
+    /// <summary>
     /// Applies declarations from a node's <c>style</c> attribute.
     /// </summary>
     /// <param name="style">Style receiving the inline declarations.</param>
@@ -1085,6 +1148,12 @@ public sealed partial class StyleResolver
 
             case CssProperty.Color:
                 style.Color = ParseColorCached(valueId, value, style.Color);
+                break;
+
+            case CssProperty.CaretColor:
+                style.CaretColor = value.Equals("auto", StringComparison.OrdinalIgnoreCase)
+                    ? ComputedStyle.CurrentColor
+                    : ParseColorCached(valueId, value, style.Color);
                 break;
 
             case CssProperty.Font:

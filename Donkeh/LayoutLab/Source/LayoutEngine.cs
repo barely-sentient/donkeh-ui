@@ -882,6 +882,36 @@ public sealed partial class LayoutEngine
 
         var style = _resolver.Resolve(node, parent, _matchBuffer.AsSpan(0, count));
 
+        // ::selection does not generate a box, but its colours belong to the
+        // element's computed style so the host's selection painter can read them
+        // without a second cascade of its own.
+        if (_table.HasPseudoElement(PseudoElementKind.Selection))
+        {
+            var selectionCount = _table.MatchRules(
+                node,
+                _rendererContext,
+                _pseudoMatchBuffer,
+                PseudoElementKind.Selection);
+
+            if (selectionCount > _pseudoMatchBuffer.Length)
+            {
+                Array.Resize(
+                    ref _pseudoMatchBuffer,
+                    Math.Max(selectionCount, _pseudoMatchBuffer.Length * 2));
+
+                selectionCount = _table.MatchRules(
+                    node,
+                    _rendererContext,
+                    _pseudoMatchBuffer,
+                    PseudoElementKind.Selection);
+            }
+
+            if (selectionCount > 0)
+            {
+                _resolver.ResolveSelection(style, _pseudoMatchBuffer.AsSpan(0, selectionCount));
+            }
+        }
+
         if (useCache)
         {
             _styleCache[node] = new StyleCacheEntry
@@ -1988,6 +2018,20 @@ public sealed partial class LayoutEngine
 
             maxRight = MathF.Max(maxRight, bounds.Right);
             maxBottom = MathF.Max(maxBottom, bounds.Bottom);
+        }
+
+        // A box's own text is painted content too. Single-line inputs, textareas
+        // and preformatted blocks can overflow without any child box, so
+        // omitting the line extents made them unable to scroll to their caret or
+        // to the end of a long line.
+        if (box.Text is { Lines.Length: > 0 } text)
+        {
+            for (var i = 0; i < text.Lines.Length; i++)
+            {
+                var line = text.Lines[i];
+                maxRight = MathF.Max(maxRight, box.TextOrigin.X + line.X + line.Width);
+                maxBottom = MathF.Max(maxBottom, box.TextOrigin.Y + line.Y + line.Height);
+            }
         }
 
         // Scroll metrics are measured from the padding box, matching the

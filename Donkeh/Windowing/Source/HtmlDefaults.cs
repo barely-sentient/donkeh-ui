@@ -41,8 +41,10 @@ public static class HtmlDefaults
     /// elements, replaced/media elements, headings, paragraphs and lists, inline
     /// text semantics, links, rules and breaks, form controls, tables, then image,
     /// media, progress and dialog sizing. Media placeholders default to 300 by
-    /// 150 px, inputs and selects to a 32 px minimum height, and textareas to
-    /// 72 px.
+    /// 150 px. Form controls follow Chrome's compact defaults: a 13.33 px system
+    /// font, a one-pixel grey border, 22 px inputs and selects and a 44 px
+    /// textarea. The sheet also declares a translucent blue <c>::selection</c>
+    /// highlight that authors can override per element.
     /// </para>
     /// <para>
     /// The text is an ordinary CSS string parsed by the tokenizer each time the
@@ -62,6 +64,11 @@ public static class HtmlDefaults
             color: #1f2328;
             background-color: #ffffff;
         }
+
+        /* Browsers paint the system highlight behind selected text and leave the
+           glyphs in their normal colour only when the highlight is translucent.
+           Authors can override this with their own ::selection rule. */
+        ::selection { background-color: rgba(0, 117, 255, 0.5); }
 
         head, title, meta, link, style, script, base, template, noscript,
         param, source, track, datalist { display: none; }
@@ -106,39 +113,75 @@ public static class HtmlDefaults
         hr { border: 0; border-top-width: 1px; border-top-style: solid; border-top-color: #d0d7de; margin: 1em 0; height: 0; }
         br { display: block; height: 1.2em; }
 
+        /* Chrome's form controls use a 13.33 px system font, a one-pixel grey
+           border and, apart from text fields, a light button surface. Keeping the
+           controls close to that baseline makes an unstyled page look familiar
+           while leaving every value overridable by an author sheet. */
         button, input, select, textarea {
-            font-family: inherit;
-            font-size: 14px;
-            color: inherit;
-            background-color: #f6f8fa;
+            font-family: "Segoe UI", Arial, sans-serif;
+            font-size: 13.3333px;
+            line-height: normal;
+            color: #000000;
+            background-color: #ffffff;
             border-width: 1px;
             border-style: solid;
-            border-color: #d0d7de;
-            border-radius: 6px;
-            padding: 6px 10px;
+            border-color: #767676;
+            border-radius: 2px;
+            padding: 1px 2px;
             margin: 0;
         }
 
-        button { cursor: pointer; font-weight: 600; }
+        button, input[type="button"], input[type="submit"], input[type="reset"], select {
+            background-color: #efefef;
+        }
+        button { cursor: pointer; padding: 1px 6px; }
+        /* Reserve space for the host-painted dropdown chevron. */
+        select { cursor: default; padding: 0 18px 0 4px; }
+
         input {
-            min-height: 32px;
+            min-height: 22px;
             /* A text field is a single-line control: its value must never wrap.
-               Long values clip (and ellipsize when the author asks for it)
-               instead of overflowing the control's line box. */
+               Long values clip and scroll instead of overflowing the control's
+               line box. */
             white-space: nowrap;
             overflow: hidden;
-            text-overflow: ellipsis;
+            text-overflow: clip;
         }
-        textarea { width: 120px; min-height: 72px; white-space: pre-wrap; }
+        textarea {
+            width: 184px;
+            min-height: 44px;
+            padding: 2px;
+            overflow: auto;
+            white-space: pre-wrap;
+            font-family: Consolas, "Courier New", monospace;
+        }
         select {
-            min-height: 32px;
+            min-height: 22px;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
         }
         select option { display: none; }
-        input[type="checkbox"], input[type="radio"] { min-height: 0; padding: 0; }
-        button:disabled, input:disabled, select:disabled, textarea:disabled { color: #8c959f; background-color: #eff2f5; }
+
+        input[type="checkbox"], input[type="radio"] {
+            width: 13px;
+            height: 13px;
+            min-height: 0;
+            padding: 0;
+            background-color: #ffffff;
+        }
+        input[type="range"] { min-height: 0; padding: 0; border: 0; background-color: transparent; }
+
+        input:focus, textarea:focus, select:focus {
+            outline-width: 2px;
+            outline-style: solid;
+            outline-color: #0b57d0;
+            outline-offset: -1px;
+        }
+        button:disabled, input:disabled, select:disabled, textarea:disabled {
+            color: #8c959f;
+            background-color: #eff2f5;
+        }
 
         table { display: table; width: 100%; margin: 0.75em 0; border-collapse: collapse; }
         thead, tbody, tfoot { display: table-row-group; }

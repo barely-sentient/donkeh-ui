@@ -12,7 +12,13 @@ namespace Donkeh.Data
         Before,
 
         /// <summary><c>::after</c> generated content.</summary>
-        After
+        After,
+
+        /// <summary>
+        /// <c>::selection</c>; styles the highlight behind selected text rather than
+        /// generating a box.
+        /// </summary>
+        Selection
     }
 
     /// <summary>

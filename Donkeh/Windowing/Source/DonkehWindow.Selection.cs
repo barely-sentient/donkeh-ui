@@ -39,13 +39,16 @@ namespace Donkeh.Windowing;
 /// </remarks>
 public sealed partial class DonkehWindow
 {
-    // A translucent blue works on both the light app and the dark inspector.
     /// <summary>
-    /// Packed <c>0xAARRGGBB</c> colour of the selection highlight: a translucent
-    /// blue that stays legible on both the light application and the dark
-    /// inspector.
+    /// Packed <c>0xAARRGGBB</c> fallback colour of the selection highlight.
     /// </summary>
-    private const uint SelectionColor = 0x803390FF;
+    /// <remarks>
+    /// Used when no <c>::selection</c> rule supplies a
+    /// <c>background-color</c>. The translucent blue stays legible on both the
+    /// light application and the dark inspector while leaving the glyph colour
+    /// untouched.
+    /// </remarks>
+    private const uint DefaultSelectionColor = 0x800075FF;
 
     /// <summary>
     /// The active selection, or <see langword="null"/> when nothing is selected.
@@ -1456,6 +1459,25 @@ public sealed partial class DonkehWindow
     }
 
     /// <summary>
+    /// Resolves the colour painted behind selected text for one box.
+    /// </summary>
+    /// <param name="style">The box's computed style.</param>
+    /// <returns>
+    /// The <c>::selection</c> background colour, or
+    /// <see cref="DefaultSelectionColor"/> when the sheet does not override it.
+    /// </returns>
+    /// <remarks>
+    /// <see cref="ComputedStyle.CurrentColor"/> is the sentinel for "no selection
+    /// colour declared". An explicitly transparent colour is honoured and paints
+    /// no highlight.
+    /// </remarks>
+    private static uint SelectionHighlightColor(ComputedStyle style)
+    {
+        var color = style.SelectionBackgroundColor;
+        return color == ComputedStyle.CurrentColor ? DefaultSelectionColor : color;
+    }
+
+    /// <summary>
     /// Adds one rectangle per visual line for an offset range in a run.
     /// </summary>
     /// <param name="instructions">Destination draw list.</param>
@@ -1491,9 +1513,21 @@ public sealed partial class DonkehWindow
         var (scrollX, scrollY) = AccumulatedScroll(box);
         var originX = box.TextOrigin.X - scrollX;
         var originY = box.TextOrigin.Y - scrollY;
-        Rect? clipRect = clip
-            ? box.ContentBox.Translate(-scrollX, -scrollY)
-            : SelectionClipRect(box);
+
+        // The content clip stays put while the control's own content scrolls;
+        // only ancestor scroll moves the clip itself. Text geometry still uses
+        // the accumulated scroll above, which includes the control's own offset.
+        Rect? clipRect;
+
+        if (clip)
+        {
+            var (clipScrollX, clipScrollY) = AccumulatedScroll(box.Parent);
+            clipRect = box.ContentBox.Translate(-clipScrollX, -clipScrollY);
+        }
+        else
+        {
+            clipRect = SelectionClipRect(box);
+        }
         var style = text.Style;
         var firstLine = 0;
         var lastLine = lines.Length;
@@ -1538,7 +1572,7 @@ public sealed partial class DonkehWindow
                 continue;
             }
 
-            instructions.AddDrawRect(rect, SelectionColor);
+            instructions.AddDrawRect(rect, SelectionHighlightColor(box.Style));
         }
     }
 
@@ -1742,9 +1776,9 @@ public sealed partial class DonkehWindow
 
             var textValue = _editText ?? string.Empty;
             var starts = LineStarts(textValue, text.Lines);
-            var scroll = AccumulatedScroll(box);
-            var top = box.ContentBox.Y - scroll.Y;
-            var bottom = box.ContentBox.Bottom - scroll.Y;
+            var (_, clipScrollY) = AccumulatedScroll(box.Parent);
+            var top = box.ContentBox.Y - clipScrollY;
+            var bottom = box.ContentBox.Bottom - clipScrollY;
             var offset = y < top
                 ? 0
                 : y > bottom

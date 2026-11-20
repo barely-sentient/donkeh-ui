@@ -28,6 +28,16 @@ public class DataEngineTests
     }
 
     [Fact]
+    public void HasPseudoElementReportsSelectionRules()
+    {
+        var table = Build("::selection { background-color: red; }");
+
+        Assert.True(table.HasPseudoElement(PseudoElementKind.Selection));
+        Assert.False(table.HasPseudoElement(PseudoElementKind.Before));
+        Assert.False(table.HasPseudoElement(PseudoElementKind.After));
+    }
+
+    [Fact]
     public void KeepsDescendantAndCompoundSelectorsDistinct()
     {
         var table = Build(".a .b { color: red; } .a.b { color: blue; }");
