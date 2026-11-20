@@ -37,11 +37,23 @@ namespace Donkeh.UILab
         /// <summary>Gets the normalised event name, such as <c>click</c> or <c>input</c>.</summary>
         public string Type { get; }
 
-        /// <summary>Gets the deepest element involved in the event.</summary>
-        public ElementNode? Target { get; internal set; }
+        /// <summary>
+        /// Gets or sets the deepest element involved in the event.
+        /// </summary>
+        /// <remarks>
+        /// Hosts and test dispatchers assign this before invoking a handler.
+        /// Application handlers should treat it as read-only.
+        /// </remarks>
+        public ElementNode? Target { get; set; }
 
-        /// <summary>Gets the element whose handler is currently running.</summary>
-        public ElementNode? CurrentTarget { get; internal set; }
+        /// <summary>
+        /// Gets or sets the element whose handler is currently running.
+        /// </summary>
+        /// <remarks>
+        /// When an event bubbles, this is the ancestor that supplied the handler
+        /// while <see cref="Target"/> remains the original element.
+        /// </remarks>
+        public ElementNode? CurrentTarget { get; set; }
 
         /// <summary>Gets whether the handler asked the host to suppress the default action.</summary>
         public bool DefaultPrevented { get; protected set; }
@@ -62,6 +74,24 @@ namespace Donkeh.UILab
         /// this mainly documents intent and leaves room for a richer dispatcher.
         /// </remarks>
         public void StopPropagation() => PropagationStopped = true;
+
+        /// <summary>
+        /// Invokes a handler if its delegate shape accepts this event type.
+        /// </summary>
+        /// <param name="handler">The registered handler to invoke.</param>
+        /// <returns>
+        /// <see langword="true"/> when a typed <c>Action&lt;TEvent&gt;</c> handler
+        /// was invoked; otherwise <see langword="false"/>.
+        /// </returns>
+        /// <remarks>
+        /// Hosts and test dispatchers call this before falling back to the legacy
+        /// parameterless, string or numeric delegate shapes.
+        /// </remarks>
+        public bool TryInvokeHandler(Delegate handler)
+        {
+            ArgumentNullException.ThrowIfNull(handler);
+            return TryInvoke(handler);
+        }
 
         /// <summary>
         /// Invokes a handler that accepts this event type, if its delegate shape
@@ -122,11 +152,17 @@ namespace Donkeh.UILab
         /// <summary>Gets the pointer Y in window CSS pixels.</summary>
         public float ClientY { get; }
 
-        /// <summary>Gets the pointer X relative to the handling element's painted border box.</summary>
-        public float LocalX { get; internal set; }
+        /// <summary>
+        /// Gets or sets the pointer X relative to the handling element's painted
+        /// border box.
+        /// </summary>
+        public float LocalX { get; set; }
 
-        /// <summary>Gets the pointer Y relative to the handling element's painted border box.</summary>
-        public float LocalY { get; internal set; }
+        /// <summary>
+        /// Gets or sets the pointer Y relative to the handling element's painted
+        /// border box.
+        /// </summary>
+        public float LocalY { get; set; }
 
         /// <summary>Gets the DOM button number: 0 left, 1 middle, 2 right.</summary>
         public int Button { get; }

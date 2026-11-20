@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+        <RootNamespace>Donkeh.Testing</RootNamespace>
+        <AssemblyName>Donkeh.Testing</AssemblyName>
+        <LangVersion>latest</LangVersion>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\Data\Source\Data.csproj" />
+        <ProjectReference Include="..\..\DataEngine\Source\DataEngine.csproj" />
+        <ProjectReference Include="..\..\LayoutLab\Source\LayoutLab.csproj" />
+        <ProjectReference Include="..\..\Parser\Source\Donkeh.Parser.csproj" />
+        <ProjectReference Include="..\..\UILab\Source\Donkeh.UILab.csproj" />
+        <ProjectReference Include="..\..\Windowing\Source\Donkeh.Windowing.csproj" />
+    </ItemGroup>
+
+</Project>

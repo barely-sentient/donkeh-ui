@@ -266,6 +266,70 @@ namespace Donkeh.UILab
         }
 
         /// <summary>
+        /// Replaces the mounted root's virtual description and patches the live
+        /// tree in place.
+        /// </summary>
+        /// <param name="vdom">
+        /// The new logical root. It must be the same kind of node as the mounted
+        /// root to preserve component state and element identity; otherwise the old
+        /// subtree is unmounted and a fresh one is mounted.
+        /// </param>
+        /// <returns>The live root after patching.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="vdom"/> is null.</exception>
+        /// <exception cref="InvalidOperationException">The renderer is not mounted.</exception>
+        /// <remarks>
+        /// <para>
+        /// This is the host-facing equivalent of a parent re-render for the root
+        /// node. Tests use it to supply new props, while development tooling can use
+        /// it after hot reload. Effects queued by the patch are committed before the
+        /// method returns, and <see cref="Version"/> is bumped once for the update.
+        /// </para>
+        /// <para>
+        /// Calling this while a flush is running is rejected because the running
+        /// flush owns the tree. Create a new renderer when no state should survive.
+        /// </para>
+        /// </remarks>
+        public Node Update(Node vdom)
+        {
+            ArgumentNullException.ThrowIfNull(vdom);
+
+            if (_rootVdom is null || _rootLive is null)
+            {
+                throw new InvalidOperationException("The renderer is not mounted.");
+            }
+
+            if (_flushing)
+            {
+                throw new InvalidOperationException("A renderer update cannot run during a flush.");
+            }
+
+            var (live, logical) = DiffNode(_rootVdom, vdom, null, null);
+            _rootVdom = logical;
+            _rootLive = live;
+            _rootComponent = logical as ComponentNode;
+
+            _flushing = true;
+
+            try
+            {
+                CommitEffects();
+            }
+            finally
+            {
+                _flushing = false;
+            }
+
+            if (_dirty.Count > 0)
+            {
+                Flush();
+            }
+
+            Version++;
+            AfterUpdate?.Invoke();
+            return live;
+        }
+
+        /// <summary>
         /// Applies every queued state update and runs the resulting effects.
         /// </summary>
         /// <exception cref="InvalidOperationException">

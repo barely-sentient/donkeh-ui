@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Component testing · Donkeh</title>
+    <meta name="description" content="Test Donkeh components headlessly with CSS queries, layout assertions and synthetic events.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/donkeh-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+                        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="component-testing.html">Component testing</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+                <a href="routing.html">Routing and setPage</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Reference</span>
+                <a href="html-elements.html">HTML elements</a>
+                <a href="event-reference.html">Event reference</a>
+                <a href="css-support.html">CSS support</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Primitives</span>
+                <a href="image.html">Image</a>
+                <a href="video.html">Video</a>
+                <a href="canvas.html">Canvas</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Implementation for Nerds</span>
+                <a href="implementation.html">Overview</a>
+                <a class="nav-sub" href="implementation-parser.html">Parser</a>
+                <a class="nav-sub" href="implementation-data.html">Data</a>
+                <a class="nav-sub" href="implementation-dataengine.html">DataEngine</a>
+                <a class="nav-sub" href="implementation-layoutlab.html">LayoutLab</a>
+                <a class="nav-sub" href="implementation-uilab.html">UILab</a>
+                <a class="nav-sub" href="implementation-hosting.html">Hosting</a>
+                <a class="nav-sub" href="implementation-windowing.html">Windowing</a>
+                <a class="nav-sub" href="implementation-android.html">Android</a>
+                <a class="nav-sub" href="implementation-browser.html">Browser</a>
+                <a class="nav-sub" href="implementation-inspector.html">Inspector</a>
+                <a class="nav-sub" href="implementation-cli.html">CLI tool</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/donkeh-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Components <span>/</span> Component testing</div>
+        <h1>Component testing</h1>
+        <p class="lead">
+            <code>Donkeh.Testing</code> mounts a component headlessly, runs the real
+            CSS and layout pipeline, and dispatches synthetic input. Tests can assert
+            on rendered text, attributes, computed styles and box geometry without
+            opening a window.
+        </p>
+
+        <h2 id="install">Adding the library</h2>
+        <p>
+            Reference the testing project from a test project. Existing Donkeh
+            applications already depend on the UILab, LayoutLab, DataEngine and
+            Windowing assemblies the harness uses.
+        </p>
+
+        <div class="code" data-label="MyApp.Tests.csproj">
+<pre><code>&lt;ItemGroup&gt;
+  &lt;ProjectReference Include="..\..\Donkeh\Testing\Source\Donkeh.Testing.csproj" /&gt;
+&lt;/ItemGroup&gt;</code></pre>
+        </div>
+
+        <h2 id="render">Mounting a component</h2>
+        <p>
+            <code>ComponentTest.Render</code> is the entry point. It mounts the
+            virtual tree, compiles the user-agent sheet plus every
+            <code>[Stylesheet(...)]</code> declaration found in loaded assemblies,
+            and performs an initial layout.
+        </p>
+
+        <div class="code" data-label="CounterTests.cs">
+<pre><code>using Donkeh.Testing;
+using static Donkeh.UILab._;
+
+var page = ComponentTest.Render(C&lt;Counter&gt;());
+
+Assert.Equal("Counter: 0", page.Find(".counter-btn").Text);
+
+page.Click(".counter-btn");
+
+Assert.Equal("Counter: 1", page.Find(".counter-btn").Text);</code></pre>
+        </div>
+
+        <p>Pass a tree directly when the test does not need a component:</p>
+
+        <div class="code" data-label="Inline tree">
+<pre><code>var page = ComponentTest.Render(
+    H("button", new Props { ClassName = "save" }, Text("Save")));
+
+page.Click(".save");</code></pre>
+        </div>
+
+        <h2 id="options">Options and stylesheets</h2>
+        <p>
+            The optional configure callback edits a
+            <code>ComponentTestOptions</code> instance. It controls the viewport,
+            root font size, text measurer, declared-style loading and extra CSS.
+        </p>
+
+        <div class="code" data-label="Options">
+<pre><code>var page = ComponentTest.Render(
+    C&lt;Card&gt;(),
+    options =&gt;
+    {
+        options.ViewportWidth = 640;
+        options.ViewportHeight = 480;
+        options.Stylesheets.Add(
+            ".card { border: 1px solid #d0d7de; }");
+    });</code></pre>
+        </div>
+
+        <p>
+            <code>AddStylesheet</code> appends CSS after mount and
+            <code>Resize</code> changes the viewport. Both recompile or relayout as
+            needed:
+        </p>
+
+        <div class="code" data-label="Late styles">
+<pre><code>page.AddStylesheet(".card.is-wide { width: 480px; }");
+page.Resize(800, 600);</code></pre>
+        </div>
+
+        <h2 id="update">Updating props</h2>
+        <p>
+            <code>Update</code> patches the mounted root with a new virtual
+            description. Component instances and hook state survive when the root
+            node kind does not change, which is what makes prop-change tests behave
+            like a parent re-render.
+        </p>
+
+        <div class="code" data-label="Prop updates">
+<pre><code>var page = ComponentTest.Render&lt;Badge, BadgeProps&gt;(
+    new BadgeProps { Label = "New" });
+
+page.Update(C&lt;Badge, BadgeProps&gt;(
+    new BadgeProps { Label = "Archived" }));</code></pre>
+        </div>
+
+        <h2 id="queries">Queries</h2>
+        <p>
+            <code>Find</code> accepts a CSS selector and throws
+            <code>ComponentQueryException</code> when nothing matches.
+            <code>TryFind</code> returns <code>null</code> instead. Queries return
+            <code>TestElement</code> wrappers with text, attributes, classes,
+            computed style and bounds.
+        </p>
+
+        <div class="code" data-label="Queries">
+<pre><code>var button = page.Find(".toolbar button.primary");
+var optional = page.TryFind("#missing");
+
+string text = button.Text;
+string? title = button.GetAttribute("title");
+bool visible = button.IsVisible;
+float width = button.Bounds.Width;
+var style = button.Style;
+
+var allRows = page.FindAll(".row");
+var byText = page.FindByText("No files yet.");</code></pre>
+        </div>
+
+        <h2 id="events">Dispatching events</h2>
+        <p>
+            Event helpers dispatch to the target or the nearest ancestor handler,
+            matching the window's bubbling contract. Handlers are invoked with typed
+            event payloads when they accept one, or with the legacy
+            <code>Action</code>, <code>Action&lt;string&gt;</code> and
+            <code>Action&lt;float, float&gt;</code> shapes otherwise. Exceptions are
+            not swallowed.
+        </p>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Helper</th><th>Event</th></tr></thead>
+                <tbody>
+                    <tr><td><code>Click</code></td><td><code>click</code></td></tr>
+                    <tr><td><code>MouseDown</code>, <code>MouseUp</code></td><td><code>mousedown</code>, <code>mouseup</code></td></tr>
+                    <tr><td><code>PointerDown</code>, <code>PointerMove</code>, <code>PointerUp</code></td><td>Pointer events</td></tr>
+                    <tr><td><code>Hover</code>, <code>Unhover</code></td><td><code>mouseover</code>, <code>mouseout</code> plus the CSS hover chain</td></tr>
+                    <tr><td><code>Scroll</code></td><td><code>scroll</code> and an updated scroll offset</td></tr>
+                    <tr><td><code>Input</code>, <code>Type</code></td><td><code>input</code> with the control value</td></tr>
+                    <tr><td><code>Change</code></td><td><code>change</code></td></tr>
+                    <tr><td><code>Paste</code>, <code>Submit</code>, <code>KeyDown</code></td><td>Their matching events</td></tr>
+                    <tr><td><code>Focus</code>, <code>Blur</code></td><td><code>focus</code> / <code>blur</code> plus interaction state</td></tr>
+                    <tr><td><code>Dispatch</code></td><td>Any custom <code>Event</code> instance</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="code" data-label="Input and scroll">
+<pre><code>page.Input(".search", "quarterly report");
+page.Type(".search", " final");
+page.Scroll(".results", 0, 120);
+page.KeyDown(".search", "Enter");</code></pre>
+        </div>
+
+        <p>
+            Every helper calls <code>Settle</code> after dispatching. That flushes
+            queued component state and reruns layout, so the next assertion sees the
+            committed result. When a test mutates a node directly, call
+            <code>page.Settle()</code> before querying.
+        </p>
+
+        <div class="code" data-label="Settle manually">
+<pre><code>page.Find(".details").Element.SetAttribute("open", "");
+page.Settle();
+
+Assert.True(page.Find(".details").HasAttribute("open"));</code></pre>
+        </div>
+
+        <div class="callout tip">
+            <strong>Deterministic geometry</strong>
+            Layout uses a deterministic text measurer by default. Supply
+            <code>ComponentTestOptions.TextMeasurer</code> when a test needs a
+            specific font metric; do not depend on installed fonts.
+        </div>
+
+        <div class="page-nav">
+            <a class="prev" href="using-hooks.html"><span>Previous</span>Using hooks</a>
+            <a class="next" href="html-elements.html"><span>Next</span>HTML elements</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh — CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/donkeh-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>

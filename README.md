@@ -71,6 +71,7 @@ dotnet watch --project test-container run
 - [Event reference](https://barely-sentient.github.io/donkeh-ui/event-reference.html)
 - [CSS support](https://barely-sentient.github.io/donkeh-ui/css-support.html)
 - [Using hooks](https://barely-sentient.github.io/donkeh-ui/using-hooks.html)
+- [Component testing](https://barely-sentient.github.io/donkeh-ui/component-testing.html)
 - [Inspector overview](https://barely-sentient.github.io/donkeh-ui/inspector.html)
 - [Host permissions](https://barely-sentient.github.io/donkeh-ui/host-permissions.html)
 
