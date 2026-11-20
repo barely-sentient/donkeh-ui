@@ -216,6 +216,21 @@ public sealed class HtmlFormControlDefaultsTests
     }
 
     [Fact]
+    public void TextareaHonoursTheInlineSizeWrittenByResizeDragging()
+    {
+        var textarea = RenderedHtml.Element("textarea", new Props
+        {
+            Attributes = new Dictionary<string, string>
+            {
+                ["style"] = "width:300px;height:120px;"
+            }
+        }, Text("Resized"));
+
+        Assert.Equal(300, textarea.Bounds.Width, 2);
+        Assert.Equal(120, textarea.Bounds.Height, 2);
+    }
+
+    [Fact]
     public void ColorInputUsesAPointingCursor()
     {
         var color = RenderedHtml.Element("input", new Props { Type = "color" });

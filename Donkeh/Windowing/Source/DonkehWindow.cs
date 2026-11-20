@@ -502,6 +502,18 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// <summary>Persistent custom colours shown by the native colour chooser.</summary>
     private readonly uint[] _colorDialogCustomColors = new uint[16];
 
+    /// <summary>Textarea currently being resized by a pointer drag, or null.</summary>
+    private ElementNode? _resizeTarget;
+
+    private float _resizeStartX;
+    private float _resizeStartY;
+    private float _resizeStartWidth;
+    private float _resizeStartHeight;
+    private float _resizeEdgeWidth;
+    private float _resizeEdgeHeight;
+    private bool _resizeBorderBox;
+    private string _resizeStylePrefix = string.Empty;
+
     /// <summary>
     /// Horizontal caret position to preserve while moving between visual lines
     /// with Up and Down, or <see langword="null"/> when the next vertical move
@@ -4632,6 +4644,10 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
                 PaintSelectIndicator(box, instructions);
                 break;
 
+            case "textarea":
+                PaintResizeGrip(box, instructions);
+                break;
+
             case "progress":
             case "meter":
                 PaintProgress(box, instructions, constants, element);
@@ -5355,6 +5371,49 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     }
 
     /// <summary>
+    /// Draws the diagonal resize grip in the bottom-right corner of a textarea.
+    /// </summary>
+    /// <param name="box">The textarea's layout box.</param>
+    /// <param name="instructions">Display list to append to.</param>
+    /// <remarks>
+    /// The grip is decorative; hit testing uses the same sixteen-pixel corner in
+    /// <see cref="IsOverTextareaResizeHandle"/>.
+    /// </remarks>
+    private static void PaintResizeGrip(LayoutBox box, InstructionBuffer instructions)
+    {
+        var rect = PaintedBorderBox(box);
+
+        if (rect.Width < 24 || rect.Height < 24)
+        {
+            return;
+        }
+
+        const uint color = 0xFF666666;
+
+        // Chrome paints two parallel 45° strokes in the corner. Both end at the
+        // same point on the bottom edge, three pixels in from the right and
+        // bottom borders, and run up and to the right: the outer stroke is
+        // eight pixels long and the inner one four. The instruction stream has
+        // no diagonal primitive, so each stroke is a one-pixel staircase.
+        DrawGripStroke(instructions, rect, 8, color);
+        DrawGripStroke(instructions, rect, 4, color);
+
+        static void DrawGripStroke(
+            InstructionBuffer instructions,
+            Rect rect,
+            int length,
+            uint color)
+        {
+            for (var step = 0; step < length; step++)
+            {
+                instructions.AddDrawRect(
+                    new Rect(rect.Right - 3 - length + step, rect.Bottom - 3 - step, 1, 1),
+                    color);
+            }
+        }
+    }
+
+    /// <summary>
     /// Paints the colour swatch inside an <c>input[type=color]</c>.
     /// </summary>
     /// <param name="box">The input's layout box.</param>
@@ -5870,6 +5929,26 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             else
             {
                 _rangeDragElement = null;
+            }
+
+            return;
+        }
+
+        if (_resizeTarget is not null)
+        {
+            if (!IsLeftMouseButtonDown())
+            {
+                EndTextareaResize();
+                return;
+            }
+
+            if (IsLiveNode(_resizeTarget))
+            {
+                UpdateTextareaResize(x, y);
+            }
+            else
+            {
+                _resizeTarget = null;
             }
 
             return;
@@ -6419,6 +6498,18 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             return;
         }
 
+        // The resize grip sits in the corner where a scrollbar may also be
+        // present, so claim it before scrollbar hit testing.
+        if (button == MouseButton.Left
+            && HitTest(_mouseX, _mouseY) is { } resizeHit
+            && TryBeginTextareaResize(resizeHit))
+        {
+            _pressed = resizeHit;
+            SetActive(resizeHit);
+            Invoke(resizeHit, "mousedown");
+            return;
+        }
+
         // A finger drag over plain scrollable content becomes a pan. Content
         // that owns the gesture (pointerdown handlers, controls, media and
         // scrollbars) keeps the normal press path.
@@ -6535,6 +6626,12 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         SetActive(element);
 
         var shift = IsShiftPressed();
+
+        if (element is not null && TryBeginTextareaResize(element))
+        {
+            Invoke(element, "mousedown");
+            return;
+        }
 
         if (element is not null && IsRangeInput(element))
         {
@@ -6664,6 +6761,12 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
                 UpdateCursor(HitTest(_mouseX, _mouseY));
             }
 
+            return;
+        }
+
+        if (_resizeTarget is not null)
+        {
+            EndTextareaResize();
             return;
         }
 
@@ -6942,6 +7045,91 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         _needsLayout = true;
         Invoke(element, "input", hex);
         Invoke(element, "change", hex);
+    }
+
+    /// <summary>Returns whether a point is inside a textarea's resize grip.</summary>
+    private bool IsOverTextareaResizeHandle(ElementNode element, float x, float y)
+    {
+        if (element.Tag != "textarea")
+        {
+            return false;
+        }
+
+        var layout = LayoutFor(element);
+
+        if (layout is null || !layout.TryGetBox(element, out var box))
+        {
+            return false;
+        }
+
+        var rect = PaintedBorderBox(box);
+
+        if (rect.Width < 24 || rect.Height < 24)
+        {
+            return false;
+        }
+
+        return x >= rect.Right - 16 && y >= rect.Bottom - 16;
+    }
+
+    /// <summary>Starts a resize gesture when the press lands on a textarea grip.</summary>
+    private bool TryBeginTextareaResize(ElementNode element)
+    {
+        if (!IsOverTextareaResizeHandle(element, _mouseX, _mouseY))
+        {
+            return false;
+        }
+
+        var layout = LayoutFor(element);
+
+        if (layout is null || !layout.TryGetBox(element, out var box))
+        {
+            return false;
+        }
+
+        var style = GetAttribute(element, "style");
+        _resizeStylePrefix = string.IsNullOrWhiteSpace(style)
+            ? string.Empty
+            : style.TrimEnd().TrimEnd(';') + ";";
+        _resizeBorderBox = box.Style.BoxSizing == BoxSizing.BorderBox;
+        _resizeEdgeWidth = box.Padding.Horizontal + box.Border.Horizontal;
+        _resizeEdgeHeight = box.Padding.Vertical + box.Border.Vertical;
+        _resizeStartX = _mouseX;
+        _resizeStartY = _mouseY;
+        _resizeStartWidth = box.BorderBox.Width;
+        _resizeStartHeight = box.BorderBox.Height;
+        _resizeTarget = element;
+        return true;
+    }
+
+    /// <summary>Applies the current pointer delta to the resized textarea.</summary>
+    private void UpdateTextareaResize(float x, float y)
+    {
+        if (_resizeTarget is null)
+        {
+            return;
+        }
+
+        var width = MathF.Max(32, _resizeStartWidth + (x - _resizeStartX));
+        var height = MathF.Max(24, _resizeStartHeight + (y - _resizeStartY));
+        var cssWidth = _resizeBorderBox ? width : width - _resizeEdgeWidth;
+        var cssHeight = _resizeBorderBox ? height : height - _resizeEdgeHeight;
+        cssWidth = MathF.Max(1, cssWidth);
+        cssHeight = MathF.Max(1, cssHeight);
+
+        _resizeTarget.SetAttribute(
+            "style",
+            $"{_resizeStylePrefix}width:{cssWidth:0.##}px;height:{cssHeight:0.##}px;");
+        _needsLayout = true;
+    }
+
+    /// <summary>Ends a textarea resize gesture.</summary>
+    private void EndTextareaResize()
+    {
+        _resizeTarget = null;
+        _pressed = null;
+        SetActive(null);
+        _needsLayout = true;
     }
 
     /// <summary>
@@ -8709,6 +8897,10 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             SetCursor(element.HasClass("dt-splitter-bottom")
                 ? StandardCursor.VResize
                 : StandardCursor.HResize);
+        }
+        else if (element is not null && IsOverTextareaResizeHandle(element, _mouseX, _mouseY))
+        {
+            SetCursor(StandardCursor.NwseResize);
         }
         else if (element is not null
             && (IsTextControl(element) || HasSelectableText(element)))
