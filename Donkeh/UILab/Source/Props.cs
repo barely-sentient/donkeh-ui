@@ -42,7 +42,7 @@ namespace Donkeh.UILab
     /// </example>
     /// <seealso cref="Attr"/>
     /// <seealso cref="ElementNode.WithAttribute(Attr)"/>
-    public class Props
+    public partial class Props
     {
         /// <summary>Gets or sets the <c>id</c> attribute.</summary>
         public string? Id { get; init; }
@@ -589,7 +589,7 @@ namespace Donkeh.UILab
     /// </code>
     /// </example>
     /// <seealso cref="Component{TProps}"/>
-    public class PropsWithChildren
+    public partial class PropsWithChildren
     {
         /// <summary>
         /// Gets the child nodes supplied by the parent, or <see langword="null"/>

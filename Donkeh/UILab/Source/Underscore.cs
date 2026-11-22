@@ -49,39 +49,31 @@ namespace Donkeh.UILab
         }
 
         /// <summary>
-        /// Creates an element with optional props and children.
+        /// Creates an element with props and children. The props argument is typed as
+        /// <see cref="Props"/> so a target-typed <c>new()</c> defaults to
+        /// <see cref="Props"/> instead of <see cref="object"/>.
         /// </summary>
         /// <param name="tagName">The tag name, for example <c>div</c> or <c>button</c>.</param>
-        /// <param name="first">
-        /// The optional first argument. It may be a <see cref="Props"/> instance to
-        /// apply, a <see cref="Node"/> child, a <see cref="string"/> that becomes a
-        /// text child, a sequence of nodes to prepend, or <see langword="null"/>.
-        /// </param>
-        /// <param name="rest">
-        /// Additional children. <see langword="null"/> entries are skipped.
-        /// </param>
-        /// <returns>
-        /// A new <see cref="ElementNode"/> containing the supplied children.
-        /// </returns>
-        /// <exception cref="ArgumentException">
-        /// Thrown when <paramref name="tagName"/> is null or empty, or when
-        /// <paramref name="first"/> is not one of the supported kinds.
-        /// </exception>
-        /// <remarks>
-        /// <para>
-        /// The overload exists so markup reads naturally: props come first, then
-        /// children. When <paramref name="first"/> is a <see cref="Props"/>, its
-        /// values (including <see cref="Props.Key"/>) are applied to the element
-        /// and only <paramref name="rest"/> becomes children.
-        /// </para>
-        /// <para>
-        /// Strings are wrapped in a <see cref="TextNode"/>. A sequence is
-        /// concatenated with <paramref name="rest"/> before normalisation, so it is
-        /// enumerated exactly once. Null children are removed by
-        /// <see cref="NormalizeChildren(Node?[])"/>.
-        /// </para>
-        /// </remarks>
-        public static ElementNode H(string tagName, object? first = null, params Node?[] rest)
+        /// <param name="props">Properties for the element, or <see langword="null"/>.</param>
+        /// <param name="children">Child nodes. <see langword="null"/> entries are skipped.</param>
+        public static ElementNode H(string tagName, Props? props, params Node?[] children)
+        {
+            var element = new ElementNode(tagName);
+
+            if (props is not null)
+            {
+                element.ApplyProps(props);
+            }
+
+            element.VdomChildren = NormalizeChildren(children);
+            return element;
+        }
+
+        /// <summary>
+        /// Creates an element from a non-props first argument: a child node, a
+        /// string, a sequence of children, or <see langword="null"/>.
+        /// </summary>
+        public static ElementNode H(string tagName, object? first, params Node?[] rest)
         {
             var element = new ElementNode(tagName);
 

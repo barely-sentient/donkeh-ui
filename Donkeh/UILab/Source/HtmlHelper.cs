@@ -4,7 +4,7 @@ namespace Donkeh.UILab
     /// Strongly named factories for the standard HTML elements.
     /// </summary>
     /// <remarks>
-    /// Each method is a thin overload over <see cref="_.H(string, object?, Node?[])"/>
+    /// Each method is a thin overload over <see cref="_.H(string, Props?, Node?[])"/>
     /// that fixes the tag name. Props are optional in the sense that callers may
     /// pass <see langword="null"/> for elements without attributes, and media
     /// elements accept their typed props such as <c>CanvasProps</c>,
