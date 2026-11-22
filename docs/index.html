@@ -44,11 +44,13 @@
             <h1>Build interfaces with <span class="gradient">real CSS.</span></h1>
             <p class="lead">
                 Donkeh brings a full CSS engine, a reconciled virtual DOM and native
-                desktop, Android and browser hosts to plain C#. Write components once;
-                choose the platforms you want.
+                desktop, Android and browser hosts to .NET. Write components with
+                real CSS and a JSX-like syntax (CSX) that feels like React, or stay
+                in plain C# â€” your choice.
             </p>
             <div class="hero-actions">
-                <a class="button primary" href="getting-started.html">Get started <span aria-hidden="true">â†’</span></a>
+                <a class="button primary" href="csx.html">Try CSX <span aria-hidden="true">â†’</span></a>
+                <a class="button" href="getting-started.html">Get started</a>
                 <a class="button" href="creating-a-component.html">Create a component</a>
                 <a class="button" href="https://github.com/barely-sentient/donkeh-ui">View source</a>
             </div>
@@ -83,12 +85,17 @@ public sealed class App : Component
 
     <section class="feature-grid">
         <article class="feature">
+            <div class="feature-icon">&lt;/&gt;</div>
+            <h3>JSX-like syntax (CSX)</h3>
+            <p>Love JSX in JS/TS? Donkeh ships CSX: write components as markup, get a full UI framework in .NET. Optional, with full IDE support.</p>
+        </article>
+        <article class="feature">
             <div class="feature-icon">#</div>
             <h3>Real CSS, not a lookalike</h3>
             <p>Selectors, specificity, cascade layers, custom properties, media queries, keyframes, transitions, gradients, shadows and modern layout.</p>
         </article>
         <article class="feature">
-            <div class="feature-icon">â—«</div>
+            <div class="feature-icon">â - «</div>
             <h3>One tree, four hosts</h3>
             <p>The same UILab tree renders to OpenGL on desktop, OpenGL ES on Android, or native DOM elements in the browser.</p>
         </article>
@@ -108,7 +115,7 @@ public sealed class App : Component
             <p>Create blank-window projects and components, embed stylesheets automatically, and keep platform entry points out of your app.</p>
         </article>
         <article class="feature">
-            <div class="feature-icon">â—Ž</div>
+            <div class="feature-icon">â - Ž</div>
             <h3>Host capabilities</h3>
             <p>Platform flags and awaitable camera, microphone, location, notification, storage and clipboard permission requests.</p>
         </article>
@@ -208,15 +215,22 @@ dotnet run</code></pre>
                 <p>Replaced content, packed assets, LibVLC playback and GPU drawing â€” including current browser limits.</p>
             </span>
         </a>
-        <a class="start-card" href="implementation.html">
+        <a class="start-card" href="csx.html">
             <span class="start-number">11</span>
+            <span>
+                <h3>CSX syntax</h3>
+                <p>Write components with JSX-like tags, or keep plain C#. Setup guide, examples and fallbacks.</p>
+            </span>
+        </a>
+        <a class="start-card" href="implementation.html">
+            <span class="start-number">12</span>
             <span>
                 <h3>Implementation for Nerds</h3>
                 <p>Package-by-package design notes: data structures, hot paths, trade-offs and the decisions behind the engine.</p>
             </span>
         </a>
         <a class="start-card" href="https://github.com/barely-sentient/donkeh-ui">
-            <span class="start-number">â†—</span>
+            <span class="start-number">â† - </span>
             <span>
                 <h3>Source and releases</h3>
                 <p>Browse the implementation, download the CLI binaries, or cut a release.</p>

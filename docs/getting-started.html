@@ -44,6 +44,7 @@
                 <span class="nav-label">Start</span>
                 <a href="index.html">Overview</a>
                 <a href="getting-started.html">Getting started</a>
+                <a href="csx.html">CSX syntax</a>
             </div>
             <div class="nav-group">
                 <span class="nav-label">Components</span>
@@ -325,6 +326,19 @@ donkeh enable-target web</code></pre>
 <pre><code>&lt;PropertyGroup&gt;
   &lt;DonkehAndroidPermissions&gt;Camera;Microphone;Location;Notifications&lt;/DonkehAndroidPermissions&gt;
 &lt;/PropertyGroup&gt;</code></pre>
+        </div>
+
+        <h2 id="csx">CSX: JSX-like components for .NET</h2>
+        <p>
+            If you love JSX in JS/TS, you will love CSX. Donkeh ships a full UI
+            framework you can author with markup-like components, real CSS and a
+            reconciled tree. It is optional and every example has a plain-C#
+            fallback. See the <a href="csx.html">CSX syntax</a> page for the setup
+            guide, editor plugins and side-by-side examples.
+        </p>
+        <div class="code" data-label="Terminal">
+<pre><code>dotnet tool install --global CSX.CliTool --version 1.0.1
+csx run</code></pre>
         </div>
 
         <h2 id="build-run">Build and run</h2>

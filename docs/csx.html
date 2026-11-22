@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>CSX syntax · Donkeh</title>
+    <meta name="description" content="Write Donkeh components with JSX-like syntax using CSX, or stay in plain C#.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/csx">CSX repo</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+                <a href="csx.html">CSX syntax</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="component-testing.html">Component testing</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+                <a href="routing.html">Routing and setPage</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Reference</span>
+                <a href="html-elements.html">HTML elements</a>
+                <a href="event-reference.html">Event reference</a>
+                <a href="css-support.html">CSS support</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Primitives</span>
+                <a href="image.html">Image</a>
+                <a href="video.html">Video</a>
+                <a href="canvas.html">Canvas</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Implementation for Nerds</span>
+                <a href="implementation.html">Overview</a>
+                <a class="nav-sub" href="implementation-parser.html">Parser</a>
+                <a class="nav-sub" href="implementation-data.html">Data</a>
+                <a class="nav-sub" href="implementation-dataengine.html">DataEngine</a>
+                <a class="nav-sub" href="implementation-layoutlab.html">LayoutLab</a>
+                <a class="nav-sub" href="implementation-uilab.html">UILab</a>
+                <a class="nav-sub" href="implementation-hosting.html">Hosting</a>
+                <a class="nav-sub" href="implementation-windowing.html">Windowing</a>
+                <a class="nav-sub" href="implementation-android.html">Android</a>
+                <a class="nav-sub" href="implementation-browser.html">Browser</a>
+                <a class="nav-sub" href="implementation-inspector.html">Inspector</a>
+                <a class="nav-sub" href="implementation-cli.html">CLI tool</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/donkeh-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> CSX syntax</div>
+        <h1>CSX syntax</h1>
+        <p class="lead">
+            You love JSX in JavaScript and TypeScript? Here is the same experience in
+            .NET. CSX lets you build a full UI framework with markup-like components,
+            real CSS and a reconciled tree  -  and it is entirely optional, with a
+            plain-C# fallback for every example.
+        </p>
+
+        <div class="pill-row">
+            <span class="pill accent">Optional</span>
+            <span class="pill">JSX-like</span>
+            <span class="pill">Source maps</span>
+            <span class="pill">IDE support</span>
+        </div>
+
+        <h2 id="what">What CSX is</h2>
+        <p>
+            A <code>.cx</code> file is a C# file with one addition: JSX-style elements
+            such as <code>&lt;Header /&gt;</code> or
+            <code>&lt;div className="app"&gt;...&lt;/div&gt;</code>. The CSX toolchain
+            transforms those elements into the ordinary <code>_.H</code>,
+            <code>_.C</code> and <code>_.F</code> calls you would otherwise write by
+            hand, then compiles the result as normal C#.
+        </p>
+        <p>
+            The CSX project lives at
+            <a href="https://github.com/barely-sentient/csx">github.com/barely-sentient/csx</a>.
+            Donkeh itself stays unchanged; CSX is a separate, optional layer on top.
+        </p>
+
+        <h2 id="setup">Setup guide</h2>
+        <ol>
+            <li>Install the CSX command-line tool.</li>
+            <li>Install the matching IDE plugin for VS Code or Rider.</li>
+            <li>Add a <code>csx.json</code> to your project (the language server
+                creates one automatically).</li>
+            <li>Write <code>.cx</code> files and run <code>csx run</code>.</li>
+        </ol>
+
+        <div class="code" data-label="Terminal">
+<pre><code>dotnet tool install --global CSX.CliTool --version 1.0.1
+
+# Optional: install the IDE plugin
+csx enable vscode
+# or
+csx enable rider</code></pre>
+        </div>
+
+        <p>
+            The <code>csx</code> tool is published to NuGet as
+            <code>CSX.CliTool</code>. The IDE plugins are published as GitHub release
+            assets, so <code>csx enable</code> downloads the version that matches
+            the running CLI.
+        </p>
+
+        <h2 id="config">Project configuration</h2>
+        <p>
+            <code>csx.json</code> sits in the project root and configures the
+            transformer. The defaults match Donkeh's helper class:
+        </p>
+        <div class="code" data-label="csx.json">
+<pre><code>{
+  "FrameworkHtmlClass": "_",
+  "FrameworkHtmlClassMethod": "H",
+  "FrameworkComponentMethod": "C",
+  "FrameworkFragmentMethod": "F",
+  "GeneratedFileOutput": "src/generated"
+}</code></pre>
+        </div>
+        <p>
+            <code>GeneratedFileOutput</code> controls where the transformed C# is
+            written. Using <code>src/generated</code> keeps the output inside the
+            project so a plain <code>dotnet run</code> compiles it automatically.
+        </p>
+
+        <h2 id="example">A component in CSX</h2>
+        <p>
+            The same component, first in CSX, then as the plain C# it compiles to.
+        </p>
+        <div class="code" data-label="Header.cx">
+<pre><code>using Donkeh.UILab;
+
+namespace Components;
+
+public class HeaderProps : Props { }
+
+public class Header : Component&lt;HeaderProps&gt;
+{
+    public override Node Render() =&gt;
+        &lt;header className="header"&gt;
+            &lt;h1&gt;My Application&lt;/h1&gt;
+        &lt;/header&gt;;
+}</code></pre>
+        </div>
+        <div class="code" data-label="Header.cx.generated.cs">
+<pre><code>using Donkeh.UILab;
+
+namespace Components;
+
+public class HeaderProps : Props { }
+
+public class Header : Component&lt;HeaderProps&gt;
+{
+    public override Node Render() =&gt;
+        _.H("header", new() { ClassName = "header" },
+            _.H("h1", null, "My Application"));
+}</code></pre>
+        </div>
+
+        <h2 id="interop">Using a component</h2>
+        <div class="code" data-label="Program.cx">
+<pre><code>using Donkeh.Hosting;
+using Donkeh.UILab;
+using Components;
+
+namespace DonkehCSXTest;
+
+[AppRoot(Width = 1000, Height = 700, Title = "DonkehCSXTest")]
+public sealed class App : Component
+{
+    public override Node Render() =&gt;
+        &lt;Header /&gt;;
+}</code></pre>
+        </div>
+        <p>
+            The CSX transformer rewrites <code>&lt;Header /&gt;</code> into
+            <code>_.C&lt;Header, HeaderProps&gt;(new() { })</code>. The generated file
+            is written to <code>src/generated</code> and compiled with the rest of
+            the project.
+        </p>
+
+        <h2 id="fallback">Fallback: plain C#</h2>
+        <p>
+            If you do not want to use CSX, write the same calls directly. Nothing
+            else changes: the framework, the hosts and the CSS engine are identical.
+        </p>
+        <div class="code" data-label="Header.cs">
+<pre><code>using Donkeh.UILab;
+
+namespace Components;
+
+public class HeaderProps : Props { }
+
+public class Header : Component&lt;HeaderProps&gt;
+{
+    public override Node Render() =&gt;
+        _.H("header", new() { ClassName = "header" },
+            _.H("h1", null, "My Application"));
+}</code></pre>
+        </div>
+        <div class="code" data-label="Program.cs">
+<pre><code>using Donkeh.Hosting;
+using Donkeh.UILab;
+using Components;
+
+namespace DonkehCSXTest;
+
+[AppRoot(Width = 1000, Height = 700, Title = "DonkehCSXTest")]
+public sealed class App : Component
+{
+    public override Node Render() =&gt;
+        _.C&lt;Header, HeaderProps&gt;(new() { });
+}</code></pre>
+        </div>
+
+        <h2 id="how">How it works</h2>
+        <ul>
+            <li><strong>Parser:</strong> tokenises <code>.cx</code> files and
+                distinguishes JSX tags from C# generics.</li>
+            <li><strong>Transformer:</strong> rewrites JSX into configurable C#
+                method calls and writes a source map next to each generated file.</li>
+            <li><strong>Language server:</strong> transforms <code>.cx</code> files on
+                the fly and proxies requests to the C# language server, mapping
+                positions back through source maps. VS Code and Rider use it for
+                IntelliSense, diagnostics and navigation.</li>
+            <li><strong>Generated output:</strong> <code>.generated.cs</code> files
+                are ordinary C# and are compiled by the normal SDK glob.</li>
+        </ul>
+
+        <h2 id="running">Running and building</h2>
+        <div class="code" data-label="Terminal">
+<pre><code># Transform .cx files and run
+csx run
+
+# Transform and build only
+csx build
+
+# Classic flow (generated files already present)
+dotnet run</code></pre>
+        </div>
+        <p>
+            <code>csx run</code> transforms every <code>.cx</code> file first, then
+            invokes <code>dotnet run</code> on the project. <code>csx build</code>
+            does the same with <code>dotnet build</code>.
+        </p>
+
+        <h2 id="editor">Editor plugins</h2>
+        <p>
+            Install the matching plugin for your editor with the CSX CLI. The
+            plugin version is matched to the CLI version automatically.
+        </p>
+        <div class="code" data-label="Terminal">
+<pre><code>csx enable vscode
+csx enable rider</code></pre>
+        </div>
+        <p>
+            The plugins download from the CSX GitHub releases. If you prefer a local
+            build, point the extension settings at your <code>CSX.CliTool</code>
+            output instead.
+        </p>
+
+        <div class="callout note">
+            <strong>Donkeh is frozen at this point</strong>
+            The Donkeh engine itself is complete; CSX is the recommended way to
+            author components going forward. Existing plain-C# projects keep working
+            unchanged.
+        </div>
+
+        <div class="page-nav">
+            <a class="prev" href="getting-started.html"><span>Previous</span>Getting started</a>
+            <a class="next" href="creating-a-component.html"><span>Next</span>Creating a component</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh  -  CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/csx">CSX repository</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>

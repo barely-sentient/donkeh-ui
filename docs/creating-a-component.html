@@ -44,6 +44,7 @@
                 <span class="nav-label">Start</span>
                 <a href="index.html">Overview</a>
                 <a href="getting-started.html">Getting started</a>
+                <a href="csx.html">CSX syntax</a>
             </div>
             <div class="nav-group">
                 <span class="nav-label">Components</span>
@@ -239,6 +240,35 @@ public override Node Render() =&gt;
             The typed helpers produce the same nodes as
             <code>H("div", ...)</code>, so the two styles can be mixed freely. Use
             whichever makes the component easier to read.
+        </p>
+
+        <h2 id="csx">Same component in CSX</h2>
+        <p>
+            With CSX installed, the same component reads like markup. The
+            transformer rewrites the tags into the <code>_.H</code> and
+            <code>_.C</code> calls above.
+        </p>
+        <div class="code" data-label="Card/Card.cx">
+<pre><code>using Donkeh.UILab;
+using Components;
+
+namespace MyApp.Components;
+
+public sealed class Card : Component
+{
+    public override Node Render() =&gt;
+        &lt;div className="card"&gt;
+            &lt;h2 className="card-title"&gt;Hello&lt;/h2&gt;
+            &lt;p className="card-copy"&gt;A small card component.&lt;/p&gt;
+            &lt;button className="card-action" onClick={() =&gt; Console.WriteLine("clicked")}&gt;
+                Open
+            &lt;/button&gt;
+        &lt;/div&gt;;
+}</code></pre>
+        </div>
+        <p>
+            See the <a href="csx.html">CSX syntax</a> page for setup and the full
+            fallback story.
         </p>
 
         <h2 id="props">Props and typed components</h2>
