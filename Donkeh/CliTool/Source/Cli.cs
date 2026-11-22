@@ -101,7 +101,10 @@ public static class Cli
 
     private static int RunNewProject(string[] args)
     {
-        var arguments = ParsedArguments.Parse(args, ["name", "framework", "type"]);
+        var csx = args.Contains("--csx", StringComparer.OrdinalIgnoreCase);
+        var filtered = args.Where(argument =>
+            !string.Equals(argument, "--csx", StringComparison.OrdinalIgnoreCase)).ToArray();
+        var arguments = ParsedArguments.Parse(filtered, ["name", "framework", "type"]);
 
         if (arguments.Help)
         {
@@ -131,7 +134,7 @@ public static class Cli
         }
 
         var framework = FrameworkLocator.Find(arguments.Value("framework"));
-        var files = ProjectGenerator.Generate(target, name, framework, arguments.Force, kind);
+        var files = ProjectGenerator.Generate(target, name, framework, arguments.Force, kind, csx);
 
         Console.WriteLine($"Created Donkeh project in {Path.GetFullPath(target)}");
 
@@ -393,7 +396,7 @@ public static class Cli
             donkeh {Version}
 
             Usage:
-              donkeh new project [<directory>] [--name <name>] [--type application|framework] [--framework <path>] [--force]
+              donkeh new project [<directory>] [--name <name>] [--type application|framework] [--framework <path>] [--csx] [--force]
               donkeh new component <name> [--project <path>] [--force]
               donkeh enable-target <desktop|android|web> [--project <path>]
               donkeh enable-feature <hot-reload> [--project <path>]
@@ -426,7 +429,7 @@ public static class Cli
     {
         Console.WriteLine("""
             Usage:
-              donkeh new project [<directory>] [--name <name>] [--type application|framework] [--framework <path>] [--force]
+              donkeh new project [<directory>] [--name <name>] [--type application|framework] [--framework <path>] [--csx] [--force]
 
             Creates a minimal Donkeh project in the current directory, or in
             <directory> when supplied. The generated app declares [AppRoot] and

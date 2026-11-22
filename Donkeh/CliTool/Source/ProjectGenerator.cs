@@ -20,7 +20,8 @@ internal static class ProjectGenerator
         string? name,
         string? frameworkRoot,
         bool force,
-        ProjectKind kind = ProjectKind.Application)
+        ProjectKind kind = ProjectKind.Application,
+        bool csx = false)
     {
         targetDirectory = Path.GetFullPath(targetDirectory);
         Directory.CreateDirectory(targetDirectory);
@@ -30,6 +31,11 @@ internal static class ProjectGenerator
         if (kind == ProjectKind.Framework)
         {
             return GenerateFramework(targetDirectory, projectName, frameworkRoot, force);
+        }
+
+        if (csx)
+        {
+            return GenerateCsxApplication(targetDirectory, projectName, frameworkRoot, force);
         }
 
         var rootNamespace = Identifiers.Namespace(projectName);
@@ -494,6 +500,143 @@ internal static class ProjectGenerator
             .Replace("__TEST_PATH__", testPath)
             .Replace("__LIB_GUID__", libraryGuid.ToString("B").ToUpperInvariant())
             .Replace("__TEST_GUID__", testGuid.ToString("B").ToUpperInvariant());
+    }
+
+    /// <summary>Generates a CSX-style application project.</summary>
+    private static IReadOnlyList<string> GenerateCsxApplication(
+        string targetDirectory,
+        string projectName,
+        string? frameworkRoot,
+        bool force)
+    {
+        var rootNamespace = Identifiers.Namespace(projectName);
+        var projectFile = Path.Combine(targetDirectory, projectName + ".csproj");
+        var programFile = Path.Combine(targetDirectory, "Program.cx");
+        var csxConfig = Path.Combine(targetDirectory, "csx.json");
+        var targetsFile = Path.Combine(targetDirectory, "Directory.Build.targets");
+        var gitignoreFile = Path.Combine(targetDirectory, ".gitignore");
+        var useCheckout = !string.IsNullOrWhiteSpace(frameworkRoot);
+
+        var files = useCheckout
+            ? new[] { projectFile, programFile, csxConfig, targetsFile, gitignoreFile }
+            : new[] { projectFile, programFile, csxConfig, gitignoreFile };
+
+        if (!force)
+        {
+            var existing = files.Where(File.Exists).ToArray();
+
+            if (existing.Length > 0)
+            {
+                throw new CliException(
+                    "The target already contains project files: " +
+                    string.Join(", ", existing.Select(Path.GetFileName)) +
+                    ". Pass --force to overwrite them.");
+            }
+        }
+
+        var title = JsonSerializer.Serialize(projectName);
+
+        if (useCheckout)
+        {
+            var propsPath = Path.GetRelativePath(
+                targetDirectory,
+                Path.Combine(frameworkRoot!, "Build", "Donkeh.props"));
+            var targetsPath = Path.GetRelativePath(
+                targetDirectory,
+                Path.Combine(frameworkRoot!, "Build", "Donkeh.targets"));
+
+            TextFiles.Write(projectFile, $$"""
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <Import Project="{{SecurityElement.Escape(propsPath)}}" />
+
+                  <PropertyGroup>
+                    <DonkehDesktop>true</DonkehDesktop>
+                    <!-- <DonkehAndroid>true</DonkehAndroid> -->
+                    <!-- <DonkehWeb>true</DonkehWeb> -->
+                  </PropertyGroup>
+
+                  <PropertyGroup>
+                    <OutputType>Exe</OutputType>
+                    <TargetFrameworks>$(DonkehTargetFrameworks)</TargetFrameworks>
+                    <RootNamespace>{{rootNamespace}}</RootNamespace>
+                    <ImplicitUsings>enable</ImplicitUsings>
+                    <Nullable>enable</Nullable>
+                    <DefaultItemExcludes>$(DefaultItemExcludes);builds/**;**/bin/**;**/obj/**</DefaultItemExcludes>
+                  </PropertyGroup>
+
+                </Project>
+                """);
+
+            TextFiles.Write(targetsFile, $$"""
+                <Project>
+                  <!-- Framework-owned host wiring. -->
+                  <Import Project="{{SecurityElement.Escape(targetsPath)}}" />
+                </Project>
+                """);
+        }
+        else
+        {
+            var version = ToolVersion();
+
+            TextFiles.Write(projectFile, $$"""
+                <Project Sdk="Microsoft.NET.Sdk">
+
+                  <PropertyGroup>
+                    <OutputType>Exe</OutputType>
+                    <TargetFramework>net10.0</TargetFramework>
+                    <RootNamespace>{{rootNamespace}}</RootNamespace>
+                    <ImplicitUsings>enable</ImplicitUsings>
+                    <Nullable>enable</Nullable>
+                    <DefaultItemExcludes>$(DefaultItemExcludes);builds/**;**/bin/**;**/obj/**</DefaultItemExcludes>
+                    <DonkehVersion Condition="'$(DonkehVersion)' == ''">{{version}}</DonkehVersion>
+                  </PropertyGroup>
+
+                  <ItemGroup>
+                    <PackageReference Include="Donkeh.Windowing" Version="$(DonkehVersion)" />
+                  </ItemGroup>
+
+                  <!-- Add Android or browser targets with:
+                       donkeh enable-target android
+                       donkeh enable-target web -->
+
+                </Project>
+                """);
+        }
+
+        TextFiles.Write(programFile, $$"""
+            using Donkeh.Hosting;
+            using Donkeh.UILab;
+
+            namespace {{rootNamespace}};
+
+            [AppRoot(Width = 1000, Height = 700, Title = {{title}})]
+            public sealed class App : Component
+            {
+                /// <inheritdoc/>
+                public override Node Render() =>
+                    <div className="app">
+                        <h1>Hello, Donkeh!</h1>
+                    </div>;
+            }
+            """);
+
+        TextFiles.Write(csxConfig, """
+            {
+              "FrameworkHtmlClass": "_",
+              "FrameworkHtmlClassMethod": "H",
+              "FrameworkComponentMethod": "C",
+              "FrameworkFragmentMethod": "F",
+              "GeneratedFileOutput": "src/generated"
+            }
+            """);
+
+        TextFiles.Write(gitignoreFile, """
+            bin/
+            obj/
+            builds/
+            """);
+
+        return files;
     }
 
     /// <summary>Writes a project that references the framework source tree.</summary>
