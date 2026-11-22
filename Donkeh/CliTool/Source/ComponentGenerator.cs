@@ -9,15 +9,22 @@ internal static class ComponentGenerator
     /// <param name="componentName">User-supplied component name.</param>
     /// <param name="projectPath">Optional project file or project directory.</param>
     /// <param name="force">Whether existing files may be replaced.</param>
+    /// <param name="csx">
+    /// Whether to generate a CSX (<c>.cx</c>) component instead of a plain
+    /// C# (<c>.cs</c>) one. When <see langword="false"/> the project is
+    /// inspected and CSX is used automatically when it is the dominant mode.
+    /// </param>
     /// <returns>The paths written or updated.</returns>
     public static IReadOnlyList<string> Generate(
         string componentName,
         string? projectPath,
-        bool force)
+        bool force,
+        bool csx = false)
     {
         var projectFile = FindProject(projectPath);
         var projectDirectory = Path.GetDirectoryName(projectFile)
             ?? throw new CliException($"Could not resolve the directory of '{projectFile}'.");
+        var useCsx = csx || IsCsxProject(projectFile);
 
         var (projectText, newLine) = TextFiles.Read(projectFile);
         var rootNamespace = ReadRootNamespace(
@@ -34,7 +41,8 @@ internal static class ComponentGenerator
             "src",
             "Components",
             className);
-        var componentFile = Path.Combine(componentDirectory, className + ".cs");
+        var componentExtension = useCsx ? ".cx" : ".cs";
+        var componentFile = Path.Combine(componentDirectory, className + componentExtension);
         var cssFile = Path.Combine(componentDirectory, className + ".css");
         var relativeCss = $"src/Components/{className}/{className}.css";
 
@@ -51,22 +59,44 @@ internal static class ComponentGenerator
             }
         }
 
-        TextFiles.Write(componentFile, $$"""
-            using Donkeh.UILab;
-            using static Donkeh.UILab.HtmlHelper;
+        if (useCsx)
+        {
+            TextFiles.Write(componentFile, $$"""
+                using Donkeh.UILab;
 
-            [assembly: Donkeh.UILab.Stylesheet("{{relativeCss}}")]
+                [assembly: Donkeh.UILab.Stylesheet("{{relativeCss}}")]
 
-            namespace {{componentNamespace}};
+                namespace {{componentNamespace}};
 
-            /// <summary>{{className}} component.</summary>
-            public sealed class {{className}} : Component
-            {
-                /// <inheritdoc/>
-                public override Node Render() =>
-                    Div(new() { ClassName = "{{cssClass}}" });
-            }
-            """);
+                /// <summary>{{className}} component.</summary>
+                public sealed class {{className}} : Component
+                {
+                    /// <inheritdoc/>
+                    public override Node Render() =>
+                        // Equivalent C#: Div(new() { ClassName = "{{cssClass}}" })
+                        <div className="{{cssClass}}" />;
+                }
+                """);
+        }
+        else
+        {
+            TextFiles.Write(componentFile, $$"""
+                using Donkeh.UILab;
+                using static Donkeh.UILab.HtmlHelper;
+
+                [assembly: Donkeh.UILab.Stylesheet("{{relativeCss}}")]
+
+                namespace {{componentNamespace}};
+
+                /// <summary>{{className}} component.</summary>
+                public sealed class {{className}} : Component
+                {
+                    /// <inheritdoc/>
+                    public override Node Render() =>
+                        Div(new() { ClassName = "{{cssClass}}" });
+                }
+                """);
+        }
 
         TextFiles.Write(cssFile, $$"""
             .{{cssClass}} {
@@ -85,6 +115,75 @@ internal static class ComponentGenerator
         }
 
         return [componentFile, cssFile, projectFile];
+    }
+
+    /// <summary>
+    /// Reports whether the project is a CSX-dominant project, based on how it
+    /// is built and started: a <c>csx.json</c> configuration file, a
+    /// <c>Program.cx</c> entry point, or any <c>.cx</c> source files.
+    /// </summary>
+    internal static bool IsCsxProject(string? projectPath)
+    {
+        string? projectFile;
+
+        try
+        {
+            projectFile = FindProject(projectPath);
+        }
+        catch (CliException)
+        {
+            return false;
+        }
+
+        var directory = Path.GetDirectoryName(projectFile);
+
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return false;
+        }
+
+        var current = new DirectoryInfo(directory);
+
+        for (var level = 0; level < 4 && current is not null; level++)
+        {
+            if (File.Exists(Path.Combine(current.FullName, "csx.json")))
+            {
+                return true;
+            }
+
+            if (File.Exists(Path.Combine(current.FullName, "Program.cx")))
+            {
+                return true;
+            }
+
+            try
+            {
+                if (Directory.GetFiles(current.FullName, "*.cx", SearchOption.TopDirectoryOnly).Length > 0)
+                {
+                    return true;
+                }
+            }
+            catch (Exception)
+            {
+                // Ignore inaccessible directories.
+            }
+
+            current = current.Parent;
+        }
+
+        try
+        {
+            if (Directory.GetFiles(directory, "*.cx", SearchOption.AllDirectories).Length > 0)
+            {
+                return true;
+            }
+        }
+        catch (Exception)
+        {
+            // Ignore inaccessible directories.
+        }
+
+        return false;
     }
 
     /// <summary>Finds the project file to update.</summary>

@@ -77,6 +77,16 @@ public static class Cli
             return RunEnableTarget(args[1..]);
         }
 
+        if (string.Equals(args[0], "add", StringComparison.OrdinalIgnoreCase))
+        {
+            if (args.Length < 2 || !string.Equals(args[1], "component", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new CliException("Expected 'component'. Run 'donkeh add --help'.");
+            }
+
+            return RunNewComponent(args[2..]);
+        }
+
         if (!string.Equals(args[0], "new", StringComparison.OrdinalIgnoreCase))
         {
             throw new CliException($"Unknown command '{args[0]}'. Run 'donkeh --help'.");
@@ -351,7 +361,10 @@ public static class Cli
 
     private static int RunNewComponent(string[] args)
     {
-        var arguments = ParsedArguments.Parse(args, ["project"]);
+        var csx = args.Contains("--csx", StringComparer.OrdinalIgnoreCase);
+        var filtered = args.Where(argument =>
+            !string.Equals(argument, "--csx", StringComparison.OrdinalIgnoreCase)).ToArray();
+        var arguments = ParsedArguments.Parse(filtered, ["project"]);
 
         if (arguments.Help)
         {
@@ -369,7 +382,8 @@ public static class Cli
         var files = ComponentGenerator.Generate(
             name,
             arguments.Value("project"),
-            arguments.Force);
+            arguments.Force,
+            csx);
 
         Console.WriteLine($"Created component {Identifiers.ComponentName(name)}");
 
@@ -397,7 +411,7 @@ public static class Cli
 
             Usage:
               donkeh new project [<directory>] [--name <name>] [--type application|framework] [--framework <path>] [--csx] [--force]
-              donkeh new component <name> [--project <path>] [--force]
+              donkeh new component <name> [--project <path>] [--csx] [--force]
               donkeh enable-target <desktop|android|web> [--project <path>]
               donkeh enable-feature <hot-reload> [--project <path>]
               donkeh watch [--project <path>] [-- <app args>]
@@ -451,7 +465,7 @@ public static class Cli
     {
         Console.WriteLine("""
             Usage:
-              donkeh new component <name> [--project <path>] [--force]
+              donkeh new component <name> [--project <path>] [--csx] [--force]
 
             Creates:
               src/Components/<Name>/<Name>.cs
@@ -463,7 +477,8 @@ public static class Cli
 
             Options:
               --project <path>     Project file or project directory.
-              --force              Overwrite existing component files.
+              --csx                Generate a CSX (.cx) component.
+               --force              Overwrite existing component files.
             """);
     }
 
