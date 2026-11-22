@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Event reference — Donkeh</title>
+    <title>Event reference  -  Donkeh</title>
     <meta name="description" content="Every event dispatched by Donkeh, its handler property, event class, payload and host support.">
     <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/site.css">
@@ -144,7 +144,7 @@
             <table>
                 <thead><tr><th>Event class</th><th>Extends</th><th>Adds</th></tr></thead>
                 <tbody>
-                    <tr><td><code>Event</code></td><td>—</td><td>Type, target, current target and default handling.</td></tr>
+                    <tr><td><code>Event</code></td><td> - </td><td>Type, target, current target and default handling.</td></tr>
                     <tr><td><code>MouseEvent</code></td><td><code>Event</code></td><td><code>ClientX</code>, <code>ClientY</code>, <code>LocalX</code>, <code>LocalY</code>, <code>Button</code>, <code>Modifiers</code>.</td></tr>
                     <tr><td><code>ClickEvent</code>, <code>MouseDownEvent</code>, <code>MouseUpEvent</code>, <code>MouseOverEvent</code>, <code>MouseOutEvent</code></td><td><code>MouseEvent</code></td><td>Event-specific classes for the mouse family.</td></tr>
                     <tr><td><code>PointerEvent</code></td><td><code>MouseEvent</code></td><td>The same position data, typed separately so pointer fields can grow.</td></tr>
@@ -220,14 +220,14 @@ H("div").On("click", new Action&lt;ClickEvent&gt;(
                     <tr><td><code>pointermove</code></td><td><code>OnPointerMoveEvent</code></td><td><code>OnPointerMove</code></td><td><code>PointerMoveEvent</code></td><td>Window and element-local coordinates.</td></tr>
                     <tr><td><code>pointerup</code></td><td><code>OnPointerUpEvent</code></td><td><code>OnPointerUp</code></td><td><code>PointerUpEvent</code></td><td>Window and element-local coordinates.</td></tr>
                     <tr><td><code>scroll</code></td><td><code>OnScrollEvent</code></td><td><code>OnScroll</code></td><td><code>ScrollEvent</code></td><td>Applied <code>DeltaX</code> and <code>DeltaY</code> in CSS pixels.</td></tr>
-                    <tr><td><code>contextmenu</code></td><td><code>OnContextMenu</code></td><td>—</td><td><code>ContextMenuEvent</code></td><td>Clicked target, handling target, local and window coordinates.</td></tr>
-                    <tr><td><code>dragstart</code></td><td><code>OnDragStart</code></td><td>—</td><td><code>DragEvent</code></td><td>Shared <code>DataTransfer</code>, source, coordinates and <code>Cancel</code>.</td></tr>
-                    <tr><td><code>drag</code></td><td><code>OnDrag</code></td><td>—</td><td><code>DragEvent</code></td><td>Shared <code>DataTransfer</code>, source and coordinates.</td></tr>
-                    <tr><td><code>dragenter</code></td><td><code>OnDragEnter</code></td><td>—</td><td><code>DragEvent</code></td><td>Shared <code>DataTransfer</code>, source and coordinates.</td></tr>
-                    <tr><td><code>dragover</code></td><td><code>OnDragOver</code></td><td>—</td><td><code>DragEvent</code></td><td>Shared <code>DataTransfer</code>, source and coordinates.</td></tr>
-                    <tr><td><code>dragleave</code></td><td><code>OnDragLeave</code></td><td>—</td><td><code>DragEvent</code></td><td>Shared <code>DataTransfer</code>, source and coordinates.</td></tr>
-                    <tr><td><code>drop</code></td><td><code>OnDrop</code></td><td>—</td><td><code>DragEvent</code></td><td>Shared <code>DataTransfer</code>, source and coordinates.</td></tr>
-                    <tr><td><code>dragend</code></td><td><code>OnDragEnd</code></td><td>—</td><td><code>DragEvent</code></td><td>Shared <code>DataTransfer</code>, source and coordinates.</td></tr>
+                    <tr><td><code>contextmenu</code></td><td><code>OnContextMenu</code></td><td> - </td><td><code>ContextMenuEvent</code></td><td>Clicked target, handling target, local and window coordinates.</td></tr>
+                    <tr><td><code>dragstart</code></td><td><code>OnDragStart</code></td><td> - </td><td><code>DragEvent</code></td><td>Shared <code>DataTransfer</code>, source, coordinates and <code>Cancel</code>.</td></tr>
+                    <tr><td><code>drag</code></td><td><code>OnDrag</code></td><td> - </td><td><code>DragEvent</code></td><td>Shared <code>DataTransfer</code>, source and coordinates.</td></tr>
+                    <tr><td><code>dragenter</code></td><td><code>OnDragEnter</code></td><td> - </td><td><code>DragEvent</code></td><td>Shared <code>DataTransfer</code>, source and coordinates.</td></tr>
+                    <tr><td><code>dragover</code></td><td><code>OnDragOver</code></td><td> - </td><td><code>DragEvent</code></td><td>Shared <code>DataTransfer</code>, source and coordinates.</td></tr>
+                    <tr><td><code>dragleave</code></td><td><code>OnDragLeave</code></td><td> - </td><td><code>DragEvent</code></td><td>Shared <code>DataTransfer</code>, source and coordinates.</td></tr>
+                    <tr><td><code>drop</code></td><td><code>OnDrop</code></td><td> - </td><td><code>DragEvent</code></td><td>Shared <code>DataTransfer</code>, source and coordinates.</td></tr>
+                    <tr><td><code>dragend</code></td><td><code>OnDragEnd</code></td><td> - </td><td><code>DragEvent</code></td><td>Shared <code>DataTransfer</code>, source and coordinates.</td></tr>
                     <tr><td><code>keydown</code></td><td><code>OnKeyDownEvent</code></td><td><code>OnKeyDown</code></td><td><code>KeyDownEvent</code></td><td>Key name, modifier flags and formatted chord.</td></tr>
                     <tr><td><code>input</code></td><td><code>OnInputEvent</code></td><td><code>OnInput</code></td><td><code>InputEvent</code></td><td>Current control text.</td></tr>
                     <tr><td><code>change</code></td><td><code>OnChangeEvent</code></td><td><code>OnChange</code></td><td><code>ChangeEvent</code></td><td>Committed control value.</td></tr>
@@ -531,7 +531,7 @@ H("div", new Props
         </div>
 
         <footer class="page-footer">
-            <p>Donkeh — CSS-driven UI for .NET.</p>
+            <p>Donkeh  -  CSS-driven UI for .NET.</p>
             <p><a href="https://github.com/barely-sentient/donkeh-ui">Edit this page</a></p>
         </footer>
     </main>

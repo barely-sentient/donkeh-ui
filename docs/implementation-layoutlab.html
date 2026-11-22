@@ -149,7 +149,7 @@
             per-property cascade map.
         </p>
         <ul>
-            <li>Inherited scalars — colour, font, writing mode and similar — are copied from the parent. Custom properties stay linked through <code>StyleParent</code> and are resolved lazily.</li>
+            <li>Inherited scalars  -  colour, font, writing mode and similar  -  are copied from the parent. Custom properties stay linked through <code>StyleParent</code> and are resolved lazily.</li>
             <li>Text nodes are forced to <code>display: inline</code> and fragments to <code>display: contents</code>; these are framework constructs, not authored CSS.</li>
             <li>Percentages, <code>em</code>, <code>rem</code>, viewport units and <code>auto</code> stay as <code>CssLength</code> values. Layout resolves them later against the correct containing block.</li>
             <li>Parsed declaration values are cached by interned value id in <code>StyleValueCache</code>, so repeated <code>0 8px</code> values parse once.</li>
@@ -213,7 +213,7 @@
         </p>
         <p>
             Boxes are the unit of layout reuse. With reuse enabled, a cached box is
-            reset — geometry, children, text, scroll and float state — while its node
+            reset  -  geometry, children, text, scroll and float state  -  while its node
             identity and child-list capacity are kept. That removes the per-frame
             allocation of the entire tree at the cost of mutating the previous result.
         </p>
