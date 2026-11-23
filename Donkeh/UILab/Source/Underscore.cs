@@ -227,6 +227,20 @@ namespace Donkeh.UILab
         }
 
         /// <summary>
+        /// Creates a component node whose children are appended to a
+        /// <see cref="PropsWithChildren"/> (or any props object exposing a
+        /// writable <c>Children</c> property). This is the overload used by the
+        /// CSX transformer for component tags that contain child nodes.
+        /// </summary>
+        public static ComponentNode C<TComponent>(PropsWithChildren props, Node? child = null, params Node?[] rest)
+            where TComponent : Component, new()
+        {
+            ArgumentNullException.ThrowIfNull(props);
+            AttachChildren(props, child, rest);
+            return new ComponentNode(typeof(TComponent), props, null);
+        }
+
+        /// <summary>
         /// Creates a component node from a runtime component type.
         /// </summary>
         /// <param name="componentType">
@@ -281,6 +295,20 @@ namespace Donkeh.UILab
         public static ComponentNode C<TComponent, TProps>(TProps props)
             where TComponent : Component<TProps>, new()
         {
+            return new ComponentNode(typeof(TComponent), props, null);
+        }
+
+        /// <summary>
+        /// Creates a typed component node whose trailing children are attached to
+        /// the props object when it supports them.
+        /// </summary>
+        public static ComponentNode C<TComponent, TProps>(TProps props, Node? child = null, params Node?[] rest)
+            where TComponent : Component<TProps>, new()
+        {
+            if (props is not null)
+            {
+                AttachChildren(props, child, rest);
+            }
             return new ComponentNode(typeof(TComponent), props, null);
         }
 
@@ -498,6 +526,66 @@ namespace Donkeh.UILab
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Attaches trailing child nodes to a props object that exposes a writable
+        /// <c>Children</c> property, combining them with any children already
+        /// present. Props objects that do not expose such a property are left
+        /// unchanged.
+        /// </summary>
+        private static void AttachChildren(object props, Node? first, params Node?[] rest)
+        {
+            var property = props.GetType().GetProperty("Children");
+            if (property is null || !property.CanWrite)
+            {
+                return;
+            }
+
+            var list = new List<Node?>();
+            if (property.GetValue(props) is IEnumerable<Node?> existing)
+            {
+                list.AddRange(existing);
+            }
+
+            if (first is not null)
+            {
+                list.Add(first);
+            }
+
+            foreach (var child in rest)
+            {
+                if (child is not null)
+                {
+                    list.Add(child);
+                }
+            }
+
+            if (list.Count == 0)
+            {
+                return;
+            }
+
+            object value;
+            var targetType = property.PropertyType;
+            if (targetType == typeof(Node[]))
+            {
+                value = list.Where(c => c is not null).Cast<Node>().ToArray();
+            }
+            else
+            {
+                value = list.ToArray();
+            }
+
+            try
+            {
+                property.SetValue(props, value);
+            }
+            catch
+            {
+                // Init-only or otherwise non-writable properties may reject reflection
+                // writes on some runtimes; ignore rather than fail the render.
+            }
         }
 
         /// <summary>
