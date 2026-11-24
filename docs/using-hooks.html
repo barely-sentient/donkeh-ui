@@ -60,12 +60,13 @@
                 <a href="html-elements.html">HTML elements</a>
                 <a href="event-reference.html">Event reference</a>
                 <a href="css-support.html">CSS support</a>
+                <a href="webview.html">WebView reference</a>
+                <a href="video.html">Video reference</a>
+                <a href="canvas.html">Canvas reference</a>
             </div>
             <div class="nav-group">
                 <span class="nav-label">Primitives</span>
                 <a href="image.html">Image</a>
-                <a href="video.html">Video</a>
-                <a href="canvas.html">Canvas</a>
             </div>
             <div class="nav-group">
                 <span class="nav-label">Inspector</span>
@@ -119,7 +120,16 @@
         </ul>
 
         <div class="code" data-label="Correct">
-<pre><code>public override Node Render()
+<pre class="csx"><code>public override Node Render()
+{
+    var (visible, setVisible) = State(false);
+    var (count, setCount) = State(0);
+
+    return &lt;div&gt;
+        {Show(visible, &lt;span&gt;{count}&lt;/span&gt;)}
+    &lt;/div&gt;;
+}</code></pre>
+<pre class="csharp"><code>public override Node Render()
 {
     var (visible, setVisible) = State(false);
     var (count, setCount) = State(0);
@@ -137,7 +147,18 @@
         </p>
 
         <div class="code" data-label="Counter.cs">
-<pre><code>public sealed class Counter : Component
+<pre class="csx"><code>public sealed class Counter : Component
+{
+    public override Node Render()
+    {
+        var (count, setCount) = State(0);
+
+        return &lt;button className="counter" onClick={() => setCount(count + 1)}&gt;
+            Clicked {count} times
+        &lt;/button&gt;;
+    }
+}</code></pre>
+<pre class="csharp"><code>public sealed class Counter : Component
 {
     public override Node Render()
     {
@@ -178,7 +199,22 @@ updateCount(value =&gt; value + 1);</code></pre>
         </p>
 
         <div class="code" data-label="Reducer.cs">
-<pre><code>public sealed record EditorState(string Text, bool Dirty);
+<pre class="csx"><code>public override Node Render()
+{
+    var (state, dispatch) = Reducer&lt;EditorState, EditorAction&gt;(
+        new EditorState("", false),
+        (current, action) => action switch
+        {
+            EditorAction.Edit edit => current with { Text = edit.Text, Dirty = true },
+            EditorAction.Save => current with { Dirty = false },
+            _ => current
+        });
+
+    return &lt;input
+        value={state.Text}
+        onInput={text => dispatch(new EditorAction.Edit(text))} /&gt;;
+}</code></pre>
+<pre class="csharp"><code>public sealed record EditorState(string Text, bool Dirty);
 
 public abstract record EditorAction
 {
@@ -225,7 +261,17 @@ public override Node Render()
         </div>
 
         <div class="code" data-label="Subscription with cleanup">
-<pre><code>public override Node Render()
+<pre class="csx"><code>public override Node Render()
+{
+    Effect(() =>
+    {
+        var connection = Connect(endpoint);
+        return () => connection.Dispose();
+    }, [endpoint]);
+
+    return &lt;p&gt;Connected&lt;/p&gt;;
+}</code></pre>
+<pre class="csharp"><code>public override Node Render()
 {
     Effect(() =&gt;
     {
@@ -289,7 +335,14 @@ var save = Callback(
         </p>
 
         <div class="code" data-label="Ref.cs">
-<pre><code>var firstRun = UseRef(true);
+<pre class="csx"><code>var inputRef = Ref&lt;ElementNode?&gt;(null);
+
+Effect(() =&gt; {
+    inputRef.Value?.Focus();
+}, []);
+
+return &lt;input ref={inputRef} /&gt;;</code></pre>
+<pre class="csharp"><code>var firstRun = UseRef(true);
 
 Effect(() =&gt;
 {
@@ -309,7 +362,10 @@ Effect(() =&gt;
         </p>
 
         <div class="code" data-label="Context.cs">
-<pre><code>var theme = UseContext(ThemeContext.Value);
+<pre class="csx"><code>var theme = UseContext(ThemeContext.Value);
+
+return &lt;main style={`background:${theme.Background}`} /&gt;;</code></pre>
+<pre class="csharp"><code>var theme = UseContext(ThemeContext.Value);
 
 return H("main", new Props
 {
@@ -368,7 +424,17 @@ return H("main", new Props
         </p>
 
         <div class="code" data-label="Typed props">
-<pre><code>public sealed class GreetingProps : Props
+<pre class="csx"><code>public sealed class GreetingProps : Props
+{
+    public string Name { get; init; } = "";
+}
+
+public sealed class Greeting : Component&lt;GreetingProps&gt;
+{
+    public override Node Render() =>
+        &lt;p>Hello, {Props.Name}&lt;/p&gt;;
+}</code></pre>
+<pre class="csharp"><code>public sealed class GreetingProps : Props
 {
     public string Name { get; init; } = "";
 }

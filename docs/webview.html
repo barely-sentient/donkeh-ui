@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>WebView reference  -  Donkeh</title>
+    <meta name="description" content="Embed browser-rendered content with the webview tag. Covers CEF offscreen rendering, WebViewProps, the controller API, input focus, platform support and licensing.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/donkeh-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
+</header>
+
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+                <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+                <a href="csx.html">CSX syntax</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="component-testing.html">Component testing</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+                <a href="routing.html">Routing and setPage</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Reference</span>
+                <a href="html-elements.html">HTML elements</a>
+                <a href="event-reference.html">Event reference</a>
+                <a href="css-support.html">CSS support</a>
+                <a href="webview.html">WebView reference</a>
+                <a href="video.html">Video reference</a>
+                <a href="canvas.html">Canvas reference</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Primitives</span>
+                <a href="image.html">Image</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Implementation for Nerds</span>
+                <a href="implementation.html">Overview</a>
+                <a class="nav-sub" href="implementation-parser.html">Parser</a>
+                <a class="nav-sub" href="implementation-data.html">Data</a>
+                <a class="nav-sub" href="implementation-dataengine.html">DataEngine</a>
+                <a class="nav-sub" href="implementation-layoutlab.html">LayoutLab</a>
+                <a class="nav-sub" href="implementation-uilab.html">UILab</a>
+                <a class="nav-sub" href="implementation-hosting.html">Hosting</a>
+                <a class="nav-sub" href="implementation-windowing.html">Windowing</a>
+                <a class="nav-sub" href="implementation-android.html">Android</a>
+                <a class="nav-sub" href="implementation-browser.html">Browser</a>
+                <a class="nav-sub" href="implementation-inspector.html">Inspector</a>
+                <a class="nav-sub" href="implementation-cli.html">CLI tool</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/donkeh-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Reference <span>/</span> WebView reference</div>
+        <h1>WebView reference</h1>
+        <p class="lead">
+            A <code>webview</code> embeds a real browser document in your UI. On desktop,
+            Chromium Embedded Framework (CEF) renders the page offscreen; Donkeh uploads each
+            painted frame as a texture and draws it through the same display list as every
+            other element. The webview therefore behaves like a replaced element &mdash; it
+            takes part in layout, stacking order, clipping, opacity and transforms &mdash;
+            instead of being a separate native window floating above the app.
+        </p>
+
+        <h2 id="what">What a webview actually is</h2>
+        <p>
+            Unlike <code>iframe</code>, <code>object</code> and <code>embed</code>, which are
+            currently just styled placeholder boxes, <code>webview</code> creates a live
+            Chromium browser. HTML, CSS and JavaScript inside it are parsed and executed by
+            Chromium, not by Donkeh. Donkeh only owns the element&rsquo;s box and decides where
+            the browser&rsquo;s pixels appear on screen.
+        </p>
+        <p>
+            The browser does not draw into the Donkeh window directly. CEF paints into an
+            offscreen buffer; Donkeh converts those pixels to RGBA, copies them into a texture
+            held by the image cache, and emits a normal image draw at the element&rsquo;s paint
+            position. This is the same pipeline used by <a href="video.html">video</a> frames,
+            which is why the webview can sit behind or in front of other content and be
+            clipped or transformed by its ancestors.
+        </p>
+
+        <h2 id="behaviour">Behaviour by concern</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Concern</th><th>How Donkeh handles it</th></tr></thead>
+                <tbody>
+                    <tr><td>Layout</td><td>Replaced content with a default 300 &times; 150 box, the <code>width</code>/<code>height</code> attributes, or CSS. The box is the browser viewport; resizing it resizes the CEF view.</td></tr>
+                    <tr><td>Painting</td><td>Each CEF frame becomes a texture in the shared image cache and is drawn as an <code>ImageSpec</code>. It obeys z-index, stacking contexts, scroll offsets, clip, opacity and transforms.</td></tr>
+                    <tr><td>Input</td><td>Pointer move/press/release, wheel and key events are forwarded into the browser by the host. The webview takes focus on press; focusing another control gives it back.</td></tr>
+                    <tr><td>Threading</td><td>CEF paints on its own UI thread. Frames are copied into a per-element buffer there and uploaded to the GPU on Donkeh&rsquo;s render thread, where the OpenGL context is current.</td></tr>
+                    <tr><td>Lifecycle</td><td>One browser per element, created on the first frame where the element has a <code>src</code>. Browsers are disposed when their element leaves the tree; CEF is shut down when the window closes.</td></tr>
+                    <tr><td>Platform</td><td>Desktop only. Android has no WebView-to-GLES texture bridge, and the browser host mirrors the tree to real DOM, where a native <code>iframe</code> is the right tool.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="usage">Adding a webview</h2>
+        <div class="code" data-label="Program.cs">
+<pre class="csx"><code>using Donkeh.UILab;
+using Donkeh.Windowing;
+using static Donkeh.UILab._;
+
+&lt;webview
+    Src="https://example.com"
+    ClassName="browser"
+    OnReady={view =&gt; view.ExecuteJavaScript(
+        "document.body.style.background = '#f7f7f7'")} /&gt;</code></pre>
+<pre class="csharp"><code>using Donkeh.UILab;
+using Donkeh.Windowing;
+using static Donkeh.UILab._;
+
+H("webview", new WebViewProps
+{
+    Src = "https://example.com",
+    ClassName = "browser",
+    OnReady = view =&gt; view.ExecuteJavaScript(
+        "document.body.style.background = '#f7f7f7'")
+});</code></pre>
+        </div>
+        <p>
+            <code>WebViewProps</code> adds <code>OnReady</code> to the ordinary
+            <a href="html-elements.html">element props</a>; <code>Src</code>,
+            <code>ClassName</code>, styles and event handlers are the standard ones. Plain
+            <code>Props</code> also works if you do not need the ready callback:
+            <code>H("webview", new Props { Src = "..." })</code>.
+        </p>
+        <p>
+            A stylesheet can size and place it like any other box:
+        </p>
+        <div class="code" data-label="styles.css">
+<pre><code>.browser {
+    width: 640px;
+    height: 480px;
+    border-radius: 12px;
+    overflow: hidden;
+}</code></pre>
+        </div>
+
+        <h2 id="source">The src attribute</h2>
+        <p>
+            <code>Src</code> accepts three forms:
+        </p>
+        <ul>
+            <li>An absolute URL such as <code>https://example.com</code>.</li>
+            <li>A <code>data:</code> URI for self-contained HTML.</li>
+            <li>A local path, which is resolved to a <code>file:</code> URI so bundled or downloaded pages can be loaded.</li>
+        </ul>
+        <p>
+            An element without a usable <code>src</code> is skipped. Changing <code>src</code>
+            disposes the existing browser and creates a new one, so the page follows the prop.
+        </p>
+        <div class="code" data-label="Program.cs">
+<pre class="csx"><code>&lt;webview Src="data:text/html,&lt;h1&gt;Hello&lt;/h1&gt;&lt;p&gt;From a data URI.&lt;/p&gt;" /&gt;</code></pre>
+<pre class="csharp"><code>H("webview", new WebViewProps
+{
+    Src = "data:text/html,&lt;h1&gt;Hello&lt;/h1&gt;&lt;p&gt;From a data URI.&lt;/p&gt;"
+});</code></pre>
+        </div>
+
+        <h2 id="sizing">Sizing and layout</h2>
+        <p>
+            The default box is 300 &times; 150 CSS pixels, matching <code>iframe</code>. Use the
+            <code>width</code> and <code>height</code> attributes or CSS to change it. The
+            element&rsquo;s border box becomes the browser viewport in device pixels; Donkeh
+            resizes the CEF view whenever layout changes, including when a scroll container
+            moves the element on screen.
+        </p>
+        <p>
+            Scrolling <em>inside</em> the loaded page is handled by Chromium. Wheel events over
+            the element are forwarded to the browser instead of scrolling Donkeh ancestors, so
+            the page scrolls naturally. Content outside the element is clipped by normal CSS
+            <code>overflow</code> rules. <code>object-fit</code> is not used: the frame always
+            fills the box.
+        </p>
+
+        <h2 id="controller">The WebView controller</h2>
+        <p>
+            <code>OnReady</code> receives a <code>WebView</code> object. It is a thin,
+            engine-independent control surface, so application code never has to reference
+            CefSharp directly.
+        </p>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Member</th><th>Description</th></tr></thead>
+                <tbody>
+                    <tr><td><code>Address</code></td><td>The URL the browser is currently displaying.</td></tr>
+                    <tr><td><code>IsLoading</code></td><td>Whether a document is still loading.</td></tr>
+                    <tr><td><code>IsReady</code></td><td>Whether the underlying browser has finished being created.</td></tr>
+                    <tr><td><code>Load(string url)</code></td><td>Navigates to a URL, data URI or local path.</td></tr>
+                    <tr><td><code>Reload()</code></td><td>Reloads the current address.</td></tr>
+                    <tr><td><code>ExecuteJavaScript(string script)</code></td><td>Runs a string of script in the main frame. Fire-and-forget; it does not return a value.</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="code" data-label="Program.cs">
+<pre class="csx"><code>&lt;webview
+    Src="https://example.com"
+    OnReady={view =&gt;
+    {
+        view.ExecuteJavaScript("window.__appToken = 'abc123'");
+    }} /&gt;</code></pre>
+<pre class="csharp"><code>H("webview", new WebViewProps
+{
+    Src = "https://example.com",
+    OnReady = view =&gt;
+    {
+        view.ExecuteJavaScript("window.__appToken = 'abc123'");
+    }
+});</code></pre>
+        </div>
+        <p>
+            The callback is invoked once, on the first frame after the browser exists. Browser
+            creation is asynchronous, so doing work before <code>OnReady</code> may silently
+            do nothing.
+        </p>
+
+        <h2 id="events">Events</h2>
+        <p>
+            Ordinary element event props (<code>OnClick</code>, <code>OnPointerDown</code>,
+            <code>OnKeyDown</code>, and so on) can be attached to a webview like any other
+            element. CEF navigation events are not bridged into Donkeh events yet; for
+            simple loading state, poll <code>IsLoading</code> through the controller. Input
+            events that land inside the element are forwarded to the browser, so they normally
+            reach the page rather than Donkeh handlers.
+        </p>
+
+        <h2 id="input">Input and focus in detail</h2>
+        <p>
+            Because the browser is offscreen, the operating system delivers input to the
+            Donkeh window, not to Chromium. Donkeh translates and forwards it:
+        </p>
+        <ul>
+            <li>Mouse move, press and release are converted to browser-local CSS pixels and sent with the current modifier state.</li>
+            <li>Wheel deltas are forwarded so the page scrolls instead of an ancestor container.</li>
+            <li>Key down, key up and character events are forwarded while a webview has focus.</li>
+            <li>Pressing inside a webview focuses it and blurs any previous webview; focusing another Donkeh control returns focus.</li>
+        </ul>
+        <p>
+            This means keyboard shortcuts and text input go to the page while it is focused.
+            It also means the browser&rsquo;s native chrome is unavailable: there is no address
+            bar, context menu integration or IME composition window. Your app owns navigation
+            through the <code>WebView</code> controller.
+        </p>
+
+        <h2 id="performance">Performance</h2>
+        <p>
+            This implementation uses CEF&rsquo;s CPU offscreen rendering path. Each painted
+            frame is copied from BGRA to RGBA and uploaded in full with
+            <code>glTexSubImage2D</code>; dirty rectangles are not used yet. Cost therefore
+            scales with the element&rsquo;s pixel area and with how often the page repaints.
+            Keep webviews to sensible sizes, and prefer static pages for large surfaces.
+        </p>
+        <p>
+            The accelerated shared-texture path exists in CEF but is intentionally not used
+            here. Swapping it in later would change only how frames are produced &mdash; the
+            element, layout, input and paint integration would stay the same.
+        </p>
+
+        <h2 id="limitations">Current limitations</h2>
+        <ul>
+            <li>Desktop hosts only; Android and the browser DOM host do not create a CEF browser.</li>
+            <li>Popup widgets painted by Chromium (for example native select dropdowns and context menus) are not composited into the Donkeh frame.</li>
+            <li>No JavaScript result bridge or CEF navigation/load events are exposed yet.</li>
+            <li>IME composition ranges and drag-and-drop from the page are not wired.</li>
+            <li>Every frame is uploaded in full; there is no dirty-region upload.</li>
+            <li>The native CEF runtime must be shipped with the application output.</li>
+        </ul>
+
+        <h2 id="licensing">Licensing</h2>
+        <p>
+            CEF and CefSharp are BSD-3-Clause licensed with no revenue threshold, so the
+            webview is usable in free and commercial Donkeh applications alike. Their full
+            notices are reproduced in <code>LICENSE.MD</code> at the repository root and must
+            accompany distributions that include the native CEF runtime.
+        </p>
+
+        <div class="page-nav">
+            <a class="prev" href="canvas.html"><span>Previous</span>Canvas reference</a>
+            <a class="next" href="host-permissions.html"><span>Next</span>Host permissions</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh  -  CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/donkeh-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
+</body>
+</html>

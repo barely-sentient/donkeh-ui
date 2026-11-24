@@ -60,12 +60,13 @@
                 <a href="html-elements.html">HTML elements</a>
                 <a href="event-reference.html">Event reference</a>
                 <a href="css-support.html">CSS support</a>
+                <a href="webview.html">WebView reference</a>
+                <a href="video.html">Video reference</a>
+                <a href="canvas.html">Canvas reference</a>
             </div>
             <div class="nav-group">
                 <span class="nav-label">Primitives</span>
                 <a href="image.html">Image</a>
-                <a href="video.html">Video</a>
-                <a href="canvas.html">Canvas</a>
             </div>
             <div class="nav-group">
                 <span class="nav-label">Inspector</span>
@@ -119,7 +120,34 @@
         </p>
 
         <div class="code" data-label="App.cs">
-<pre><code>using Donkeh.Hosting;
+<pre class="csx"><code>using Donkeh.Hosting;
+using Donkeh.UILab;
+using static Donkeh.UILab.HtmlHelper;
+using static Donkeh.UILab.Routing;
+
+[AppRoot(Width = 1000, Height = 700, Title = "My app")]
+public sealed class App : Component
+{
+    public override Node Render() =&gt;
+        AppRouter("/",
+            AppRoutes(
+                Route("/", () =&gt; Home()),
+                Route("/settings", () =&gt; Settings()),
+                Route("/docs/*", () =&gt; Docs())));
+}
+
+private static Node Home() =&gt;
+    &lt;div className="page"&gt;
+        &lt;h1&gt;Home&lt;/h1&gt;
+        {Link("/settings", Text("Open settings"))}
+    &lt;/div&gt;;
+
+private static Node Settings() =&gt;
+    &lt;div className="page"&gt;&lt;h1&gt;Settings&lt;/h1&gt;&lt;/div&gt;;
+
+private static Node Docs() =&gt;
+    &lt;div className="page"&gt;&lt;h1&gt;Docs&lt;/h1&gt;&lt;/div&gt;;</code></pre>
+<pre class="csharp"><code>using Donkeh.Hosting;
 using Donkeh.UILab;
 using static Donkeh.UILab.HtmlHelper;
 using static Donkeh.UILab.Routing;
@@ -154,7 +182,10 @@ private static Node Docs() =&gt;
         </p>
 
         <div class="code" data-label="Route children">
-<pre><code>AppRoutes(
+<pre class="csx"><code>AppRoutes(
+    Route("/", Text("Home")),
+    Route("/about", Text("About")));</code></pre>
+<pre class="csharp"><code>AppRoutes(
     Route("/", Text("Home")),
     Route("/about", Text("About")));</code></pre>
         </div>
@@ -185,7 +216,11 @@ private static Node Docs() =&gt;
         </p>
 
         <div class="code" data-label="Fallback">
-<pre><code>using static Donkeh.UILab._;
+<pre class="csx"><code>AppRoutes(
+    Route("/", () =&gt; Home()),
+    Route("/settings", () =&gt; Settings()),
+    Route("*", () =&gt; NotFound()));</code></pre>
+<pre class="csharp"><code>using static Donkeh.UILab._;
 
 C&lt;AppRoutes, AppRoutesProps&gt;(new AppRoutesProps
 {
@@ -213,7 +248,15 @@ C&lt;AppRoutes, AppRoutesProps&gt;(new AppRoutesProps
         </div>
 
         <div class="code" data-label="SaveButton.cs">
-<pre><code>using Donkeh.UILab;
+<pre class="csx"><code>public sealed class SaveButton : Component
+{
+    public override Node Render()
+    {
+        var router = UseRouter();
+        return &lt;button onClick={() =&gt; router.setPage("/saved")}&gt;Save&lt;/button&gt;;
+    }
+}</code></pre>
+<pre class="csharp"><code>using Donkeh.UILab;
 using static Donkeh.UILab.HtmlHelper;
 using static Donkeh.UILab._;
 
@@ -238,7 +281,15 @@ public sealed class SaveButton : Component
         </p>
 
         <div class="code" data-label="PathLabel.cs">
-<pre><code>public sealed class PathLabel : Component
+<pre class="csx"><code>public sealed class PathLabel : Component
+{
+    public override Node Render()
+    {
+        var path = UsePath();
+        return &lt;span className="path"&gt;{path}&lt;/span&gt;;
+    }
+}</code></pre>
+<pre class="csharp"><code>public sealed class PathLabel : Component
 {
     public override Node Render() =&gt;
         Span(new() { ClassName = "path" },

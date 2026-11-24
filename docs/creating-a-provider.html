@@ -60,12 +60,13 @@
                 <a href="html-elements.html">HTML elements</a>
                 <a href="event-reference.html">Event reference</a>
                 <a href="css-support.html">CSS support</a>
+                <a href="webview.html">WebView reference</a>
+                <a href="video.html">Video reference</a>
+                <a href="canvas.html">Canvas reference</a>
             </div>
             <div class="nav-group">
                 <span class="nav-label">Primitives</span>
                 <a href="image.html">Image</a>
-                <a href="video.html">Video</a>
-                <a href="canvas.html">Canvas</a>
             </div>
             <div class="nav-group">
                 <span class="nav-label">Inspector</span>
@@ -140,7 +141,28 @@ public static class ThemeContext
         </p>
 
         <div class="code" data-label="App.cs">
-<pre><code>using Donkeh.UILab;
+<pre class="csx"><code>using Donkeh.UILab;
+using static Donkeh.UILab._;
+
+public sealed class App : Component
+{
+    public override Node Render()
+    {
+        var (dark, setDark) = State(false);
+        var theme = dark ? ThemeContext.Dark : ThemeContext.Value.DefaultValue;
+
+        return Provider(ThemeContext.Value, theme,
+            &lt;main className="app"&gt;
+                &lt;button
+                    ClassName="theme-toggle"
+                    OnClick={() =&gt; setDark(!dark)}&gt;
+                    {dark ? "Use light theme" : "Use dark theme"}
+                &lt;/button&gt;
+                &lt;Toolbar /&gt;
+            &lt;/main&gt;);
+    }
+}</code></pre>
+<pre class="csharp"><code>using Donkeh.UILab;
 using static Donkeh.UILab._;
 
 public sealed class App : Component
@@ -169,7 +191,18 @@ public sealed class App : Component
         </p>
 
         <div class="code" data-label="Toolbar.cs">
-<pre><code>using Donkeh.UILab;
+<pre class="csx"><code>public sealed class Toolbar : Component
+{
+    public override Node Render()
+    {
+        var theme = UseContext(ThemeContext.Value);
+
+        return &lt;div className="toolbar" style={`background:${theme.Background};color:${theme.Accent}`}&gt;
+            Toolbar
+        &lt;/div&gt;;
+    }
+}</code></pre>
+<pre class="csharp"><code>using Donkeh.UILab;
 using static Donkeh.UILab._;
 
 public sealed class Toolbar : Component
@@ -218,7 +251,13 @@ public sealed class Toolbar : Component
         </p>
 
         <div class="code" data-label="Nested providers">
-<pre><code>return Provider(ThemeContext.Value, theme,
+<pre class="csx"><code>&lt;ThemeContext Value={outer}&gt;
+    &lt;Toolbar /&gt;
+    &lt;ThemeContext Value={inner}&gt;
+        &lt;Sidebar /&gt;
+    &lt;/ThemeContext&gt;
+&lt;/ThemeContext&gt;</code></pre>
+<pre class="csharp"><code>return Provider(ThemeContext.Value, theme,
     Provider(LocaleContext.Value, locale,
         C&lt;Dashboard&gt;()));</code></pre>
         </div>

@@ -60,12 +60,13 @@
                 <a href="html-elements.html">HTML elements</a>
                 <a href="event-reference.html">Event reference</a>
                 <a href="css-support.html">CSS support</a>
+                <a href="webview.html">WebView reference</a>
+                <a href="video.html">Video reference</a>
+                <a href="canvas.html">Canvas reference</a>
             </div>
             <div class="nav-group">
                 <span class="nav-label">Primitives</span>
                 <a href="image.html">Image</a>
-                <a href="video.html">Video</a>
-                <a href="canvas.html">Canvas</a>
             </div>
             <div class="nav-group">
                 <span class="nav-label">Inspector</span>
@@ -131,7 +132,17 @@
         </p>
 
         <div class="code" data-label="CounterTests.cs">
-<pre><code>using Donkeh.Testing;
+<pre class="csx"><code>using Donkeh.Testing;
+using static Donkeh.UILab._;
+
+var page = ComponentTest.Render(&lt;Counter /&gt;());
+
+Assert.Equal("Counter: 0", page.Find(".counter-btn").Text);
+
+page.Click(".counter-btn");
+
+Assert.Equal("Counter: 1", page.Find(".counter-btn").Text);</code></pre>
+<pre class="csharp"><code>using Donkeh.Testing;
 using static Donkeh.UILab._;
 
 var page = ComponentTest.Render(C&lt;Counter&gt;());
@@ -146,7 +157,11 @@ Assert.Equal("Counter: 1", page.Find(".counter-btn").Text);</code></pre>
         <p>Pass a tree directly when the test does not need a component:</p>
 
         <div class="code" data-label="Inline tree">
-<pre><code>var page = ComponentTest.Render(
+<pre class="csx"><code>var page = ComponentTest.Render(
+    &lt;button className="save"&gt;Save&lt;/button&gt;);
+
+page.Click(".save");</code></pre>
+<pre class="csharp"><code>var page = ComponentTest.Render(
     H("button", new Props { ClassName = "save" }, Text("Save")));
 
 page.Click(".save");</code></pre>
@@ -160,7 +175,16 @@ page.Click(".save");</code></pre>
         </p>
 
         <div class="code" data-label="Options">
-<pre><code>var page = ComponentTest.Render(
+<pre class="csx"><code>var page = ComponentTest.Render(
+    &lt;Card /&gt;(),
+    options =&gt;
+    {
+        options.ViewportWidth = 640;
+        options.ViewportHeight = 480;
+        options.Stylesheets.Add(
+            ".card { border: 1px solid #d0d7de; }");
+    });</code></pre>
+<pre class="csharp"><code>var page = ComponentTest.Render(
     C&lt;Card&gt;(),
     options =&gt;
     {
@@ -191,7 +215,11 @@ page.Resize(800, 600);</code></pre>
         </p>
 
         <div class="code" data-label="Prop updates">
-<pre><code>var page = ComponentTest.Render&lt;Badge, BadgeProps&gt;(
+<pre class="csx"><code>var page = ComponentTest.Render&lt;Badge, BadgeProps&gt;(
+    new BadgeProps { Label = "New" });
+
+page.Update(&lt;Badge label="Archived" /&gt;);</code></pre>
+<pre class="csharp"><code>var page = ComponentTest.Render&lt;Badge, BadgeProps&gt;(
     new BadgeProps { Label = "New" });
 
 page.Update(C&lt;Badge, BadgeProps&gt;(

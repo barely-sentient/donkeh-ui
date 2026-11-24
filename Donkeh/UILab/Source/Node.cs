@@ -228,6 +228,12 @@ namespace Donkeh.UILab
         /// </summary>
         public Delegate? VideoReadyHandler { get; set; }
 
+        /// <summary>
+        /// Handler invoked when the host creates a browser for a <c>webview</c>
+        /// element. <see langword="null"/> for other elements.
+        /// </summary>
+        public Delegate? WebViewReadyHandler { get; set; }
+
         /// <summary>The tag name this element was created with.</summary>
         /// <value>
         /// The original case-preserved tag text, or an empty string when the
@@ -736,6 +742,11 @@ namespace Donkeh.UILab
             if (props.OnVideoReady is { } videoReady)
             {
                 VideoReadyHandler = videoReady;
+            }
+
+            if (props.OnWebViewReady is { } webViewReady)
+            {
+                WebViewReadyHandler = webViewReady;
             }
         }
 
@@ -1268,6 +1279,7 @@ namespace Donkeh.UILab
             CanvasDrawHandler = source.CanvasDrawHandler;
             AudioReadyHandler = source.AudioReadyHandler;
             VideoReadyHandler = source.VideoReadyHandler;
+            WebViewReadyHandler = source.WebViewReadyHandler;
 
             if (!ReferenceEquals(Ref, source.Ref))
             {

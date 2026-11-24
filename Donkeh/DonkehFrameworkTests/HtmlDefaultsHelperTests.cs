@@ -25,7 +25,7 @@ public sealed class HtmlDefaultsHelperTests
         "sup", "code", "kbd", "samp", "var", "mark", "abbr", "acronym",
         "cite", "q", "time", "label", "output", "ruby", "rt", "bdi", "bdo",
         "big", "strike", "del", "dfn", "tt", "nobr", "data", "ins",
-        "img", "canvas", "video", "iframe", "object", "embed", "svg",
+        "img", "canvas", "video", "iframe", "object", "embed", "svg", "webview",
         "input", "textarea", "select", "button", "progress", "meter", "marquee",
         "table", "caption", "col", "colgroup", "thead", "tbody", "tfoot",
         "tr", "td", "th", "slot", "my-widget"
@@ -66,7 +66,7 @@ public sealed class HtmlDefaultsHelperTests
     [Fact]
     public void OnlyReplacedTagsReportAnIntrinsicSize()
     {
-        string[] replaced = ["img", "canvas", "video", "audio", "iframe", "object", "embed"];
+        string[] replaced = ["img", "canvas", "video", "audio", "iframe", "object", "embed", "webview"];
 
         foreach (var tag in replaced)
         {

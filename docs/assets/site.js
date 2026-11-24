@@ -329,16 +329,92 @@
     }
 
     document.querySelectorAll(".code").forEach(function (block) {
-        var code = block.querySelector("code");
-        if (!code || block.dataset.highlighted === "true") {
+        if (block.dataset.highlighted === "true") {
             return;
         }
 
-        var raw = code.textContent;
-        var language = detectLanguage(block, raw);
-        code.innerHTML = highlight(raw, language);
+        block.querySelectorAll("code").forEach(function (code) {
+            var raw = code.textContent;
+            var language = detectLanguage(block, raw);
+            code.innerHTML = highlight(raw, language);
+        });
+
         block.dataset.highlighted = "true";
     });
+
+    var csxMode = true;
+    try {
+        var savedCsx = localStorage.getItem("donkeh-csx-mode");
+        if (savedCsx !== null) {
+            csxMode = savedCsx === "true";
+        }
+    } catch (error) {
+        csxMode = true;
+    }
+
+    function applyCsxMode(on) {
+        csxMode = !!on;
+        try {
+            localStorage.setItem("donkeh-csx-mode", String(csxMode));
+        } catch (error) {
+            // Storage can be unavailable in private modes.
+        }
+        document.querySelectorAll(".code").forEach(function (block) {
+            var csx = block.querySelector("pre.csx, pre.variant.csx");
+            var csharp = block.querySelector("pre.csharp, pre.variant.csharp");
+            if (csx && csharp) {
+                csx.classList.toggle("is-active", csxMode);
+                csharp.classList.toggle("is-active", !csxMode);
+                csx.style.display = csxMode ? "" : "none";
+                csharp.style.display = csxMode ? "none" : "";
+                var input = block.querySelector(".csx-switch input");
+                if (input && input.checked !== csxMode) {
+                    input.checked = csxMode;
+                }
+            }
+        });
+    }
+
+    // Inject an iOS-style switch into every code block that offers both variants.
+    document.querySelectorAll(".code").forEach(function (block) {
+        var csx = block.querySelector("pre.csx, pre.variant.csx");
+        var csharp = block.querySelector("pre.csharp, pre.variant.csharp");
+        if (!csx || !csharp) {
+            return;
+        }
+
+        if (block.querySelector(".csx-switch")) {
+            return;
+        }
+
+        var label = document.createElement("label");
+        label.className = "csx-switch";
+        label.title = "Toggle CSX syntax";
+
+        var input = document.createElement("input");
+        input.type = "checkbox";
+        input.checked = csxMode;
+        input.setAttribute("aria-label", "CSX mode");
+
+        var track = document.createElement("span");
+        track.className = "track";
+
+        var text = document.createElement("span");
+        text.className = "label-text";
+        text.textContent = "CSX";
+
+        label.appendChild(input);
+        label.appendChild(track);
+        label.appendChild(text);
+
+        input.addEventListener("change", function () {
+            applyCsxMode(input.checked);
+        });
+
+        block.appendChild(label);
+    });
+
+    applyCsxMode(csxMode);
 
     document.querySelectorAll(".code").forEach(function (block) {
         var button = document.createElement("button");
@@ -348,7 +424,7 @@
         button.setAttribute("aria-label", "Copy code");
 
         button.addEventListener("click", function () {
-            var code = block.querySelector("code");
+            var code = block.querySelector("pre.is-active code") || block.querySelector("code");
             var text = code ? code.innerText : "";
 
             function done() {

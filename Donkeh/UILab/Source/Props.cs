@@ -544,6 +544,13 @@ namespace Donkeh.UILab
         /// The argument is the window-side <c>VideoPlayer</c> control surface.
         /// </summary>
         public Delegate? OnVideoReady { get; init; }
+
+        /// <summary>
+        /// Handler invoked when a <c>webview</c> element's browser has been
+        /// created. The argument is the window-side <c>WebView</c> control
+        /// surface.
+        /// </summary>
+        public Delegate? OnWebViewReady { get; init; }
     }
 
     /// <summary>

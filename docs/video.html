@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Video  -  Donkeh</title>
+    <title>Video reference  -  Donkeh</title>
     <meta name="description" content="How the video element works in Donkeh: LibVLC decoding, texture frames, player controls and browser-host differences.">
     <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/site.css">
@@ -60,12 +60,13 @@
                 <a href="html-elements.html">HTML elements</a>
                 <a href="event-reference.html">Event reference</a>
                 <a href="css-support.html">CSS support</a>
+                <a href="webview.html">WebView reference</a>
+                <a href="video.html">Video reference</a>
+                <a href="canvas.html">Canvas reference</a>
             </div>
             <div class="nav-group">
                 <span class="nav-label">Primitives</span>
                 <a href="image.html">Image</a>
-                <a href="video.html">Video</a>
-                <a href="canvas.html">Canvas</a>
             </div>
             <div class="nav-group">
                 <span class="nav-label">Inspector</span>
@@ -102,8 +103,8 @@
     </aside>
 
     <main class="content" id="content">
-        <div class="breadcrumb">Docs <span>/</span> Primitives <span>/</span> Video</div>
-        <h1>Video</h1>
+        <div class="breadcrumb">Docs <span>/</span> Reference <span>/</span> Video reference</div>
+        <h1>Video reference</h1>
         <p class="lead">
             <code>video</code> is a host primitive, not an element the renderer can
             paint by walking children. On desktop and Android a native player decodes
@@ -134,7 +135,31 @@
 
         <h2 id="usage">Basic playback</h2>
         <div class="code" data-label="Video.cs">
-<pre><code>using Donkeh.UILab;
+<pre class="csx"><code>using Donkeh.UILab;
+using Donkeh.Windowing;
+using static Donkeh.UILab.HtmlHelper;
+using static Donkeh.UILab._;
+
+public sealed class Clip : Component
+{
+    public override Node Render() =&gt;
+        &lt;Video
+            Src="media/intro.mp4"
+            Controls={true}
+            AutoPlay={true}
+            Loop={true}
+            Muted={true}
+            Volume={0.8f}
+            OnReady={player =&gt;
+            {
+                // Save the player, or seek to a chapter once it exists.
+                player.Seek(12.5f);
+            }}
+            OnTimeUpdate={seconds =&gt;
+                Console.WriteLine($"position: {seconds:0.0}s")}
+            OnEnded={() =&gt; Console.WriteLine("finished")} /&gt;;
+}</code></pre>
+<pre class="csharp"><code>using Donkeh.UILab;
 using Donkeh.Windowing;
 using static Donkeh.UILab.HtmlHelper;
 using static Donkeh.UILab._;
@@ -195,7 +220,24 @@ public sealed class Clip : Component
         </p>
 
         <div class="code" data-label="VideoPlayer">
-<pre><code>public sealed class PlayerControls : Component
+<pre class="csx"><code>public sealed class PlayerControls : Component
+{
+    private VideoPlayer? _player;
+
+    public override Node Render()
+    {
+        var playing = _player?.IsPlaying == true;
+
+        return &lt;Div ClassName="transport"&gt;
+            &lt;Video
+                Src="media/demo.mp4"
+                OnReady={player =&gt; _player = player} /&gt;
+            &lt;Button OnClick={() =&gt; _player?.Play()}&gt;Play&lt;/Button&gt;
+            &lt;Button OnClick={() =&gt; _player?.Pause()}&gt;Pause&lt;/Button&gt;
+        &lt;/Div&gt;;
+    }
+}</code></pre>
+<pre class="csharp"><code>public sealed class PlayerControls : Component
 {
     private VideoPlayer? _player;
 

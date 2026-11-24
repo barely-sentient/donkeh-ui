@@ -60,12 +60,13 @@
                 <a href="html-elements.html">HTML elements</a>
                 <a href="event-reference.html">Event reference</a>
                 <a href="css-support.html">CSS support</a>
+                <a href="webview.html">WebView reference</a>
+                <a href="video.html">Video reference</a>
+                <a href="canvas.html">Canvas reference</a>
             </div>
             <div class="nav-group">
                 <span class="nav-label">Primitives</span>
                 <a href="image.html">Image</a>
-                <a href="video.html">Video</a>
-                <a href="canvas.html">Canvas</a>
             </div>
             <div class="nav-group">
                 <span class="nav-label">Inspector</span>
@@ -112,7 +113,16 @@
         </p>
 
         <div class="code" data-label="Typed helpers">
-<pre><code>using Donkeh.UILab;
+<pre class="csx"><code>using Donkeh.UILab;
+using static Donkeh.UILab.HtmlHelper;
+using static Donkeh.UILab._;
+
+&lt;div className="card"&gt;
+    &lt;h2 className="card-title"&gt;Files&lt;/h2&gt;
+    &lt;p className="card-copy"&gt;12 items&lt;/p&gt;
+    &lt;a href="/files"&gt;Open&lt;/a&gt;
+&lt;/div&gt;</code></pre>
+<pre class="csharp"><code>using Donkeh.UILab;
 using static Donkeh.UILab.HtmlHelper;
 using static Donkeh.UILab._;
 
@@ -157,7 +167,14 @@ Div(new() { ClassName = "card" },
         </p>
 
         <div class="code" data-label="Attributes">
-<pre><code>Button(new()
+<pre class="csx"><code>&lt;button
+    className="primary"
+    disabled={isBusy}
+    data-command="save"
+    aria-label="Save changes"&gt;
+    Save
+&lt;/button&gt;</code></pre>
+<pre class="csharp"><code>Button(new()
 {
     ClassName = "primary",
     Disabled = isBusy,
@@ -202,7 +219,8 @@ Div(new() { ClassName = "card" },
         </p>
 
         <div class="code" data-label="Custom element">
-<pre><code>H("my-badge", new()
+<pre class="csx"><code>&lt;my-badge className="badge" data-count="3"&gt;New&lt;/my-badge&gt;</code></pre>
+<pre class="csharp"><code>H("my-badge", new()
 {
     ClassName = "badge",
     Attributes = new Dictionary&lt;string, string&gt;
@@ -218,14 +236,15 @@ Div(new() { ClassName = "card" },
                 <thead><tr><th>Element</th><th>Notes</th></tr></thead>
                 <tbody>
                     <tr><td><code>img</code></td><td>Replaced content with intrinsic sizing, source resolution, object-fit and a shared texture cache. See <a href="image.html">Image</a>.</td></tr>
-                    <tr><td><code>video</code></td><td>Desktop and Android use a LibVLC player whose frames become textures. See <a href="video.html">Video</a>.</td></tr>
-                    <tr><td><code>canvas</code></td><td>Desktop uses batched Silk.NET drawing or raw OpenGL; browser drawing is not wired yet. See <a href="canvas.html">Canvas</a>.</td></tr>
+                    <tr><td><code>video</code></td><td>Desktop and Android use a LibVLC player whose frames become textures. See <a href="video.html">Video reference</a>.</td></tr>
+                    <tr><td><code>canvas</code></td><td>Desktop uses batched Silk.NET drawing or raw OpenGL; browser drawing is not wired yet. See <a href="canvas.html">Canvas reference</a>.</td></tr>
                     <tr><td><code>audio</code></td><td>Desktop and Android use the window-side audio player and paint transport controls. It has no visual box when <code>controls</code> is absent.</td></tr>
                     <tr><td><code>input</code></td><td>Text-like types are editable with click-to-place caret, arrow and word navigation, selection, scrolling to the caret and <code>caret-color</code>/<code>::selection</code> support. Checkbox, radio, range, colour and file inputs are host-painted and interactive. Other types still render as controls.</td></tr>
                     <tr><td><code>select</code>, <code>option</code></td><td>The selected option and a dropdown chevron are painted by the host. Arrow keys, Home/End, Enter/Space and type-ahead navigate the option list. Option elements are hidden in the user-agent sheet.</td></tr>
                     <tr><td><code>textarea</code></td><td>Editable multi-line text with click-to-place caret, Up/Down line movement, line-aware Home/End, selection, internal scrolling, caret and placeholder support.</td></tr>
                     <tr><td><code>table</code> family</td><td>Table layout, collapse and spacing are supported. Use normal table structure; anonymous table boxes are not synthesised for arbitrary children.</td></tr>
                     <tr><td><code>picture</code>, <code>source</code></td><td>Parsed as elements, but responsive source selection is not implemented. <code>img</code> uses its own <code>src</code>.</td></tr>
+                    <tr><td><code>webview</code></td><td>Desktop hosts a CEF offscreen browser whose frames become textures, so the element joins normal paint order, clipping and transforms. Use <code>WebViewProps</code> for navigation and script. See <a href="webview.html">WebView reference</a>.</td></tr>
                     <tr><td><code>iframe</code>, <code>object</code>, <code>embed</code></td><td>Render a stable 300 × 150 placeholder box. They do not load or embed external documents.</td></tr>
                     <tr><td><code>script</code>, <code>style</code>, <code>link</code>, <code>meta</code></td><td>Hidden by the user-agent sheet. Scripts are never executed and <code>link</code> stylesheets are never fetched; load CSS through <code>[Stylesheet]</code>.</td></tr>
                 </tbody>

@@ -60,12 +60,13 @@
                 <a href="html-elements.html">HTML elements</a>
                 <a href="event-reference.html">Event reference</a>
                 <a href="css-support.html">CSS support</a>
+                <a href="webview.html">WebView reference</a>
+                <a href="video.html">Video reference</a>
+                <a href="canvas.html">Canvas reference</a>
             </div>
             <div class="nav-group">
                 <span class="nav-label">Primitives</span>
                 <a href="image.html">Image</a>
-                <a href="video.html">Video</a>
-                <a href="canvas.html">Canvas</a>
             </div>
             <div class="nav-group">
                 <span class="nav-label">Inspector</span>
@@ -125,7 +126,15 @@
         </p>
 
         <div class="code" data-label="HookedComponent.cs">
-<pre><code>using Donkeh.UILab;
+<pre class="csx"><code>public sealed class Counter : Component
+{
+    public override Node Render()
+    {
+        var (count, setCount) = State(0);
+        return &lt;button onClick={() =&gt; setCount(count + 1)}&gt;{count}&lt;/button&gt;;
+    }
+}</code></pre>
+<pre class="csharp"><code>using Donkeh.UILab;
 
 namespace MyApp;
 
@@ -145,7 +154,26 @@ public abstract class HookedComponent : Component
         </p>
 
         <div class="code" data-label="TogglePanel.cs">
-<pre><code>using Donkeh.UILab;
+<pre class="csx"><code>using Donkeh.UILab;
+using static Donkeh.UILab._;
+
+namespace MyApp;
+
+public sealed class TogglePanel : HookedComponent
+{
+    public override Node Render()
+    {
+        var (open, toggle) = UseToggle();
+
+        return &lt;section className="panel"&gt;
+            &lt;button className="panel-toggle" onClick={toggle}&gt;
+                {open ? "Hide" : "Show"}
+            &lt;/button&gt;
+            {Show(open, &lt;div className="panel-body"&gt;Panel content&lt;/div&gt;)}
+        &lt;/section&gt;;
+    }
+}</code></pre>
+<pre class="csharp"><code>using Donkeh.UILab;
 using static Donkeh.UILab._;
 
 namespace MyApp;
@@ -237,7 +265,19 @@ public sealed class TogglePanel : HookedComponent
         </p>
 
         <div class="code" data-label="Connection hook">
-<pre><code>protected void UseConnection(string endpoint)
+<pre class="csx"><code>public static Connection UseConnection(string endpoint)
+{
+    var component = HookedComponent.RequireCurrent();
+    var handle = component.GetHook&lt;ConnectionHook&gt;(() =&gt; new ConnectionHook(endpoint));
+
+    if (handle.Endpoint != endpoint)
+    {
+        handle.Reconnect(endpoint);
+    }
+
+    return handle.Connection;
+}</code></pre>
+<pre class="csharp"><code>protected void UseConnection(string endpoint)
 {
     Effect(() =&gt;
     {

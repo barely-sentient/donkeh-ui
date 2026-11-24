@@ -63,7 +63,17 @@
 
         <div class="hero-code">
             <div class="code" data-label="Program.cs">
-<pre><code>using Donkeh.Hosting;
+<pre class="csx"><code>using Donkeh.Hosting;
+using Donkeh.UILab;
+using static Donkeh.UILab.HtmlHelper;
+
+[AppRoot(Width = 1180, Height = 760, Title = "My app")]
+public sealed class App : Component
+{
+    public override Node Render() =>
+        &lt;div className="app"&gt;&lt;/div&gt;;
+}</code></pre>
+<pre class="csharp"><code>using Donkeh.Hosting;
 using Donkeh.UILab;
 using static Donkeh.UILab.HtmlHelper;
 

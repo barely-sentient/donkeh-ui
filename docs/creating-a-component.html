@@ -60,12 +60,13 @@
                 <a href="html-elements.html">HTML elements</a>
                 <a href="event-reference.html">Event reference</a>
                 <a href="css-support.html">CSS support</a>
+                <a href="webview.html">WebView reference</a>
+                <a href="video.html">Video reference</a>
+                <a href="canvas.html">Canvas reference</a>
             </div>
             <div class="nav-group">
                 <span class="nav-label">Primitives</span>
                 <a href="image.html">Image</a>
-                <a href="video.html">Video</a>
-                <a href="canvas.html">Canvas</a>
             </div>
             <div class="nav-group">
                 <span class="nav-label">Inspector</span>
@@ -128,7 +129,19 @@
         <p>It also updates the project file and writes the assembly attribute:</p>
 
         <div class="code" data-label="FileList/FileList.cs">
-<pre><code>using Donkeh.UILab;
+<pre class="csx"><code>using Donkeh.UILab;
+using static Donkeh.UILab.HtmlHelper;
+
+[assembly: Donkeh.UILab.Stylesheet("src/Components/FileList/FileList.css")]
+
+namespace MyApp.Components;
+
+public sealed class FileList : Component
+{
+    public override Node Render() =&gt;
+        &lt;div className="file-list"&gt;&lt;/div&gt;;
+}</code></pre>
+<pre class="csharp"><code>using Donkeh.UILab;
 using static Donkeh.UILab.HtmlHelper;
 
 [assembly: Donkeh.UILab.Stylesheet("src/Components/FileList/FileList.css")]
@@ -163,7 +176,26 @@ public sealed class FileList : Component
         </p>
 
         <div class="code" data-label="Card/Card.cs">
-<pre><code>using Donkeh.UILab;
+<pre class="csx"><code>using Donkeh.UILab;
+using static Donkeh.UILab.HtmlHelper;
+using static Donkeh.UILab._;
+
+[assembly: Donkeh.UILab.Stylesheet("src/Components/Card/Card.css")]
+
+namespace MyApp.Components;
+
+public sealed class Card : Component
+{
+    public override Node Render() =&gt;
+        &lt;div className="card"&gt;
+            &lt;h2 className="card-title"&gt;Hello&lt;/h2&gt;
+            &lt;p className="card-copy"&gt;A small card component.&lt;/p&gt;
+            &lt;button className="card-action" onClick={() =&gt; Console.WriteLine("clicked")}&gt;
+                Open
+            &lt;/button&gt;
+        &lt;/div&gt;;
+}</code></pre>
+<pre class="csharp"><code>using Donkeh.UILab;
 using static Donkeh.UILab.HtmlHelper;
 using static Donkeh.UILab._;
 
@@ -213,7 +245,16 @@ public sealed class Card : Component
         </p>
 
         <div class="code" data-label="Typed helpers">
-<pre><code>using static Donkeh.UILab.HtmlHelper;
+<pre class="csx"><code>using static Donkeh.UILab.HtmlHelper;
+using static Donkeh.UILab._;
+
+public override Node Render() =&gt;
+    &lt;div className="toolbar"&gt;
+        &lt;span className="toolbar-title"&gt;Files&lt;/span&gt;
+        &lt;input type="search" placeholder="Search" /&gt;
+        &lt;button className="primary"&gt;Open&lt;/button&gt;
+    &lt;/div&gt;;</code></pre>
+<pre class="csharp"><code>using static Donkeh.UILab.HtmlHelper;
 using static Donkeh.UILab._;
 
 public override Node Render() =&gt;
@@ -249,7 +290,23 @@ public override Node Render() =&gt;
             <code>_.C</code> calls above.
         </p>
         <div class="code" data-label="Card/Card.cx">
-<pre><code>using Donkeh.UILab;
+<pre class="csx"><code>using Donkeh.UILab;
+using Components;
+
+namespace MyApp.Components;
+
+public sealed class Card : Component
+{
+    public override Node Render() =&gt;
+        &lt;div className="card"&gt;
+            &lt;h2 className="card-title"&gt;Hello&lt;/h2&gt;
+            &lt;p className="card-copy"&gt;A small card component.&lt;/p&gt;
+            &lt;button className="card-action" onClick={() =&gt; Console.WriteLine("clicked")}&gt;
+                Open
+            &lt;/button&gt;
+        &lt;/div&gt;;
+}</code></pre>
+<pre class="csharp"><code>using Donkeh.UILab;
 using Components;
 
 namespace MyApp.Components;
@@ -286,7 +343,25 @@ public sealed class Card : Component
         </p>
 
         <div class="code" data-label="Badge.cs">
-<pre><code>using Donkeh.UILab;
+<pre class="csx"><code>using Donkeh.UILab;
+using static Donkeh.UILab._;
+
+public sealed class BadgeProps
+{
+    public string Label { get; init; } = "";
+    public bool Strong { get; init; }
+    public string? Tooltip { get; init; }
+}
+
+public sealed class Badge : Component&lt;BadgeProps&gt;
+{
+    public override Node Render() =&gt;
+        &lt;span className={Props.Strong ? "badge badge-strong" : "badge"}
+              title={Props.Tooltip}&gt;
+            {Props.Label}
+        &lt;/span&gt;;
+}</code></pre>
+<pre class="csharp"><code>using Donkeh.UILab;
 using static Donkeh.UILab._;
 
 public sealed class BadgeProps
@@ -323,7 +398,11 @@ public sealed class Badge : Component&lt;BadgeProps&gt;
         </div>
 
         <div class="code" data-label="Usage">
-<pre><code>H("div", new Props { ClassName = "toolbar" },
+<pre class="csx"><code>&lt;div className="toolbar"&gt;
+    &lt;Badge Label="New" /&gt;
+    &lt;Badge Label="Urgent" Strong Tooltip="Needs attention" /&gt;
+&lt;/div&gt;</code></pre>
+<pre class="csharp"><code>H("div", new Props { ClassName = "toolbar" },
     C&lt;Badge, BadgeProps&gt;(new BadgeProps { Label = "New" }),
     C&lt;Badge, BadgeProps&gt;(new BadgeProps
     {
@@ -349,7 +428,26 @@ public sealed class Badge : Component&lt;BadgeProps&gt;
         </p>
 
         <div class="code" data-label="Panel.cs">
-<pre><code>using Donkeh.UILab;
+<pre class="csx"><code>using Donkeh.UILab;
+using static Donkeh.UILab.HtmlHelper;
+using static Donkeh.UILab._;
+
+public sealed class PanelProps : PropsWithChildren
+{
+    public string Heading { get; init; } = "";
+}
+
+public sealed class Panel : Component&lt;PanelProps&gt;
+{
+    public override Node Render() =&gt;
+        &lt;section className="panel"&gt;
+            &lt;h2 className="panel-heading"&gt;{Props.Heading}&lt;/h2&gt;
+            &lt;div className="panel-body"&gt;
+                {F(Props.Children ?? [])}
+            &lt;/div&gt;
+        &lt;/section&gt;;
+}</code></pre>
+<pre class="csharp"><code>using Donkeh.UILab;
 using static Donkeh.UILab.HtmlHelper;
 using static Donkeh.UILab._;
 
@@ -369,7 +467,10 @@ public sealed class Panel : Component&lt;PanelProps&gt;
         </div>
 
         <div class="code" data-label="Passing children">
-<pre><code>C&lt;Panel, PanelProps&gt;(new PanelProps
+<pre class="csx"><code>&lt;Panel heading="Files"&gt;
+    &lt;p&gt;12 items&lt;/p&gt;
+&lt;/Panel&gt;</code></pre>
+<pre class="csharp"><code>C&lt;Panel, PanelProps&gt;(new PanelProps
 {
     Heading = "Files",
     Children =
@@ -395,7 +496,17 @@ public sealed class Panel : Component&lt;PanelProps&gt;
         </p>
 
         <div class="code" data-label="Panel without extra props">
-<pre><code>public sealed class Panel : Component&lt;PropsWithChildren&gt;
+<pre class="csx"><code>public sealed class Panel : Component&lt;PropsWithChildren&gt;
+{
+    public override Node Render() =&gt;
+        &lt;div className="panel"&gt;{F(Props.Children ?? [])}&lt;/div&gt;;
+}
+
+// Usage
+&lt;Panel&gt;
+    Everything passed here is rendered inside the panel.
+&lt;/Panel&gt;</code></pre>
+<pre class="csharp"><code>public sealed class Panel : Component&lt;PropsWithChildren&gt;
 {
     public override Node Render() =&gt;
         Div(new() { ClassName = "panel" }, F(Props.Children ?? []));
@@ -436,7 +547,11 @@ C&lt;Panel, PropsWithChildren&gt;(new PropsWithChildren
         </p>
 
         <div class="code" data-label="Keyed list">
-<pre><code>var rows = items.Select(item =&gt;
+<pre class="csx"><code>var rows = items.Select(item =&gt;
+    &lt;div key={item.Id} className="row"&gt;{item.Name}&lt;/div&gt;).ToArray();
+
+return &lt;div className="list"&gt;{rows}&lt;/div&gt;;</code></pre>
+<pre class="csharp"><code>var rows = items.Select(item =&gt;
     H("div", new Props
     {
         Key = item.Id,
@@ -563,7 +678,11 @@ window.Run(root);</code></pre>
         </div>
 
         <div class="code" data-label="Using images">
-<pre><code>H("img", new Props
+<pre class="csx"><code>&lt;img src="Assets/logo.png" alt="Logo" /&gt;
+
+// CSS
+&lt;div className="hero" /&gt;</code></pre>
+<pre class="csharp"><code>H("img", new Props
 {
     Src = "Assets/logo.png",
     Alt = "Logo"

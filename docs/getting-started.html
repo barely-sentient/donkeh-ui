@@ -60,12 +60,13 @@
                 <a href="html-elements.html">HTML elements</a>
                 <a href="event-reference.html">Event reference</a>
                 <a href="css-support.html">CSS support</a>
+                <a href="webview.html">WebView reference</a>
+                <a href="video.html">Video reference</a>
+                <a href="canvas.html">Canvas reference</a>
             </div>
             <div class="nav-group">
                 <span class="nav-label">Primitives</span>
                 <a href="image.html">Image</a>
-                <a href="video.html">Video</a>
-                <a href="canvas.html">Canvas</a>
             </div>
             <div class="nav-group">
                 <span class="nav-label">Inspector</span>
@@ -250,7 +251,21 @@ donkeh watch</code></pre>
         </p>
 
         <div class="code" data-label="Program.cs">
-<pre><code>using Donkeh.Hosting;
+<pre class="csx"><code>using Donkeh.Hosting;
+using Donkeh.UILab;
+using static Donkeh.UILab.HtmlHelper;
+
+[AppRoot(
+    Width = 1180,
+    Height = 760,
+    Title = "My app",
+    EnableDevTools = true)]
+public sealed class App : Component
+{
+    public override Node Render() =>
+        &lt;Div ClassName="app" /&gt;;
+}</code></pre>
+<pre class="csharp"><code>using Donkeh.Hosting;
 using Donkeh.UILab;
 using static Donkeh.UILab.HtmlHelper;
 

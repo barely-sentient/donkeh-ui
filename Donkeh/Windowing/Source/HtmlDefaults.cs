@@ -371,7 +371,7 @@ public static class HtmlDefaults
         audio { display: inline; width: 300px; height: 54px; }
         audio:not([controls]) { display: none !important; }
 
-        iframe {
+        iframe, webview {
             display: inline;
             border: 2px inset #767676;
             overflow: hidden;
@@ -456,7 +456,7 @@ public static class HtmlDefaults
         "code", "kbd", "samp", "var", "mark", "abbr", "acronym", "cite", "q",
         "time", "label", "output", "ruby", "rt", "bdi", "bdo", "big", "strike",
         "del", "dfn", "tt", "nobr", "data", "ins", "img", "canvas", "video",
-        "audio", "iframe", "object", "embed", "svg"
+        "audio", "iframe", "object", "embed", "svg", "webview"
     };
 
     /// <summary>
@@ -579,8 +579,8 @@ public static class HtmlDefaults
     /// <param name="tag">The element tag; may be <see langword="null"/>.</param>
     /// <returns>
     /// <see langword="true"/> for <c>img</c>, <c>canvas</c>, <c>video</c>,
-    /// <c>audio</c>, <c>iframe</c>, <c>object</c> and <c>embed</c>; otherwise
-    /// <see langword="false"/>.
+    /// <c>audio</c>, <c>iframe</c>, <c>object</c>, <c>embed</c> and
+    /// <c>webview</c>; otherwise <see langword="false"/>.
     /// </returns>
     /// <remarks>
     /// Form controls such as <c>input</c>, <c>select</c> and <c>textarea</c> are
@@ -589,7 +589,7 @@ public static class HtmlDefaults
     /// tags.
     /// </remarks>
     public static bool IsReplaced(string? tag) => tag is "img" or "canvas" or "video"
-        or "audio" or "iframe" or "object" or "embed";
+        or "audio" or "iframe" or "object" or "embed" or "webview";
 
     /// <summary>
     /// Reads a length attribute such as <c>width="320"</c> on an image. CSS

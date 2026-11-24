@@ -686,12 +686,30 @@ namespace Donkeh.Data.Dom
         /// <returns><see langword="true"/> when the attribute is present.</returns>
         public bool TryGetAttribute(string name, out string? value)
         {
-            if (!string.IsNullOrEmpty(name)
-                && InternTable.TryGetId(name, out var nameId)
-                && _attributes.TryGetValue(nameId, out var valueId))
+            if (!string.IsNullOrEmpty(name))
             {
-                value = InternTable.GetString(valueId);
-                return true;
+                if (InternTable.TryGetId(name, out var nameId)
+                    && _attributes.TryGetValue(nameId, out var valueId))
+                {
+                    value = InternTable.GetString(valueId);
+                    return true;
+                }
+
+                // Attribute names are case-sensitive for selector matching, but
+                // looking them up by name is forgiving about casing so callers can
+                // use the camelCase form (Width, Height, ...) that reads naturally
+                // in CSX markup without breaking intrinsic sizing.
+                foreach (var pair in _attributes)
+                {
+                    var stored = InternTable.GetString(pair.Key);
+
+                    if (stored is not null
+                        && stored.Equals(name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        value = InternTable.GetString(pair.Value);
+                        return true;
+                    }
+                }
             }
 
             value = null;

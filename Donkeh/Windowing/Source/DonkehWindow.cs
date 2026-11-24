@@ -1,6 +1,9 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Numerics;
+using CefEventFlags = CefSharp.CefEventFlags;
+using CefKeyEventType = CefSharp.KeyEventType;
+using CefMouseButton = CefSharp.MouseButtonType;
 using Donkeh.Data;
 using Donkeh.Data.Dom;
 using Donkeh.Hosting;
@@ -107,6 +110,18 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// <summary>Scratch set of video elements present in the current layout.</summary>
     private readonly HashSet<ElementNode> _videoLive = [];
 
+    /// <summary>Shared offscreen CEF host and per-element webview browsers.</summary>
+    private WebViewHost? _webViewHost;
+
+    /// <summary>Scratch set of webview elements present in the current layout.</summary>
+    private readonly HashSet<ElementNode> _webViewLive = [];
+
+    /// <summary>Webview element that currently owns browser focus.</summary>
+    private ElementNode? _webViewFocused;
+
+    /// <summary>Webview element whose browser is holding a pointer press.</summary>
+    private ElementNode? _webViewPressed;
+
     /// <summary>Author stylesheets in cascade order; the last one wins on ties.</summary>
     private readonly List<string> _stylesheets = [];
 
@@ -176,6 +191,9 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
 
     /// <summary>Video boxes collected from the current layout result.</summary>
     private readonly List<LayoutBox> _videoBoxes = [];
+
+    /// <summary>Webview boxes collected from the current layout result.</summary>
+    private readonly List<LayoutBox> _webViewBoxes = [];
 
     /// <summary>Canvas boxes collected from the current layout result.</summary>
     private readonly List<LayoutBox> _canvasBoxes = [];
@@ -1514,6 +1532,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         _mediaBoxesResult = _layoutResult;
         _audioBoxes.Clear();
         _videoBoxes.Clear();
+        _webViewBoxes.Clear();
         _canvasBoxes.Clear();
 
         if (_layoutResult?.Root is null)
@@ -1537,6 +1556,10 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             else if (string.Equals(tag, "video", StringComparison.OrdinalIgnoreCase))
             {
                 _videoBoxes.Add(box);
+            }
+            else if (string.Equals(tag, "webview", StringComparison.OrdinalIgnoreCase))
+            {
+                _webViewBoxes.Add(box);
             }
             else if (string.Equals(tag, "canvas", StringComparison.OrdinalIgnoreCase))
             {
@@ -1771,6 +1794,141 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             }
         }
     }
+
+    /// <summary>
+    /// Creates or updates one offscreen browser per <c>webview</c> element,
+    /// uploads its latest frame and prunes browsers that left the tree.
+    /// </summary>
+    private void SyncWebViewElements()
+    {
+        EnsureMediaBoxCache();
+
+        if (_layoutResult?.Root is null || !WebViewHost.IsSupported)
+        {
+            return;
+        }
+
+        _webViewLive.Clear();
+        var dpi = GetViewDpi();
+
+        foreach (var box in _webViewBoxes)
+        {
+            if (box.Node is not ElementNode element)
+            {
+                continue;
+            }
+
+            var source = GetAttribute(element, "src");
+
+            if (string.IsNullOrWhiteSpace(source))
+            {
+                continue;
+            }
+
+            var rect = PaintedBorderBox(box);
+            var width = Math.Max(1, (int)MathF.Round(rect.Width * dpi));
+            var height = Math.Max(1, (int)MathF.Round(rect.Height * dpi));
+
+            _webViewLive.Add(element);
+            _webViewHost ??= new WebViewHost();
+
+            var textureKey = "webviewframe:"
+                + element.GetHashCode().ToString(CultureInfo.InvariantCulture);
+            var controller = _webViewHost.Ensure(
+                element,
+                new WebViewElementOptions(source, width, height),
+                textureKey);
+
+            _webViewHost.SyncSize(element, width, height);
+
+            if (controller is not null
+                && _webViewHost.MarkReady(element)
+                && element.WebViewReadyHandler is Action<WebView> ready)
+            {
+                try { ready(controller); }
+                catch { }
+            }
+        }
+
+        _webViewHost?.UpdateFrames(_images);
+        _webViewHost?.Prune(_webViewLive);
+    }
+
+    /// <summary>
+    /// Finds the webview under a window point and returns browser-local
+    /// coordinates in CSS pixels.
+    /// </summary>
+    private bool TryGetWebViewAt(float x, float y, out ElementNode element, out float localX, out float localY)
+    {
+        element = null!;
+        localX = 0;
+        localY = 0;
+
+        if (_webViewHost is null || _layoutResult?.Root is null)
+        {
+            return false;
+        }
+
+        foreach (var box in _webViewBoxes)
+        {
+            if (box.Node is not ElementNode candidate)
+            {
+                continue;
+            }
+
+            var rect = PaintedBorderBox(box);
+
+            if (!rect.Contains(x, y))
+            {
+                continue;
+            }
+
+            element = candidate;
+            localX = x - rect.X;
+            localY = y - rect.Y;
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>Translates Donkeh input state into CEF event modifiers.</summary>
+    private static CefEventFlags GetCefModifiers()
+    {
+        var flags = CefEventFlags.None;
+
+        if (InputState.Control) flags |= CefEventFlags.ControlDown;
+        if (InputState.Shift) flags |= CefEventFlags.ShiftDown;
+        if (InputState.Alt) flags |= CefEventFlags.AltDown;
+        if (InputState.Left) flags |= CefEventFlags.LeftMouseButton;
+        if (InputState.Middle) flags |= CefEventFlags.MiddleMouseButton;
+        if (InputState.Right) flags |= CefEventFlags.RightMouseButton;
+
+        return flags;
+    }
+
+    /// <summary>Translates keyboard modifier state into CEF event modifiers.</summary>
+    private static CefEventFlags GetCefKeyModifiers(bool control, bool shift, bool alt)
+    {
+        var flags = CefEventFlags.None;
+
+        if (control) flags |= CefEventFlags.ControlDown;
+        if (shift) flags |= CefEventFlags.ShiftDown;
+        if (alt) flags |= CefEventFlags.AltDown;
+        if (InputState.Left) flags |= CefEventFlags.LeftMouseButton;
+        if (InputState.Middle) flags |= CefEventFlags.MiddleMouseButton;
+        if (InputState.Right) flags |= CefEventFlags.RightMouseButton;
+
+        return flags;
+    }
+
+    /// <summary>Maps a Silk.NET mouse button to a CEF button.</summary>
+    private static CefMouseButton ToCefButton(MouseButton button) => button switch
+    {
+        MouseButton.Middle => CefMouseButton.Middle,
+        MouseButton.Right => CefMouseButton.Right,
+        _ => CefMouseButton.Left
+    };
 
     /// <summary>Reads a float attribute with an invariant fallback.</summary>
     private static float ReadFloatAttribute(ElementNode element, string name, float fallback)
@@ -2074,6 +2232,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         UpdateDevTools(delta);
         SyncAudioElements();
         SyncVideoElements();
+        SyncWebViewElements();
 
         var size = _window.Size;
         var framebuffer = _window.FramebufferSize;
@@ -4348,6 +4507,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
 
             case "video":
             case "iframe":
+            case "webview":
             case "object":
             case "embed":
                 return new Size(
@@ -4393,6 +4553,15 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             return videoKey is null
                 ? null
                 : new ImageSpec(videoKey, box.Style.ObjectFit, 1, 0xFFFFFFFF);
+        }
+
+        if (string.Equals(element.Tag, "webview", StringComparison.OrdinalIgnoreCase))
+        {
+            var webViewKey = _webViewHost?.GetTextureKey(element);
+
+            return webViewKey is null
+                ? null
+                : new ImageSpec(webViewKey, ObjectFit.Fill, 1, 0xFFFFFFFF);
         }
 
         if (!string.Equals(element.Tag, "img", StringComparison.OrdinalIgnoreCase))
@@ -5801,6 +5970,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         foreach (var keyboard in _input.Keyboards)
         {
             keyboard.KeyDown += (_, key, _) => OnKeyDown(keyboard, key);
+            keyboard.KeyUp += (_, key, _) => OnKeyUp(keyboard, key);
             keyboard.KeyChar += (_, character) => OnKeyChar(character);
         }
 
@@ -5872,6 +6042,19 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         _mouseMovePending = false;
         var x = _pendingMouseX;
         var y = _pendingMouseY;
+
+        if (_webViewHost is not null
+            && TryGetWebViewAt(x, y, out var webView, out var webX, out var webY))
+        {
+            var dpi = GetViewDpi();
+            _webViewHost.SendMouseMove(
+                webView,
+                (int)MathF.Round(webX * dpi),
+                (int)MathF.Round(webY * dpi),
+                GetCefModifiers(),
+                leave: false);
+            return;
+        }
 
         UpdateLongPressMove(x, y);
 
@@ -6463,6 +6646,28 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         _devTools.PointerY = _mouseY;
         InputState.SetPointer(_mouseX, _mouseY);
 
+        // A webview owns its pointer and keyboard interaction. Forward the press
+        // and stop before Donkeh's own gesture, selection and focus handling.
+        if (_webViewHost is not null
+            && TryGetWebViewAt(_mouseX, _mouseY, out var webView, out var webX, out var webY))
+        {
+            var dpi = GetViewDpi();
+            _webViewHost.SendMouseClick(
+                webView,
+                (int)MathF.Round(webX * dpi),
+                (int)MathF.Round(webY * dpi),
+                GetCefModifiers(),
+                ToCefButton(button),
+                up: false,
+                clickCount: 1);
+            Focus(webView, focusVisible: false);
+            SetActive(webView);
+            _webViewPressed = webView;
+            _pressed = null;
+            _pointerTarget = null;
+            return;
+        }
+
         // The middle button is an application gesture (typically panning), not a
         // press. Capture the pointer so moves keep arriving, but do not dispatch
         // pointerdown: that would start painting, a text selection or a drag
@@ -6750,6 +6955,30 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         _devTools.PointerX = _mouseX;
         _devTools.PointerY = _mouseY;
         InputState.SetPointer(_mouseX, _mouseY);
+
+        if (_webViewHost is not null && _webViewPressed is not null)
+        {
+            var pressed = _webViewPressed;
+            _webViewPressed = null;
+
+            var dpi = GetViewDpi();
+            TryGetWebViewAt(_mouseX, _mouseY, out var ignored, out var webX, out var webY);
+            _webViewHost.SendMouseClick(
+                pressed,
+                (int)MathF.Round(webX * dpi),
+                (int)MathF.Round(webY * dpi),
+                GetCefModifiers(),
+                ToCefButton(button),
+                up: true,
+                clickCount: 1);
+
+            if (button == MouseButton.Left)
+            {
+                SetActive(null);
+            }
+
+            return;
+        }
 
         if (button is MouseButton.Right or MouseButton.Middle)
         {
@@ -7193,6 +7422,20 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     {
         InputState.Update(_input);
         CloseSelectMenu();
+
+        if (_webViewHost is not null
+            && TryGetWebViewAt(_mouseX, _mouseY, out var webView, out var webX, out var webY))
+        {
+            var dpi = GetViewDpi();
+            _webViewHost.SendMouseWheel(
+                webView,
+                (int)MathF.Round(webX * dpi),
+                (int)MathF.Round(webY * dpi),
+                GetCefModifiers(),
+                vertical,
+                horizontal);
+            return;
+        }
 
         // Ctrl/Alt+wheel is reserved for the application (zoom, brush size and
         // similar gestures). Skip the native scroll step and forward the raw
@@ -7872,6 +8115,16 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             return;
         }
 
+        if (_webViewFocused is not null && _webViewHost is not null)
+        {
+            _webViewHost.SendKey(
+                _webViewFocused,
+                CefKeyEventType.RawKeyDown,
+                WebViewHost.ToVirtualKey(key),
+                GetCefKeyModifiers(control, shift, alt));
+            return;
+        }
+
         if (control && key == Key.C && CopySelection(keyboard))
         {
             return;
@@ -8266,6 +8519,27 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         return index;
     }
 
+    /// <summary>Forwards a key release to a focused webview's browser.</summary>
+    /// <param name="keyboard">Keyboard providing modifier state.</param>
+    /// <param name="key">The released key.</param>
+    private void OnKeyUp(IKeyboard keyboard, Key key)
+    {
+        if (_webViewFocused is null || _webViewHost is null)
+        {
+            return;
+        }
+
+        var control = keyboard.IsKeyPressed(Key.ControlLeft) || keyboard.IsKeyPressed(Key.ControlRight);
+        var shift = keyboard.IsKeyPressed(Key.ShiftLeft) || keyboard.IsKeyPressed(Key.ShiftRight);
+        var alt = keyboard.IsKeyPressed(Key.AltLeft) || keyboard.IsKeyPressed(Key.AltRight);
+
+        _webViewHost.SendKey(
+            _webViewFocused,
+            CefKeyEventType.KeyUp,
+            WebViewHost.ToVirtualKey(key),
+            GetCefKeyModifiers(control, shift, alt));
+    }
+
     /// <summary>
     /// Inserts a typed character into the focused control, replacing any control
     /// selection, then dispatches <c>input</c>.
@@ -8289,6 +8563,15 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// </remarks>
     private void OnKeyChar(char character)
     {
+        if (_webViewFocused is not null && _webViewHost is not null)
+        {
+            _webViewHost.SendChar(
+                _webViewFocused,
+                character,
+                GetCefKeyModifiers(InputState.Control, InputState.Shift, InputState.Alt));
+            return;
+        }
+
         if (_focused is null || char.IsControl(character))
         {
             return;
@@ -8683,6 +8966,12 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         }
 
         _focused = element;
+
+        _webViewFocused = element is not null
+            && string.Equals(element.Tag, "webview", StringComparison.OrdinalIgnoreCase)
+                ? element
+                : null;
+        _webViewHost?.SetFocused(_webViewFocused);
 
         if (element is not null && IsTextControl(element))
         {
@@ -10288,6 +10577,13 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// </remarks>
     private void OnClosing()
     {
+        // CEF must be shut down on the thread that initialized it, which is the
+        // frame thread this callback runs on.
+        _webViewHost?.Dispose();
+        _webViewHost = null;
+        _webViewFocused = null;
+        _webViewPressed = null;
+
         // The GLFW window and OpenGL context are still alive here, which is the
         // only safe time to release input devices, textures and buffers. The
         // native window itself is disposed by Run() after the loop has finished.
@@ -10350,6 +10646,8 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
 
         _disposed = true;
         WindowChrome.Detach(this);
+        _webViewHost?.Dispose();
+        _webViewHost = null;
         _input?.Dispose();
         _devTools.Builds.Dispose();
         DisposeGpu();

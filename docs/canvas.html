@@ -3,8 +3,8 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Canvas  -  Donkeh</title>
-    <meta name="description" content="Draw into a canvas with batched CanvasContext primitives or raw Silk.NET OpenGL, and understand the current browser limitation.">
+    <title>Canvas reference  -  Donkeh</title>
+    <meta name="description" content="Canvas reference: draw into a canvas with batched CanvasContext primitives or raw Silk.NET OpenGL, and understand the current browser limitation.">
     <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/site.css">
     <script>
@@ -60,12 +60,13 @@
                 <a href="html-elements.html">HTML elements</a>
                 <a href="event-reference.html">Event reference</a>
                 <a href="css-support.html">CSS support</a>
+                <a href="webview.html">WebView reference</a>
+                <a href="video.html">Video reference</a>
+                <a href="canvas.html">Canvas reference</a>
             </div>
             <div class="nav-group">
                 <span class="nav-label">Primitives</span>
                 <a href="image.html">Image</a>
-                <a href="video.html">Video</a>
-                <a href="canvas.html">Canvas</a>
             </div>
             <div class="nav-group">
                 <span class="nav-label">Inspector</span>
@@ -102,8 +103,8 @@
     </aside>
 
     <main class="content" id="content">
-        <div class="breadcrumb">Docs <span>/</span> Primitives <span>/</span> Canvas</div>
-        <h1>Canvas</h1>
+        <div class="breadcrumb">Docs <span>/</span> Reference <span>/</span> Canvas reference</div>
+        <h1>Canvas reference</h1>
         <p class="lead">
             A canvas is an immediate drawing surface. It has no meaningful children and
             no CSS-painted content of its own; the host gives your callback a GPU context
@@ -139,7 +140,30 @@
         </p>
 
         <div class="code" data-label="Sparkline.cs">
-<pre><code>using Donkeh.LayoutLab;
+<pre class="csx"><code>using Donkeh.LayoutLab;
+using Donkeh.UILab;
+using Donkeh.Windowing;
+using static Donkeh.UILab.HtmlHelper;
+using static Donkeh.UILab._;
+
+public sealed class Sparkline : Component
+{
+    public override Node Render() =&gt;
+        &lt;Canvas
+            Width="320"
+            Height="120"
+            OnDraw={context =&gt;
+            {
+                context.Clear(0xFF111827);
+
+                var bar = new Rect(16, 48, 28, 56);
+                context.FillRoundedRect(bar, 0xFF5957D9, new CornerRadius(6, 6, 6, 6));
+                context.FillRect(bar.X + 44, 24, 28, 80, 0xFF43D3E8);
+                context.FillEllipse(new Rect(120, 20, 64, 64), 0xFF86EFAC);
+                context.StrokeRect(new Rect(200, 28, 96, 64), 0xFFE5E7EB, 2);
+            }} /&gt;;
+}</code></pre>
+<pre class="csharp"><code>using Donkeh.LayoutLab;
 using Donkeh.UILab;
 using Donkeh.Windowing;
 using static Donkeh.UILab.HtmlHelper;
@@ -207,7 +231,18 @@ public sealed class Sparkline : Component
         </p>
 
         <div class="code" data-label="OnContext">
-<pre><code>using Silk.NET.OpenGL;
+<pre class="csx"><code>using Silk.NET.OpenGL;
+
+&lt;Canvas
+    OnDraw={context =&gt; context.Clear(0xFF0B1018)}
+    OnContext={gl =&gt;
+    {
+        gl.Enable(EnableCap.ScissorTest);
+        gl.ClearColor(0.05f, 0.08f, 0.12f, 1f);
+        gl.Clear(ClearBufferMask.ColorBufferBit);
+        gl.Disable(EnableCap.ScissorTest);
+    }} /&gt;</code></pre>
+<pre class="csharp"><code>using Silk.NET.OpenGL;
 
 H("canvas", new CanvasProps
 {
