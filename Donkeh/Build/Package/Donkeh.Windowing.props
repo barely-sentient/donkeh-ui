@@ -21,4 +21,16 @@
             Project="Sdk.props"
             Condition="'$(TargetFramework)' == 'net10.0-browser'" />
 
+    <!--
+        CefSharp's buildTransitive targets copy the CEF redistributables (locale
+        .pak files plus CefSharp.dll/Ijwhost.dll for the browser subprocess).
+        They only run for projects that reference the package directly, so a
+        ProjectReference/PackageReference to Donkeh.Windowing alone leaves the
+        desktop output unbootable. Reference CefSharp from the app as well;
+        application code still only sees the engine-neutral WebView controller.
+    -->
+    <ItemGroup Condition="'$(DonkehDesktop)' != 'false' and ('$(TargetFramework)' == '' or '$(TargetFramework)' == 'net10.0')">
+        <PackageReference Include="CefSharp.OffScreen.NETCore" Version="134.3.90" />
+    </ItemGroup>
+
 </Project>

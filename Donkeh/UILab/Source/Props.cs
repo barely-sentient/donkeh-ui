@@ -68,6 +68,12 @@ namespace Donkeh.UILab
         public string? Src { get; init; }
 
         /// <summary>
+        /// Gets or sets the <c>loading-page</c> attribute of a <c>webview</c>.
+        /// Shown until the document from <see cref="Src"/> becomes available.
+        /// </summary>
+        public string? LoadingPage { get; init; }
+
+        /// <summary>
         /// Gets or sets the <c>type</c> attribute, for example the input type or a
         /// button type.
         /// </summary>

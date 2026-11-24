@@ -239,7 +239,11 @@ H("webview", new WebViewProps
                     <tr><td><code>IsReady</code></td><td>Whether the underlying browser has finished being created.</td></tr>
                     <tr><td><code>Load(string url)</code></td><td>Navigates to a URL, data URI or local path.</td></tr>
                     <tr><td><code>Reload()</code></td><td>Reloads the current address.</td></tr>
-                    <tr><td><code>ExecuteJavaScript(string script)</code></td><td>Runs a string of script in the main frame. Fire-and-forget; it does not return a value.</td></tr>
+                    <tr><td><code>ExecuteJavaScript(string script)</code></td><td>Runs a string of script in the main frame. Fire-and-forget.</td></tr>
+                    <tr><td><code>EvaluateJavaScriptAsync(string script)</code></td><td>Evaluates script and returns the result as a string.</td></tr>
+                    <tr><td><code>Back()</code>, <code>Forward()</code>, <code>CanGoBack</code>, <code>CanGoForward</code></td><td>Navigation history of the active tab.</td></tr>
+                    <tr><td><code>OpenTab(url?, activate?)</code>, <code>Tabs</code></td><td>Convenience access to the tab manager.</td></tr>
+                    <tr><td><code>Plugins</code></td><td>The plugin context for the active tab (scripts, bindings, IPC).</td></tr>
                 </tbody>
             </table>
         </div>
@@ -274,6 +278,233 @@ H("webview", new WebViewProps
             events that land inside the element are forwarded to the browser, so they normally
             reach the page rather than Donkeh handlers.
         </p>
+
+        <h2 id="configuration">Startup pages and configuration</h2>
+        <p>
+            Global settings live in <code>WebViewOptions.Current</code>. Subscribe to the
+            static <code>WebViewOptions.Configuring</code> event to set them up just before CEF
+            is initialized, or replace the instance through <code>WebViewOptions.Use(...)</code>
+            with your own subclass. The class is not sealed and its members are virtual, so
+            resolution can be overridden completely.
+        </p>
+        <div class="code" data-label="Program.cs">
+<pre class="csx"><code>WebViewOptions.Configuring += options =&gt;
+{
+    options.ProtocolKey = "my-app";
+    options.LoadingPage = "data:text/html,&lt;h1&gt;Loading…&lt;/h1&gt;";
+    options.NewTabPage = "my-app://newtab";
+    options.OnWebViewReady = view =&gt; Console.WriteLine(view.Address);
+};</code></pre>
+<pre class="csharp"><code>WebViewOptions.Configuring += options =&gt;
+{
+    options.ProtocolKey = "my-app";
+    options.LoadingPage = "data:text/html,&lt;h1&gt;Loading…&lt;/h1&gt;";
+    options.NewTabPage = "my-app://newtab";
+    options.OnWebViewReady = view =&gt; Console.WriteLine(view.Address);
+};</code></pre>
+        </div>
+        <p>
+            <code>LoadingPage</code> defaults to <code>about:blank</code> and is shown until the
+            document from <code>src</code> is ready. A single element can override it with the
+            <code>loading-page</code> attribute. <code>OnWebViewReady</code> is a global hook
+            invoked for every webview alongside the element-level <code>OnReady</code> prop.
+        </p>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Option</th><th>Description</th></tr></thead>
+                <tbody>
+                    <tr><td><code>ProtocolKey</code></td><td>Scheme registered with CEF for custom application URLs, e.g. <code>my-app</code>.</td></tr>
+                    <tr><td><code>LoadingPage</code></td><td>Page shown while the target document loads. Defaults to <code>about:blank</code>.</td></tr>
+                    <tr><td><code>NewTabPage</code></td><td>Page used by <code>view.Tabs.Open()</code> when no URL is given.</td></tr>
+                    <tr><td><code>HomePage</code></td><td>Convenience value for app-owned navigation.</td></tr>
+                    <tr><td><code>OnWebViewReady</code>, <code>OnTabOpened</code>, <code>OnTabClosed</code></td><td>Global hooks for controllers and tab lifecycle.</td></tr>
+                    <tr><td><code>AssetResolver</code>, <code>UrlResolver</code></td><td>Custom resolver delegates consulted before the built-in probing.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="custom-urls">Custom URLs</h2>
+        <p>
+            Set <code>ProtocolKey</code> before the first browser is created and map URLs to
+            content with <code>AddCustomUrl</code>. The second argument can be an embedded
+            resource name, a file path relative to the application directory, a
+            <code>WebViewResource</code>, or a per-request resolver. Automatic resolution tries
+            embedded manifest resources first, then files, and finally the
+            <code>UrlResolver</code> delegate.
+        </p>
+        <div class="code" data-label="Program.cs">
+<pre class="csx"><code>options.ProtocolKey = "my-app";
+
+// Embedded resource or file, auto-detected:
+options.AddCustomUrl("my-app://path/to/item", "path/to/embedded/asset.html");
+
+// Literal content:
+options.AddCustomUrl("my-app://newtab", WebViewResource.FromHtml("&lt;h1&gt;New tab&lt;/h1&gt;"));
+
+// Dynamic content:
+options.AddCustomUrl("my-app://item/{id}", uri =&gt;
+    WebViewResource.FromHtml("&lt;h1&gt;" + uri.AbsolutePath + "&lt;/h1&gt;"));
+
+// Catch-all for the protocol:
+options.UrlResolver = uri =&gt; uri.Scheme == "my-app"
+    ? WebViewResource.FromFile("fallback.html")
+    : null;</code></pre>
+<pre class="csharp"><code>options.ProtocolKey = "my-app";
+
+options.AddCustomUrl("my-app://path/to/item", "path/to/embedded/asset.html");
+options.AddCustomUrl("my-app://newtab", WebViewResource.FromHtml("&lt;h1&gt;New tab&lt;/h1&gt;"));
+options.AddCustomUrl("my-app://item/{id}", uri =&gt;
+    WebViewResource.FromHtml("&lt;h1&gt;" + uri.AbsolutePath + "&lt;/h1&gt;"));
+options.UrlResolver = uri =&gt; uri.Scheme == "my-app"
+    ? WebViewResource.FromFile("fallback.html")
+    : null;</code></pre>
+        </div>
+        <p>
+            Additional protocols can be registered with
+            <code>AddProtocol(scheme, resolver)</code>. Unhandled custom URLs return a 404 page.
+        </p>
+
+        <h2 id="tabs">Tabs and history</h2>
+        <p>
+            Each <code>webview</code> owns a tab collection. Only the active tab is painted,
+            but every tab keeps its own browser, history and load state.
+            <code>WebView</code> delegates its navigation members to the active tab.
+        </p>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Member</th><th>Description</th></tr></thead>
+                <tbody>
+                    <tr><td><code>view.Tabs</code></td><td>The <code>WebViewTabManager</code> for this element.</td></tr>
+                    <tr><td><code>Open(url?, activate?)</code>, <code>Close(tab)</code>, <code>Activate(tab)</code></td><td>Tab lifecycle.</td></tr>
+                    <tr><td><code>Next()</code>, <code>Previous()</code></td><td>Cyclic tab activation.</td></tr>
+                    <tr><td><code>Tabs</code>, <code>Active</code></td><td>Open tabs in creation order and the visible tab.</td></tr>
+                    <tr><td><code>TabOpened</code>, <code>TabClosed</code>, <code>ActiveChanged</code></td><td>Events for binding a tab strip.</td></tr>
+                    <tr><td><code>WebViewTab</code></td><td><code>Id</code>, <code>Address</code>, <code>Title</code>, <code>IsLoading</code>, <code>CanGoBack</code>, <code>CanGoForward</code>, <code>StateChanged</code>, <code>Load</code>, <code>Reload</code>, <code>Back</code>, <code>Forward</code>, <code>Activate</code>, <code>Close</code>.</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="code" data-label="Program.cs">
+<pre class="csx"><code>&lt;webview
+    src="my-app://item"
+    onReady={view =&gt;
+    {
+        var tab = view.Tabs.Open();          // uses NewTabPage
+        tab.Load("https://example.com");
+    }} /&gt;</code></pre>
+<pre class="csharp"><code>H("webview", new WebViewProps
+{
+    Src = "my-app://item",
+    OnReady = view =&gt;
+    {
+        var tab = view.Tabs?.Open();
+        tab?.Load("https://example.com");
+    }
+});</code></pre>
+        </div>
+        <p>
+            Changing an element&rsquo;s <code>src</code> still replaces its browser and therefore
+            its tab collection. Tabs are owned by the element, not shared between webviews.
+        </p>
+
+        <h2 id="plugins">Plugins and script injection</h2>
+        <p>
+            Plugins are the Electron-like extension point. A plugin contributes preload
+            scripts, registers .NET objects for JavaScript, and handles IPC messages.
+            Register plugins globally in <code>WebViewOptions.Configuring</code>, or use
+            <code>view.Plugins</code> / <code>tab.Plugins</code> to add and remove them for
+            a single view at runtime.
+        </p>
+        <div class="code" data-label="Program.cs">
+<pre class="csx"><code>WebViewOptions.Configuring += options =&gt;
+{
+    options.AddPlugin(new MyPlugin());
+    options.RegisterObject("files", new FileApi());
+    options.OnMessage("save", msg =&gt;
+    {
+        var data = msg.Read&lt;SaveRequest&gt;();
+        msg.Reply(new { ok = true });
+    });
+};
+
+public sealed class MyPlugin : WebViewPlugin
+{
+    public override string Name =&gt; "my-plugin";
+
+    public override IReadOnlyList&lt;WebViewScript&gt; Scripts =&gt;
+    [
+        WebViewScript.Preload("my.preload", @"
+            window.donkeh.on('refresh', function (payload) { location.reload(); });
+        ")
+    ];
+
+    public override void OnAttached(WebViewPluginContext context)
+    {
+        context.RegisterObject("api", new MyApi());
+        context.OnMessage("open", msg =&gt; Console.WriteLine(msg.Payload));
+    }
+
+    public override void OnLoad(WebViewPluginContext context, Uri url)
+    {
+        context.Emit("ready", new { url = url.AbsoluteUri });
+    }
+}</code></pre>
+<pre class="csharp"><code>WebViewOptions.Configuring += options =&gt;
+{
+    options.AddPlugin(new MyPlugin());
+    options.RegisterObject("files", new FileApi());
+    options.OnMessage("save", msg =&gt;
+    {
+        var data = msg.Read&lt;SaveRequest&gt;();
+        msg.Reply(new { ok = true });
+    });
+};
+
+// WebViewScript, WebViewPlugin and WebViewPluginContext are the same in plain C#.
+H("webview", new WebViewProps
+{
+    Src = "my-app://item",
+    OnReady = view =&gt; view.Plugins?.AddPlugin(new ExtraPlugin())
+});</code></pre>
+        </div>
+        <p>
+            Scripts run at <code>DocumentStart</code> (as soon as the frame's V8 context
+            exists, before page scripts), <code>DocumentEnd</code>, or never
+            (<code>Manual</code>). They can be filtered by URL and restricted to the main
+            frame. By default each snippet is wrapped in an IIFE so it does not leak
+            declarations into the page; set <code>Isolate = false</code> to inject raw source.
+        </p>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Member</th><th>Description</th></tr></thead>
+                <tbody>
+                    <tr><td><code>WebViewScript.Preload(id, source)</code></td><td>Inject before page scripts.</td></tr>
+                    <tr><td><code>WebViewScript.AfterLoad(id, source)</code></td><td>Inject after the frame finishes loading.</td></tr>
+                    <tr><td><code>Filter</code>, <code>MainFrameOnly</code>, <code>Isolate</code>, <code>Enabled</code></td><td>Control which documents receive a script and how it is wrapped.</td></tr>
+                    <tr><td><code>WebViewPlugin</code></td><td><code>Name</code>, <code>Enabled</code>, <code>Scripts</code>, <code>OnAttached</code>, <code>OnDetached</code>, <code>OnContextCreated</code>, <code>OnLoad</code>, <code>OnMessage</code>.</td></tr>
+                    <tr><td><code>RegisterObject(name, target, options)</code></td><td>Bind a .NET object; methods camelCase by default and async methods return promises.</td></tr>
+                    <tr><td><code>OnMessage(channel, handler)</code>, <code>Reply(payload)</code></td><td>Handle JS→C# messages and answer <code>invoke</code> calls.</td></tr>
+                    <tr><td><code>Emit(channel, payload)</code></td><td>Raise a C#→JS event received by <code>window.donkeh.on(channel, callback)</code>.</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <p>
+            The injected bridge exposes <code>window.donkeh.send(channel, payload)</code>,
+            <code>invoke(channel, payload)</code> (a promise resolved by
+            <code>message.Reply(...)</code>), <code>on(channel, callback)</code> and
+            <code>off(channel, callback)</code>. Set <code>EnablePluginBridge = false</code>
+            or <code>BridgeGlobalName</code> in <code>WebViewOptions</code> to replace or
+            rename it. Messages are JSON; use <code>WebViewMessage.Read&lt;T&gt;()</code> to
+            deserialize them.
+        </p>
+        <div class="callout note">
+            <p>
+                Object binding uses CefSharp's legacy binding, so objects must be
+                registered before the browser is created. Global registrations and
+                plugin <code>OnAttached</code> hooks happen automatically at that point;
+                objects added later with <code>RegisterObject</code> bind through an
+                explicit <code>CefSharp.BindObjectAsync</code> call.
+            </p>
+        </div>
 
         <h2 id="input">Input and focus in detail</h2>
         <p>
@@ -311,7 +542,7 @@ H("webview", new WebViewProps
         <ul>
             <li>Desktop hosts only; Android and the browser DOM host do not create a CEF browser.</li>
             <li>Popup widgets painted by Chromium (for example native select dropdowns and context menus) are not composited into the Donkeh frame.</li>
-            <li>No JavaScript result bridge or CEF navigation/load events are exposed yet.</li>
+            <li>Load state, title and history flags are available on <code>WebViewTab</code>; full CEF request/navigation events are not bridged into Donkeh events yet.</li>
             <li>IME composition ranges and drag-and-drop from the page are not wired.</li>
             <li>Every frame is uploaded in full; there is no dirty-region upload.</li>
             <li>The native CEF runtime must be shipped with the application output.</li>

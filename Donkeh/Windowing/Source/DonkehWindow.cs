@@ -1825,6 +1825,8 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
                 continue;
             }
 
+            var loadingPage = GetAttribute(element, "loading-page");
+
             var rect = PaintedBorderBox(box);
             var width = Math.Max(1, (int)MathF.Round(rect.Width * dpi));
             var height = Math.Max(1, (int)MathF.Round(rect.Height * dpi));
@@ -1836,7 +1838,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
                 + element.GetHashCode().ToString(CultureInfo.InvariantCulture);
             var controller = _webViewHost.Ensure(
                 element,
-                new WebViewElementOptions(source, width, height),
+                new WebViewElementOptions(source, loadingPage ?? "", width, height),
                 textureKey);
 
             _webViewHost.SyncSize(element, width, height);

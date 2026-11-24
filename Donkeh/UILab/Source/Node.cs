@@ -401,6 +401,11 @@ namespace Donkeh.UILab
                 AddStringAttribute("src", src);
             }
 
+            if (props.LoadingPage is { } loadingPage)
+            {
+                AddStringAttribute("loading-page", loadingPage);
+            }
+
             if (props.Type is { } type)
             {
                 AddStringAttribute("type", type);

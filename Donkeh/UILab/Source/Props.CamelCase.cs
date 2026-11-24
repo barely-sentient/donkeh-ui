@@ -424,6 +424,12 @@ namespace Donkeh.UILab
             init => Src = value;
         }
 
+        public string? loadingPage
+        {
+            get => LoadingPage;
+            init => LoadingPage = value;
+        }
+
         public int? tabIndex
         {
             get => TabIndex;

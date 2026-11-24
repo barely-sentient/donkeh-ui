@@ -18,28 +18,20 @@ namespace Donkeh.Windowing;
 /// </summary>
 internal readonly record struct WebViewElementOptions(
     string Source,
+    string LoadingPage,
     int Width,
     int Height);
 
 /// <summary>
-/// Owns one offscreen CEF browser per <c>webview</c> element, captures CPU
-/// painted frames and uploads them into the window's image cache.
+/// Owns one offscreen CEF host per <c>webview</c> element, with one or more
+/// browser tabs, and uploads painted frames into the window's image cache.
 /// </summary>
 /// <remarks>
-/// <para>
 /// CEF is initialized once on the thread that first creates a browser, and
-/// shut down from <see cref="Dispose"/> on that same thread. Browser creation
-/// is asynchronous; the element's ready handler fires the first frame after
-/// the browser exists.
-/// </para>
-/// <para>
-/// CEF paints BGRA pixels on its own UI thread. The render handler converts
-/// them to RGBA and stores them in a per-element buffer. The frame thread then
-/// uploads the most recent frame through
-/// <see cref="ImageCache.UpdateDynamicTexture"/>, so the webview is drawn by
-/// the same display-list path as images and video and keeps its z-index, clip,
-/// opacity and transform.
-/// </para>
+/// shut down from <see cref="Dispose"/> on that same thread. Custom schemes
+/// are registered from <see cref="WebViewOptions"/> immediately before
+/// initialization, so applications configure them through
+/// <see cref="WebViewOptions.Configuring"/>.
 /// </remarks>
 internal sealed class WebViewHost : IDisposable
 {
@@ -47,10 +39,6 @@ internal sealed class WebViewHost : IDisposable
     private static bool _cefInitialized;
     private static bool _cefInitFailed;
 
-    /// <summary>
-    /// True when CEF can be hosted. Android and browser hosts have their own
-    /// native webview/DOM paths and never construct this host.
-    /// </summary>
     public static bool IsSupported =>
         !OperatingSystem.IsAndroid()
         && !OperatingSystem.IsBrowser()
@@ -58,17 +46,13 @@ internal sealed class WebViewHost : IDisposable
         && !OperatingSystem.IsMacCatalyst();
 
     private readonly object _sync = new();
-    private readonly Dictionary<ElementNode, Track> _tracks = [];
+    private readonly Dictionary<ElementNode, WebViewGroup> _groups = [];
     private readonly HashSet<ElementNode> _pending = [];
     private readonly HashSet<ElementNode> _readySignaled = [];
     private ElementNode? _focused;
     private bool _disposed;
 
-    /// <summary>
-    /// Gets or schedules a browser for an element. Returns the code-facing
-    /// controller, or <see langword="null"/> while creation is pending or
-    /// unavailable.
-    /// </summary>
+    /// <summary>Gets or schedules browsers for an element.</summary>
     public WebView? Ensure(ElementNode element, WebViewElementOptions options, string textureKey)
     {
         if (_disposed || !IsSupported || string.IsNullOrWhiteSpace(options.Source))
@@ -78,9 +62,11 @@ internal sealed class WebViewHost : IDisposable
 
         options = options with { Source = NormalizeSource(options.Source) };
 
+        WebViewGroup? group = null;
+
         lock (_sync)
         {
-            if (_tracks.TryGetValue(element, out var existing))
+            if (_groups.TryGetValue(element, out var existing))
             {
                 if (string.Equals(existing.Options.Source, options.Source, StringComparison.Ordinal))
                 {
@@ -88,179 +74,231 @@ internal sealed class WebViewHost : IDisposable
                     return existing.Controller;
                 }
 
-                // The src attribute changed: replace the browser instead of
-                // silently showing the previous document.
                 RemoveLocked(element);
             }
 
-            if (_pending.Contains(element))
-            {
-                return null;
-            }
-
+            if (_pending.Contains(element)) return null;
             _pending.Add(element);
         }
 
+        var configured = WebViewOptions.Current;
+
         if (!EnsureCef())
         {
-            lock (_sync)
-            {
-                _pending.Remove(element);
-            }
-
+            lock (_sync) _pending.Remove(element);
             return null;
         }
 
-        Track? track = null;
+        try
+        {
+            group = new WebViewGroup(this, element, options, textureKey);
+            group.Manager.TabFactory = url => CreateTab(group, url);
+            group.Manager.TabDestroyer = tab => DestroyTab(group, tab);
+            group.Manager.TabActivator = tab => ActivateTab(group, tab);
+
+            var first = CreateTab(group, options.Source);
+            if (first is null) throw new InvalidOperationException("Could not create the webview browser.");
+
+            ActivateTab(group, first);
+        }
+        catch
+        {
+            group?.Dispose();
+            lock (_sync) _pending.Remove(element);
+            return null;
+        }
+
+        lock (_sync)
+        {
+            if (_disposed)
+            {
+                group.Dispose();
+                return null;
+            }
+
+            _groups[element] = group;
+        }
+
+        try { configured.OnWebViewReady?.Invoke(group.Controller); }
+        catch { }
+
+        return group.Controller;
+    }
+
+    /// <summary>Converts a plain path to a <c>file:</c> URI; passes URLs through.</summary>
+    private static string NormalizeSource(string source)
+    {
+        if (source.Contains("://", StringComparison.Ordinal)
+            || source.StartsWith("data:", StringComparison.OrdinalIgnoreCase)
+            || source.Equals("about:blank", StringComparison.OrdinalIgnoreCase))
+        {
+            return source;
+        }
+
+        try { return new Uri(Path.GetFullPath(source)).AbsoluteUri; }
+        catch { return source; }
+    }
+
+    private static void OnBrowserCreated(IBrowser browser, WebViewTabTrack track)
+    {
+        try { browser.GetHost().WindowlessFrameRate = 60; }
+        catch { }
+
+        try
+        {
+            if (!string.Equals(track.TargetUrl, "about:blank", StringComparison.OrdinalIgnoreCase))
+            {
+                browser.MainFrame?.LoadUrl(track.TargetUrl);
+            }
+        }
+        catch
+        {
+            // The browser may have navigated before the callback ran.
+        }
+    }
+
+    private WebViewTab? CreateTab(WebViewGroup group, string url)
+    {
+        if (_disposed || string.IsNullOrWhiteSpace(url)) return null;
+
+        var track = new WebViewTabTrack(this, group, NormalizeSource(url));
+        WebViewTab? tab = null;
+        var loading = string.IsNullOrWhiteSpace(group.Options.LoadingPage)
+            ? "about:blank"
+            : NormalizeSource(group.Options.LoadingPage);
 
         try
         {
             var browser = new ChromiumWebBrowser(
-                options.Source,
+                loading,
                 browserSettings: null,
                 requestContext: null,
-                automaticallyCreateBrowser: true,
-                onAfterBrowserCreated: OnBrowserCreated,
+                // Defer creation until bindings/handlers are installed: CefSharp
+                // serializes legacy bound objects into extraInfo at creation time.
+                automaticallyCreateBrowser: false,
+                onAfterBrowserCreated: b => OnBrowserCreated(b, track),
                 useLegacyRenderHandler: true);
 
-            track = new Track(textureKey, browser, options);
+            track.Attach(browser);
+            track.Width = Math.Max(1, group.Options.Width);
+            track.Height = Math.Max(1, group.Options.Height);
             browser.RenderHandler = new WebViewRenderHandler(track);
-            browser.Size = new CefSize(Math.Max(1, options.Width), Math.Max(1, options.Height));
+
+            tab = new WebViewTab(Guid.NewGuid(), track);
+            track.Tab = tab;
+            var runtime = new WebViewPluginRuntime(browser, track, tab);
+            track.Runtime = runtime;
+            track.Plugins = runtime.Context;
+            tab.View.PluginContext = runtime.Context;
+
+            var previousRenderHandler = browser.RenderProcessMessageHandler;
+            browser.RenderProcessMessageHandler =
+                new WebViewRenderProcessMessageHandler(previousRenderHandler, runtime);
+            browser.LoadHandler = new WebViewLoadHandler(track, runtime);
+            browser.Size = new CefSize(Math.Max(1, group.Options.Width), Math.Max(1, group.Options.Height));
+            browser.CreateBrowser();
         }
         catch
         {
-            track?.Dispose();
-            track = null;
+            track.DisposeBrowser();
+            return null;
         }
 
-        lock (_sync)
-        {
-            var accepted = _pending.Remove(element);
+        group.Tracks.Add(track);
+        group.Manager.Attach(tab!);
 
-            if (track is null || !accepted || _disposed)
-            {
-                if (track is not null)
-                {
-                    track.Dispose();
-                }
+        try { WebViewOptions.Current.OnTabOpened?.Invoke(tab!); }
+        catch { }
 
-                return null;
-            }
-
-            _tracks[element] = track;
-            return track.Controller;
-        }
+        return tab;
     }
 
-    /// <summary>
-    /// Converts a plain path to a <c>file:</c> URI so local content can be
-    /// loaded. Absolute and data URLs are passed through unchanged.
-    /// </summary>
-    private static string NormalizeSource(string source)
+    private void DestroyTab(WebViewGroup group, WebViewTab tab)
     {
-        if (source.Contains("://", StringComparison.Ordinal)
-            || source.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
-        {
-            return source;
-        }
+        if (tab.Bridge is not WebViewTabTrack track) return;
 
-        try
-        {
-            return new Uri(Path.GetFullPath(source)).AbsoluteUri;
-        }
-        catch
-        {
-            return source;
-        }
+        group.Tracks.Remove(track);
+        track.DisposeBrowser();
+
+        try { WebViewOptions.Current.OnTabClosed?.Invoke(tab); }
+        catch { }
     }
 
-    private static void OnBrowserCreated(IBrowser browser)
+    private void ActivateTab(WebViewGroup group, WebViewTab tab)
     {
-        try
-        {
-            browser.GetHost().WindowlessFrameRate = 60;
-        }
-        catch
-        {
-            // Older CEF builds may reject the requested rate; the default is fine.
-        }
+        if (tab.Bridge is not WebViewTabTrack track) return;
+
+        group.Manager.SetActive(tab);
+        SetFocused(ReferenceEquals(_focused, group.Element) ? group.Element : null);
     }
 
-    /// <summary>
-    /// Keeps an element's CEF viewport in sync with its layout box.
-    /// </summary>
+    /// <summary>Keeps every tab's CEF viewport in sync with its layout box.</summary>
     public void SyncSize(ElementNode element, int width, int height)
     {
-        Track? track;
+        WebViewGroup? group;
 
         lock (_sync)
         {
-            if (!_tracks.TryGetValue(element, out track))
-            {
-                return;
-            }
+            if (!_groups.TryGetValue(element, out group)) return;
         }
 
         width = Math.Max(1, width);
         height = Math.Max(1, height);
 
-        if (track.Browser.Size.Width == width && track.Browser.Size.Height == height)
-        {
-            return;
-        }
+        group.Options = group.Options with { Width = width, Height = height };
 
-        try
+        foreach (var track in group.Tracks)
         {
-            track.Browser.Size = new CefSize(width, height);
-        }
-        catch
-        {
-            // The browser may have been disposed by a navigation.
+            track.Width = width;
+            track.Height = height;
+
+            if (track.Browser is null) continue;
+
+            if (track.Browser.Size.Width == width && track.Browser.Size.Height == height) continue;
+
+            try { track.Browser.Size = new CefSize(width, height); }
+            catch { }
         }
     }
 
-    /// <summary>Gets the image-cache key receiving an element's frames.</summary>
+    /// <summary>Gets the image-cache key for the element's visible tab.</summary>
     public string? GetTextureKey(ElementNode element)
     {
         lock (_sync)
         {
-            return _tracks.TryGetValue(element, out var track) ? track.TextureKey : null;
+            if (!_groups.TryGetValue(element, out var group)) return null;
+            return group.Active?.TextureKey;
         }
     }
 
-    /// <summary>Uploads the most recent frame of every browser.</summary>
-    /// <returns>Whether any browser produced a new frame.</returns>
+    /// <summary>Uploads the most recent frame of every tab.</summary>
     public bool UpdateFrames(ImageCache images)
     {
-        Track[] tracks;
+        WebViewGroup[] groups;
 
         lock (_sync)
         {
-            if (_tracks.Count == 0)
-            {
-                return false;
-            }
-
-            tracks = [.. _tracks.Values];
+            if (_groups.Count == 0) return false;
+            groups = [.. _groups.Values];
         }
 
         var updated = false;
 
-        foreach (var track in tracks)
+        foreach (var group in groups)
         {
-            lock (track.FrameSync)
+            foreach (var track in group.Tracks)
             {
-                if (!track.HasFrame)
+                lock (track.FrameSync)
                 {
-                    continue;
-                }
+                    if (!track.HasFrame) continue;
 
-                images.UpdateDynamicTexture(
-                    track.TextureKey,
-                    track.Pixels.AsSpan(0, track.Width * track.Height * 4),
-                    track.Width,
-                    track.Height);
-                updated = true;
+                    images.UpdateDynamicTexture(
+                        track.TextureKey,
+                        track.Pixels.AsSpan(0, track.Width * track.Height * 4),
+                        track.Width,
+                        track.Height);
+                    updated = true;
+                }
             }
         }
 
@@ -270,10 +308,7 @@ internal sealed class WebViewHost : IDisposable
     /// <summary>Claims the one-time ready notification for an element.</summary>
     public bool MarkReady(ElementNode element)
     {
-        lock (_sync)
-        {
-            return _readySignaled.Add(element);
-        }
+        lock (_sync) return _readySignaled.Add(element);
     }
 
     /// <summary>Disposes browsers for elements that left the tree.</summary>
@@ -283,28 +318,19 @@ internal sealed class WebViewHost : IDisposable
 
         lock (_sync)
         {
-            foreach (var element in _tracks.Keys)
+            foreach (var element in _groups.Keys)
             {
-                if (!live.Contains(element))
-                {
-                    (stale ??= []).Add(element);
-                }
+                if (!live.Contains(element)) (stale ??= []).Add(element);
             }
 
             if (stale is not null)
             {
-                foreach (var element in stale)
-                {
-                    RemoveLocked(element);
-                }
+                foreach (var element in stale) RemoveLocked(element);
             }
         }
     }
 
-    /// <summary>
-    /// Moves browser focus to <paramref name="element"/>, blurring the
-    /// previously focused browser when needed.
-    /// </summary>
+    /// <summary>Moves browser focus to an element's visible tab.</summary>
     public void SetFocused(ElementNode? element)
     {
         ElementNode? previous;
@@ -315,10 +341,7 @@ internal sealed class WebViewHost : IDisposable
             _focused = element;
         }
 
-        if (ReferenceEquals(previous, element))
-        {
-            return;
-        }
+        if (ReferenceEquals(previous, element)) return;
 
         SendFocus(previous, false);
         SendFocus(element, true);
@@ -326,49 +349,30 @@ internal sealed class WebViewHost : IDisposable
 
     private void SendFocus(ElementNode? element, bool focus)
     {
-        if (element is null)
-        {
-            return;
-        }
+        if (element is null) return;
 
-        var track = GetTrack(element);
-        if (track is null || !track.Browser.IsBrowserInitialized || track.Browser.IsDisposed)
-        {
-            return;
-        }
+        var track = GetActiveTrack(element);
+        if (track?.Browser is null || track.Browser.IsDisposed || !track.Browser.IsBrowserInitialized) return;
 
-        try
-        {
-            track.Browser.GetBrowser().GetHost().SendFocusEvent(focus);
-        }
-        catch
-        {
-        }
+        try { track.Browser.GetBrowser().GetHost().SendFocusEvent(focus); }
+        catch { }
     }
 
     // ------------------------------------------------------------------ input
 
-    /// <summary>Forwards a pointer move to an element's browser.</summary>
     public bool SendMouseMove(ElementNode element, int x, int y, CefEventFlags modifiers, bool leave)
     {
         var host = GetHost(element);
-        if (host is null)
-        {
-            return false;
-        }
+        if (host is null) return false;
 
         try
         {
             host.SendMouseMoveEvent(new CefMouseEvent(x, y, modifiers), leave);
             return true;
         }
-        catch
-        {
-            return false;
-        }
+        catch { return false; }
     }
 
-    /// <summary>Forwards a mouse press or release to an element's browser.</summary>
     public bool SendMouseClick(
         ElementNode element,
         int x,
@@ -379,23 +383,16 @@ internal sealed class WebViewHost : IDisposable
         int clickCount)
     {
         var host = GetHost(element);
-        if (host is null)
-        {
-            return false;
-        }
+        if (host is null) return false;
 
         try
         {
             host.SendMouseClickEvent(new CefMouseEvent(x, y, modifiers), button, up, clickCount);
             return true;
         }
-        catch
-        {
-            return false;
-        }
+        catch { return false; }
     }
 
-    /// <summary>Forwards a wheel event to an element's browser.</summary>
     public bool SendMouseWheel(
         ElementNode element,
         int x,
@@ -405,10 +402,7 @@ internal sealed class WebViewHost : IDisposable
         float horizontal)
     {
         var host = GetHost(element);
-        if (host is null)
-        {
-            return false;
-        }
+        if (host is null) return false;
 
         try
         {
@@ -418,26 +412,15 @@ internal sealed class WebViewHost : IDisposable
                 (int)(vertical * WheelUnits));
             return true;
         }
-        catch
-        {
-            return false;
-        }
+        catch { return false; }
     }
 
     private const float WheelUnits = 120f;
 
-    /// <summary>Forwards a key down/up event to an element's browser.</summary>
-    public bool SendKey(
-        ElementNode element,
-        KeyEventType type,
-        int virtualKey,
-        CefEventFlags modifiers)
+    public bool SendKey(ElementNode element, KeyEventType type, int virtualKey, CefEventFlags modifiers)
     {
         var host = GetHost(element);
-        if (host is null || virtualKey == 0)
-        {
-            return false;
-        }
+        if (host is null || virtualKey == 0) return false;
 
         try
         {
@@ -452,20 +435,13 @@ internal sealed class WebViewHost : IDisposable
             });
             return true;
         }
-        catch
-        {
-            return false;
-        }
+        catch { return false; }
     }
 
-    /// <summary>Forwards a character to an element's browser.</summary>
     public bool SendChar(ElementNode element, char character, CefEventFlags modifiers)
     {
         var host = GetHost(element);
-        if (host is null || char.IsControl(character))
-        {
-            return false;
-        }
+        if (host is null || char.IsControl(character)) return false;
 
         try
         {
@@ -480,29 +456,15 @@ internal sealed class WebViewHost : IDisposable
             });
             return true;
         }
-        catch
-        {
-            return false;
-        }
+        catch { return false; }
     }
 
     /// <summary>Maps a Silk.NET key to a Win32 virtual key code.</summary>
     public static int ToVirtualKey(Key key)
     {
-        if (key >= Key.A && key <= Key.Z)
-        {
-            return 0x41 + ((int)key - (int)Key.A);
-        }
-
-        if (key >= Key.Number0 && key <= Key.Number9)
-        {
-            return 0x30 + ((int)key - (int)Key.Number0);
-        }
-
-        if (key >= Key.F1 && key <= Key.F12)
-        {
-            return 0x70 + ((int)key - (int)Key.F1);
-        }
+        if (key >= Key.A && key <= Key.Z) return 0x41 + ((int)key - (int)Key.A);
+        if (key >= Key.Number0 && key <= Key.Number9) return 0x30 + ((int)key - (int)Key.Number0);
+        if (key >= Key.F1 && key <= Key.F12) return 0x70 + ((int)key - (int)Key.F1);
 
         return key switch
         {
@@ -528,30 +490,25 @@ internal sealed class WebViewHost : IDisposable
         };
     }
 
-    private Track? GetTrack(ElementNode element)
+    private WebViewTabTrack? GetActiveTrack(ElementNode element)
     {
         lock (_sync)
         {
-            return _tracks.GetValueOrDefault(element);
+            if (!_groups.TryGetValue(element, out var group)) return null;
+            return group.Active;
         }
     }
 
     private IBrowserHost? GetHost(ElementNode element)
     {
-        var track = GetTrack(element);
-        if (track is null || track.Browser.IsDisposed || !track.Browser.IsBrowserInitialized)
+        var track = GetActiveTrack(element);
+        if (track?.Browser is null || track.Browser.IsDisposed || !track.Browser.IsBrowserInitialized)
         {
             return null;
         }
 
-        try
-        {
-            return track.Browser.GetBrowser().GetHost();
-        }
-        catch
-        {
-            return null;
-        }
+        try { return track.Browser.GetBrowser().GetHost(); }
+        catch { return null; }
     }
 
     // ------------------------------------------------------------- lifecycle
@@ -560,24 +517,32 @@ internal sealed class WebViewHost : IDisposable
     {
         lock (CefInitLock)
         {
-            if (_cefInitialized)
-            {
-                return true;
-            }
-
-            if (_cefInitFailed)
-            {
-                return false;
-            }
+            if (_cefInitialized) return true;
+            if (_cefInitFailed) return false;
 
             try
             {
                 if (Cef.IsInitialized != true)
                 {
+                    // Give the application its one chance to configure schemes,
+                    // pages and URL mappings before CEF locks them down.
+                    WebViewOptions.RaiseConfiguring();
+                    var configured = WebViewOptions.Current;
+
                     var settings = new CefSharp.OffScreen.CefSettings
                     {
                         LogSeverity = LogSeverity.Disable
                     };
+
+                    foreach (var scheme in configured.GetRegisteredSchemes())
+                    {
+                        settings.RegisterScheme(new CefCustomScheme(
+                            scheme,
+                            SchemeOptions.Standard | SchemeOptions.Secure | SchemeOptions.CorsEnabled)
+                        {
+                            SchemeHandlerFactory = new WebViewSchemeHandlerFactory(configured)
+                        });
+                    }
 
                     if (!Cef.Initialize(settings))
                     {
@@ -602,110 +567,171 @@ internal sealed class WebViewHost : IDisposable
         _pending.Remove(element);
         _readySignaled.Remove(element);
 
-        if (_tracks.Remove(element, out var track))
-        {
-            track.Dispose();
-        }
+        if (_groups.Remove(element, out var group)) group.Dispose();
     }
 
-    /// <inheritdoc/>
     public void Dispose()
     {
-        Track[] tracks;
+        WebViewGroup[] groups;
 
         lock (_sync)
         {
-            if (_disposed)
-            {
-                return;
-            }
+            if (_disposed) return;
 
             _disposed = true;
             _pending.Clear();
             _readySignaled.Clear();
-            tracks = [.. _tracks.Values];
-            _tracks.Clear();
+            groups = [.. _groups.Values];
+            _groups.Clear();
         }
 
-        foreach (var track in tracks)
-        {
-            track.Dispose();
-        }
+        foreach (var group in groups) group.Dispose();
 
-        // Cef.Shutdown must run on the same thread as Cef.Initialize. Both are
-        // driven by the window's frame thread (Ensure/Sync and OnClosing).
+        // Cef.Shutdown must run on the same thread as Cef.Initialize.
         if (_cefInitialized)
         {
-            try
-            {
-                Cef.Shutdown();
-            }
-            catch
-            {
-            }
-            finally
-            {
-                _cefInitialized = false;
-            }
+            try { Cef.Shutdown(); }
+            catch { }
+            finally { _cefInitialized = false; }
         }
     }
 
-    private sealed class Track : IDisposable
+    /// <summary>All browsers and tab state belonging to one element.</summary>
+    internal sealed class WebViewGroup : IDisposable
     {
-        public Track(string textureKey, ChromiumWebBrowser browser, WebViewElementOptions options)
+        public WebViewGroup(
+            WebViewHost host,
+            ElementNode element,
+            WebViewElementOptions options,
+            string textureKeyBase)
         {
-            TextureKey = textureKey;
-            Browser = browser;
+            Host = host;
+            Element = element;
             Options = options;
-            Controller = new WebView(browser);
+            TextureKeyBase = textureKeyBase;
+            Controller = new WebView(Manager);
         }
 
-        /// <summary>Guards the captured frame buffer between CEF and the renderer.</summary>
-        public object FrameSync { get; } = new();
-
-        /// <summary>BGRA pixels converted to RGBA, row-major, top-down.</summary>
-        public byte[] Pixels { get; set; } = [];
-
-        public int Width { get; set; }
-
-        public int Height { get; set; }
-
-        public bool HasFrame { get; set; }
-
-        public string TextureKey { get; }
-
-        public ChromiumWebBrowser Browser { get; }
-
-        public WebView Controller { get; }
-
+        public WebViewHost Host { get; }
+        public ElementNode Element { get; }
         public WebViewElementOptions Options { get; set; }
+        public string TextureKeyBase { get; }
+        public WebViewTabManager Manager { get; } = new();
+        public List<WebViewTabTrack> Tracks { get; } = [];
+        public WebView Controller { get; }
+        public WebViewTabTrack? Active => Manager.Active?.Bridge as WebViewTabTrack;
 
         public void Dispose()
         {
-            try
-            {
-                Browser.Dispose();
-            }
-            catch
-            {
-            }
+            foreach (var track in Tracks.ToArray()) track.DisposeBrowser();
+            Tracks.Clear();
         }
     }
 
+    /// <summary>One tab's browser, frame buffer and engine-neutral bridge.</summary>
+    internal sealed class WebViewTabTrack : IWebViewTabBridge, IDisposable
+    {
+        private readonly WebViewHost _host;
+        private readonly WebViewGroup _group;
+        private string _title = "";
+        private bool _isLoading;
+        private bool _canGoBack;
+        private bool _canGoForward;
+
+        public WebViewTabTrack(WebViewHost host, WebViewGroup group, string targetUrl)
+        {
+            _host = host;
+            _group = group;
+            TargetUrl = targetUrl;
+            TextureKey = group.TextureKeyBase + ":" + Guid.NewGuid().ToString("N");
+        }
+
+        public object FrameSync { get; } = new();
+        public byte[] Pixels { get; set; } = [];
+        public int Width { get; set; }
+        public int Height { get; set; }
+        public bool HasFrame { get; set; }
+        public string TextureKey { get; }
+        public string TargetUrl { get; }
+        public ChromiumWebBrowser? Browser { get; private set; }
+        public WebViewTab? Tab { get; set; }
+        public WebViewPluginRuntime? Runtime { get; set; }
+        public WebViewPluginContext? Plugins { get; set; }
+        public WebView View => _view ??= new WebView(Browser!);
+        private WebView? _view;
+
+        public void Attach(ChromiumWebBrowser browser) => Browser = browser;
+
+        public void DisposeBrowser()
+        {
+            Runtime?.Dispose();
+            Runtime = null;
+
+            try { Browser?.Dispose(); }
+            catch { }
+            Browser = null;
+        }
+
+        public void Dispose() => DisposeBrowser();
+
+        public string Address => Browser?.Address ?? "";
+
+        public string Title
+        {
+            get => _title;
+            set
+            {
+                _title = value ?? "";
+                Tab?.RaiseStateChanged();
+            }
+        }
+
+        public bool IsLoading => _isLoading;
+        public bool CanGoBack => _canGoBack;
+        public bool CanGoForward => _canGoForward;
+        public bool IsActive => ReferenceEquals(_group.Manager.Active, Tab);
+
+        public void UpdateState(bool canGoBack, bool canGoForward, bool isLoading)
+        {
+            _canGoBack = canGoBack;
+            _canGoForward = canGoForward;
+            _isLoading = isLoading;
+            Tab?.RaiseStateChanged();
+        }
+
+        public void Load(string url)
+        {
+            if (Browser is null || Browser.IsDisposed || string.IsNullOrWhiteSpace(url)) return;
+
+            var source = url.StartsWith("data:", StringComparison.OrdinalIgnoreCase)
+                || url.Contains("://", StringComparison.Ordinal)
+                || url.Equals("about:blank", StringComparison.OrdinalIgnoreCase)
+                ? url
+                : NormalizeSource(url);
+
+            Browser.Load(source);
+        }
+
+        public void Reload() => Load(Address);
+        public void Back() { try { Browser?.GetBrowser()?.GoBack(); } catch { } }
+        public void Forward() { try { Browser?.GetBrowser()?.GoForward(); } catch { } }
+        public void Activate() { if (Tab is not null) _host.ActivateTab(_group, Tab); }
+        public void Close() { if (Tab is not null) _group.Manager.Close(Tab); }
+    }
+
     /// <summary>
-    /// CEF render handler that converts each BGRA paint into the RGBA buffer
-    /// consumed by <see cref="ImageCache"/>.
+    /// CEF render handler that converts BGRA paints into RGBA frame buffers.
     /// </summary>
     private sealed class WebViewRenderHandler : IRenderHandler
     {
-        private readonly Track _track;
+        private readonly WebViewTabTrack _track;
 
-        public WebViewRenderHandler(Track track) => _track = track;
+        public WebViewRenderHandler(WebViewTabTrack track) => _track = track;
 
         public ScreenInfo? GetScreenInfo() => null;
 
         public CefRect GetViewRect() =>
-            new(0, 0, Math.Max(1, _track.Options.Width), Math.Max(1, _track.Options.Height));
+            new(0, 0, Math.Max(1, _track.Width), Math.Max(1, _track.Height));
 
         public bool GetScreenPoint(int viewX, int viewY, out int screenX, out int screenY)
         {
@@ -714,29 +740,17 @@ internal sealed class WebViewHost : IDisposable
             return false;
         }
 
-        public void OnAcceleratedPaint(PaintElementType type, CefRect dirtyRect, AcceleratedPaintInfo info)
-        {
-            // CPU OSR only: accelerated paint is intentionally not requested.
-        }
+        public void OnAcceleratedPaint(PaintElementType type, CefRect dirtyRect, AcceleratedPaintInfo info) { }
 
         public void OnPaint(PaintElementType type, CefRect dirtyRect, IntPtr buffer, int width, int height)
         {
-            if (type != PaintElementType.View
-                || buffer == IntPtr.Zero
-                || width <= 0
-                || height <= 0)
-            {
-                return;
-            }
+            if (type != PaintElementType.View || buffer == IntPtr.Zero || width <= 0 || height <= 0) return;
 
             var length = width * height * 4;
 
             lock (_track.FrameSync)
             {
-                if (_track.Pixels.Length != length)
-                {
-                    _track.Pixels = new byte[length];
-                }
+                if (_track.Pixels.Length != length) _track.Pixels = new byte[length];
 
                 unsafe
                 {
@@ -758,34 +772,13 @@ internal sealed class WebViewHost : IDisposable
             }
         }
 
-        public void OnCursorChange(IntPtr cursor, CefCursorType type, CursorInfo customCursorInfo)
-        {
-        }
-
+        public void OnCursorChange(IntPtr cursor, CefCursorType type, CursorInfo customCursorInfo) { }
         public bool StartDragging(IDragData dragData, DragOperationsMask mask, int x, int y) => false;
-
-        public void UpdateDragCursor(DragOperationsMask operation)
-        {
-        }
-
-        public void OnPopupShow(bool show)
-        {
-        }
-
-        public void OnPopupSize(CefRect rect)
-        {
-        }
-
-        public void OnImeCompositionRangeChanged(CefRange selectedRange, CefRect[] characterBounds)
-        {
-        }
-
-        public void OnVirtualKeyboardRequested(IBrowser browser, TextInputMode inputMode)
-        {
-        }
-
-        public void Dispose()
-        {
-        }
+        public void UpdateDragCursor(DragOperationsMask operation) { }
+        public void OnPopupShow(bool show) { }
+        public void OnPopupSize(CefRect rect) { }
+        public void OnImeCompositionRangeChanged(CefRange selectedRange, CefRect[] characterBounds) { }
+        public void OnVirtualKeyboardRequested(IBrowser browser, TextInputMode inputMode) { }
+        public void Dispose() { }
     }
 }
