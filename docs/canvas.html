@@ -149,10 +149,10 @@ using static Donkeh.UILab._;
 public sealed class Sparkline : Component
 {
     public override Node Render() =&gt;
-        &lt;Canvas
-            Width="320"
-            Height="120"
-            OnDraw={context =&gt;
+        &lt;canvas
+            width="320"
+            height="120"
+            onDraw={context =&gt;
             {
                 context.Clear(0xFF111827);
 
@@ -233,9 +233,9 @@ public sealed class Sparkline : Component
         <div class="code" data-label="OnContext">
 <pre class="csx"><code>using Silk.NET.OpenGL;
 
-&lt;Canvas
-    OnDraw={context =&gt; context.Clear(0xFF0B1018)}
-    OnContext={gl =&gt;
+&lt;canvas
+    onDraw={context =&gt; context.Clear(0xFF0B1018)}
+    onContext={gl =&gt;
     {
         gl.Enable(EnableCap.ScissorTest);
         gl.ClearColor(0.05f, 0.08f, 0.12f, 1f);

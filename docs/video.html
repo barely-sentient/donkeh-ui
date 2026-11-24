@@ -143,21 +143,21 @@ using static Donkeh.UILab._;
 public sealed class Clip : Component
 {
     public override Node Render() =&gt;
-        &lt;Video
-            Src="media/intro.mp4"
-            Controls={true}
-            AutoPlay={true}
-            Loop={true}
-            Muted={true}
-            Volume={0.8f}
-            OnReady={player =&gt;
+        &lt;video
+            src="media/intro.mp4"
+            controls={true}
+            autoPlay={true}
+            loop={true}
+            muted={true}
+            volume={0.8f}
+            onReady={player =&gt;
             {
                 // Save the player, or seek to a chapter once it exists.
                 player.Seek(12.5f);
             }}
-            OnTimeUpdate={seconds =&gt;
+            onTimeUpdate={seconds =&gt;
                 Console.WriteLine($"position: {seconds:0.0}s")}
-            OnEnded={() =&gt; Console.WriteLine("finished")} /&gt;;
+            onEnded={() =&gt; Console.WriteLine("finished")} /&gt;;
 }</code></pre>
 <pre class="csharp"><code>using Donkeh.UILab;
 using Donkeh.Windowing;
@@ -228,13 +228,13 @@ public sealed class Clip : Component
     {
         var playing = _player?.IsPlaying == true;
 
-        return &lt;Div ClassName="transport"&gt;
-            &lt;Video
-                Src="media/demo.mp4"
-                OnReady={player =&gt; _player = player} /&gt;
-            &lt;Button OnClick={() =&gt; _player?.Play()}&gt;Play&lt;/Button&gt;
-            &lt;Button OnClick={() =&gt; _player?.Pause()}&gt;Pause&lt;/Button&gt;
-        &lt;/Div&gt;;
+        return &lt;div className="transport"&gt;
+            &lt;video
+                src="media/demo.mp4"
+                onReady={player =&gt; _player = player} /&gt;
+            &lt;button onClick={() =&gt; _player?.Play()}&gt;Play&lt;/Button&gt;
+            &lt;button onClick={() =&gt; _player?.Pause()}&gt;Pause&lt;/Button&gt;
+        &lt;/div&gt;;
     }
 }</code></pre>
 <pre class="csharp"><code>public sealed class PlayerControls : Component

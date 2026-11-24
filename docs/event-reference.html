@@ -176,37 +176,37 @@
 using static Donkeh.UILab.HtmlHelper;
 
 // Typed property: the lambda receives a ClickEvent.
-<Button OnClickEvent={click => Console.WriteLine($"click at {click.LocalX}, {click.LocalY}")}>
+&lt;button onClickEvent={click =&gt; Console.WriteLine($"click at {click.LocalX}, {click.LocalY}")}&gt;
     Save
-</Button>
+&lt;/button&gt;
 
 // Typed element helper.
-<Button OnClick={click => Console.WriteLine(click.Type)}>Cancel</Button>
+&lt;button onClick={click =&gt; Console.WriteLine(click.Type)}&gt;Cancel&lt;/button&gt;
 
 // Simple handler for handlers that need no payload.
-<Button OnClick={() => Close()}>Close</Button>
+&lt;button buttonClick={() =&gt; Close()}&gt;Close&lt;/button&gt;
 
 // Arbitrary event name. The delegate can be any shape the host dispatches.
-<Div OnClick={new Action<ClickEvent>(click => Console.WriteLine(click.Target?.Key))} /></code></pre>
+&lt;div onClick={new Action&lt;ClickEvent&gt;(click =&gt; Console.WriteLine(click.Target?.Key))} /&gt;</code></pre>
 <pre class="csharp"><code>using static Donkeh.UILab._;
 using static Donkeh.UILab.HtmlHelper;
 
 // Typed property: the lambda receives a ClickEvent.
 Button(new Props
 {
-    OnClickEvent = click => Console.WriteLine($"click at {click.LocalX}, {click.LocalY}")
+    OnClickEvent = click =&gt; Console.WriteLine($"click at {click.LocalX}, {click.LocalY}")
 }, Text("Save"));
 
 // Typed element helper.
 H("button", Text("Cancel"))
-    .OnClick(click => Console.WriteLine(click.Type));
+    .OnClick(click =&gt; Console.WriteLine(click.Type));
 
 // Simple handler for handlers that need no payload.
-H("button", Text("Close")).OnClick(() => Close());
+H("button", Text("Close")).OnClick(() =&gt; Close());
 
 // Arbitrary event name. The delegate can be any shape the host dispatches.
 H("div").On("click", new Action&lt;ClickEvent&gt;(
-    click => Console.WriteLine(click.Target?.Key)));</code></pre>
+    click =&gt; Console.WriteLine(click.Target?.Key)));</code></pre>
         </div>
 
         <p>
@@ -288,22 +288,22 @@ H("div").On("click", new Action&lt;ClickEvent&gt;(
         </p>
 
         <div class="code" data-label="Pointer drag">
-<pre class="csx"><code>var surface = <Div ClassName="surface"
-    OnPointerDownEvent={down => Console.WriteLine($"pressed at {down.LocalX}, {down.LocalY}")}
-    OnPointerMoveEvent={move => Console.WriteLine($"moved by {move.ClientX}, {move.ClientY}")}
-    OnPointerUpEvent={up => Console.WriteLine($"released at {up.LocalX}, {up.LocalY}")} /></code></pre>
+<pre class="csx"><code>var surface = &lt;div className="surface"
+    onPointerDown={down =&gt; Console.WriteLine($"pressed at {down.LocalX}, {down.LocalY}")}
+    onPointerMove={move =&gt; Console.WriteLine($"moved by {move.ClientX}, {move.ClientY}")}
+    onPointerUp={up =&gt; Console.WriteLine($"released at {up.LocalX}, {up.LocalY}")} /&gt;</code></pre>
 <pre class="csharp"><code>var surface = H("div", new Props
 {
     ClassName = "surface",
-    OnPointerDownEvent = down =>
+    OnPointerDownEvent = down =&gt;
     {
         Console.WriteLine($"pressed at {down.LocalX}, {down.LocalY}");
     },
-    OnPointerMoveEvent = move =>
+    OnPointerMoveEvent = move =&gt;
     {
         Console.WriteLine($"moved by {move.ClientX}, {move.ClientY}");
     },
-    OnPointerUpEvent = up =>
+    OnPointerUpEvent = up =&gt;
     {
         Console.WriteLine($"released at {up.LocalX}, {up.LocalY}");
     }
@@ -324,7 +324,7 @@ H("div").On("click", new Action&lt;ClickEvent&gt;(
 <pre class="csharp"><code>Div(new Props
 {
     ClassName = "file-list",
-    OnContextMenu = menu =>
+    OnContextMenu = menu =&gt;
     {
         OpenMenu(menu.Target?.Key, menu.WindowX, menu.WindowY);
         menu.PreventDefault();
@@ -340,8 +340,8 @@ H("div").On("click", new Action&lt;ClickEvent&gt;(
         </p>
 
         <div class="code" data-label="Keyboard shortcut">
-<pre class="csx"><code><Input ClassName="search"
-    OnKeyDownEvent={key =>
+<pre class="csx"><code>&lt;input className="search"
+    onKeyDown={key =&gt;
     {
         if (key.Key == "Escape")
         {
@@ -351,11 +351,11 @@ H("div").On("click", new Action&lt;ClickEvent&gt;(
         {
             OpenCommandPalette();
         }
-    }} /></code></pre>
+    }} /&gt;</code></pre>
 <pre class="csharp"><code>H("input", new Props
 {
     ClassName = "search",
-    OnKeyDownEvent = key =>
+    OnKeyDownEvent = key =&gt;
     {
         if (key.Key == "Escape")
         {
@@ -405,15 +405,15 @@ H("div").On("click", new Action&lt;ClickEvent&gt;(
         </p>
 
         <div class="code" data-label="Scroll payload">
-<pre class="csx"><code><Div ClassName="scroller"
-    OnScrollEvent={scroll =>
+<pre class="csx"><code>&lt;div className="scroller"
+    onScroll={scroll =&gt;
     {
         Console.WriteLine($"moved {scroll.DeltaX}px across and {scroll.DeltaY}px down");
-    }} /></code></pre>
+    }} /&gt;</code></pre>
 <pre class="csharp"><code>H("div", new Props
 {
     ClassName = "scroller",
-    OnScrollEvent = scroll =>
+    OnScrollEvent = scroll =&gt;
     {
         Console.WriteLine($"moved {scroll.DeltaX}px across and {scroll.DeltaY}px down");
     }
@@ -445,37 +445,37 @@ H("div").On("click", new Action&lt;ClickEvent&gt;(
         </div>
 
         <div class="code" data-label="Drag and drop">
-<pre class="csx"><code><Li
-    Key={file.Id}
-    Draggable={true}
-    OnDragStart={drag =>
+<pre class="csx"><code>&lt;li
+    key={file.Id}
+    draggable={true}
+    onDragStart={drag =&gt;
     {
         drag.Data.SetData("application/x-file-id", file.Id);
         drag.Data.EffectAllowed = "move";
-    }}>
+    }}&gt;
     {file.Name}
-</Li>
+&lt;/li&gt;
 
-<Div ClassName="drop-zone"
-    OnDragOver={drag =>
+&lt;div className="drop-zone"
+    onDragOver={drag =&gt;
     {
         drag.Data.DropEffect = drag.Data.HasData("application/x-file-id")
             ? "move"
             : "none";
     }}
-    OnDrop={drop =>
+    onDrop={drop =&gt;
     {
         var id = drop.Data.GetData("application/x-file-id");
         if (id is not null)
         {
             MoveFile(id, drop.LocalX, drop.LocalY);
         }
-    }} /></code></pre>
+    }} /&gt;</code></pre>
 <pre class="csharp"><code>H("li", new Props
 {
     Key = file.Id,
     Draggable = true,
-    OnDragStart = drag =>
+    OnDragStart = drag =&gt;
     {
         drag.Data.SetData("application/x-file-id", file.Id);
         drag.Data.EffectAllowed = "move";
@@ -485,13 +485,13 @@ H("div").On("click", new Action&lt;ClickEvent&gt;(
 H("div", new Props
 {
     ClassName = "drop-zone",
-    OnDragOver = drag =>
+    OnDragOver = drag =&gt;
     {
         drag.Data.DropEffect = drag.Data.HasData("application/x-file-id")
             ? "move"
             : "none";
     },
-    OnDrop = drop =>
+    OnDrop = drop =&gt;
     {
         var id = drop.Data.GetData("application/x-file-id");
         if (id is not null)
@@ -528,9 +528,9 @@ H("div", new Props
 {
     Src = "media/intro.mp4",
     Controls = true,
-    OnPlayEvent = play => Console.WriteLine($"playing from {play.Time}s"),
-    OnTimeUpdateEvent = update => SeekBar.Value = update.Time,
-    OnEndedEvent = ended => ShowReplayButton()
+    OnPlayEvent = play =&gt; Console.WriteLine($"playing from {play.Time}s"),
+    OnTimeUpdateEvent = update =&gt; SeekBar.Value = update.Time,
+    OnEndedEvent = ended =&gt; ShowReplayButton()
 });</code></pre>
         </div>
 

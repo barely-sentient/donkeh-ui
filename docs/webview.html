@@ -152,9 +152,9 @@ using Donkeh.Windowing;
 using static Donkeh.UILab._;
 
 &lt;webview
-    Src="https://example.com"
-    ClassName="browser"
-    OnReady={view =&gt; view.ExecuteJavaScript(
+    src="https://example.com"
+    className="browser"
+    onReady={view =&gt; view.ExecuteJavaScript(
         "document.body.style.background = '#f7f7f7'")} /&gt;</code></pre>
 <pre class="csharp"><code>using Donkeh.UILab;
 using Donkeh.Windowing;
@@ -201,7 +201,7 @@ H("webview", new WebViewProps
             disposes the existing browser and creates a new one, so the page follows the prop.
         </p>
         <div class="code" data-label="Program.cs">
-<pre class="csx"><code>&lt;webview Src="data:text/html,&lt;h1&gt;Hello&lt;/h1&gt;&lt;p&gt;From a data URI.&lt;/p&gt;" /&gt;</code></pre>
+<pre class="csx"><code>&lt;webview src="data:text/html,&lt;h1&gt;Hello&lt;/h1&gt;&lt;p&gt;From a data URI.&lt;/p&gt;" /&gt;</code></pre>
 <pre class="csharp"><code>H("webview", new WebViewProps
 {
     Src = "data:text/html,&lt;h1&gt;Hello&lt;/h1&gt;&lt;p&gt;From a data URI.&lt;/p&gt;"
@@ -245,8 +245,8 @@ H("webview", new WebViewProps
         </div>
         <div class="code" data-label="Program.cs">
 <pre class="csx"><code>&lt;webview
-    Src="https://example.com"
-    OnReady={view =&gt;
+    src="https://example.com"
+    onReady={view =&gt;
     {
         view.ExecuteJavaScript("window.__appToken = 'abc123'");
     }} /&gt;</code></pre>
