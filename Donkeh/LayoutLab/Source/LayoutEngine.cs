@@ -2088,9 +2088,14 @@ public sealed partial class LayoutEngine
                 continue;
             }
 
-            // A fixed box uses the viewport unless a transformed/filtered
-            // ancestor was recorded as its containing block at build time.
-            var containingBlock = box.ContainingBlock?.PaddingBox ?? viewport;
+            // A fixed box uses the real layout viewport unless a
+            // transformed/filtered ancestor was recorded as its containing
+            // block at build time. This method is re-entrant: nested absolute
+            // layout calls it with a child's containing block as `viewport`,
+            // so using that parameter here would shrink viewport-fixed boxes
+            // to the nested box (e.g. a 46x46 icon tile). Always use the frame
+            // viewport captured in Layout().
+            var containingBlock = box.ContainingBlock?.PaddingBox ?? _layoutViewport;
             LayoutAbsoluteBox(box, containingBlock);
         }
     }

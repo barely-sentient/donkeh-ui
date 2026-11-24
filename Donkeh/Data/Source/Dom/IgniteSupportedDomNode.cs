@@ -130,6 +130,14 @@ namespace Donkeh.Data.Dom
 
                 _isSuppressed = value;
 
+                // The node's own computed style can depend on structural
+                // selectors (:last-child, :nth-child, ...) whose sibling set
+                // changes when suppression flips. Bump our own revision so
+                // ResolveStyle re-resolves after a display:none <-> flex
+                // transition; bumping only the parent left this node's cached
+                // style (and therefore its box) stuck on the old value.
+                _revision++;
+
                 if (_parent is not null)
                 {
                     _parent._suppressedChildCount += value ? 1 : -1;

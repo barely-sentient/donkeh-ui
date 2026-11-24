@@ -963,6 +963,12 @@ namespace Donkeh.UILab
 
             var (live, logical) = DiffChildren(parent, oldLogical, newLogical, scope);
 
+            if (parent is ElementNode dbgParent && System.Array.IndexOf(dbgParent.ClassName, "file-browser-dialog-host") >= 0)
+            {
+                System.IO.File.AppendAllText(@"C:\Users\jhuds\AppData\Local\Temp\opencode\hostflow.txt",
+                    $"APPLYCHILDREN old={oldLogical.Length} new={newLogical.Length} live={live.Length} kinds={string.Join("|", System.Array.ConvertAll(newLogical, n => n.GetType().Name))}\n");
+            }
+
             parent.VdomChildren = logical;
 
             // Reassigning Children bumps the parent's revision and invalidates
