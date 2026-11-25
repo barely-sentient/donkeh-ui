@@ -7,71 +7,192 @@
     <meta name="description" content="Discover and extend the Donkeh CLI and MCP capabilities for LLM agents.">
     <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/site.css">
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem("donkeh-theme");
+                const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = dark ? "dark" : "light";
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
+    <script src="assets/site.js" defer></script>
 </head>
 <body>
+<a class="skip-link" href="#content">Skip to content</a>
+
 <header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
     <a class="brand" href="index.html">
         <span class="brand-mark">D</span>
         <span class="brand-name">Donkeh</span>
         <span class="brand-tag">docs</span>
     </a>
+    <span class="topbar-spacer"></span>
+    <div class="topbar-actions">
+        <a class="topbar-link" href="https://github.com/barely-sentient/donkeh-ui">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">☾</button>
+    </div>
 </header>
 
-<main class="content" id="content">
-    <div class="breadcrumb">Docs <span>/</span> LLM integration</div>
-    <h1>LLM integration</h1>
-    <p class="lead">
-        The Donkeh CLI exposes project, component, CSX, CSS, renderer,
-        documentation and diagnostic capabilities as JSON commands and as MCP
-        tools. Packages can extend the same catalogue without modifying the CLI.
-    </p>
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <nav class="nav" aria-label="Documentation">
+            <div class="nav-group">
+                <span class="nav-label">Start</span>
+                <a href="index.html">Overview</a>
+                <a href="getting-started.html">Getting started</a>
+                <a href="csx.html">CSX syntax</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Components</span>
+                <a href="creating-a-component.html">Creating a component</a>
+                <a href="creating-a-provider.html">Creating a provider</a>
+                <a href="using-hooks.html">Using hooks</a>
+                <a href="component-testing.html">Component testing</a>
+                <a href="developing-hooks.html">Developing hooks</a>
+                <a href="routing.html">Routing and setPage</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Reference</span>
+                <a href="html-elements.html">HTML elements</a>
+                <a href="event-reference.html">Event reference</a>
+                <a href="css-support.html">CSS support</a>
+                <a href="webview.html">WebView reference</a>
+                <a href="video.html">Video reference</a>
+                <a href="canvas.html">Canvas reference</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Primitives</span>
+                <a href="image.html">Image</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Inspector</span>
+                <a href="inspector.html">Overview</a>
+                <a href="inspector-hierarchy.html">Hierarchy</a>
+                <a href="inspector-performance.html">Performance</a>
+                <a href="inspector-animations.html">Animations</a>
+                <a href="inspector-deploy.html">Deploy</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Implementation for Nerds</span>
+                <a href="implementation.html">Overview</a>
+                <a class="nav-sub" href="implementation-parser.html">Parser</a>
+                <a class="nav-sub" href="implementation-data.html">Data</a>
+                <a class="nav-sub" href="implementation-dataengine.html">DataEngine</a>
+                <a class="nav-sub" href="implementation-layoutlab.html">LayoutLab</a>
+                <a class="nav-sub" href="implementation-uilab.html">UILab</a>
+                <a class="nav-sub" href="implementation-hosting.html">Hosting</a>
+                <a class="nav-sub" href="implementation-windowing.html">Windowing</a>
+                <a class="nav-sub" href="implementation-android.html">Android</a>
+                <a class="nav-sub" href="implementation-browser.html">Browser</a>
+                <a class="nav-sub" href="implementation-inspector.html">Inspector</a>
+                <a class="nav-sub" href="implementation-cli.html">CLI tool</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Runtime</span>
+                <a href="host-permissions.html">Host permissions</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">Agents</span>
+                <a href="llm-integration.html">LLM integration</a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="https://github.com/barely-sentient/donkeh-ui">GitHub repository</a>
+            <span>Donkeh documentation</span>
+        </div>
+    </aside>
 
-    <h2 id="discovery">Discovery</h2>
-    <p>
-        Start with the overview, then inspect one capability or the MCP input
-        schemas. Every agent-facing command accepts <code>--json</code>.
-    </p>
-    <div class="code" data-label="Terminal">
+    <main class="content" id="content">
+        <div class="breadcrumb">Docs <span>/</span> Agents <span>/</span> LLM integration</div>
+        <h1>LLM integration</h1>
+        <p class="lead">
+            The Donkeh CLI exposes project, component, CSX, CSS, renderer,
+            documentation and diagnostic capabilities as JSON commands and as MCP
+            tools. Packages can extend the same catalogue without modifying the CLI.
+        </p>
+
+        <div class="pill-row">
+            <span class="pill accent">JSON-first</span>
+            <span class="pill">MCP stdio</span>
+            <span class="pill">Package-extensible</span>
+        </div>
+
+        <h2 id="discovery">Discovery</h2>
+        <p>
+            Start with the overview, then inspect one capability or the MCP input
+            schemas. Every agent-facing command accepts <code>--json</code>.
+        </p>
+        <div class="code" data-label="Terminal">
 <pre><code>donkeh mcp show --json
 donkeh mcp capabilities csx.validate --json
 donkeh mcp tools --json
 donkeh mcp invoke csx.validate --file ./Components/Card.cx --json
 donkeh inspect project --json
 donkeh component search "file selection" --json</code></pre>
-    </div>
+        </div>
 
-    <h2 id="mcp">MCP server</h2>
-    <p>
-        <code>donkeh mcp start</code> hosts the same capability implementations on
-        stdio. Tool results include text content and structured JSON. stdout is
-        reserved for the protocol; diagnostics go to stderr.
-    </p>
-    <div class="code" data-label="Terminal">
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Task</th><th>CLI</th><th>MCP tool</th></tr></thead>
+                <tbody>
+                    <tr><td>Project overview</td><td><code>donkeh inspect project</code></td><td><code>project_inspect</code></td></tr>
+                    <tr><td>Component search</td><td><code>donkeh component search</code></td><td><code>component_search</code></td></tr>
+                    <tr><td>Component API</td><td><code>donkeh component inspect</code></td><td><code>component_inspect</code></td></tr>
+                    <tr><td>CSX validation</td><td><code>donkeh csx validate</code></td><td><code>csx_validate</code></td></tr>
+                    <tr><td>CSS validation</td><td><code>donkeh css validate</code></td><td><code>css_validate</code></td></tr>
+                    <tr><td>Documentation</td><td><code>donkeh docs search</code></td><td><code>docs_search</code></td></tr>
+                    <tr><td>Project health</td><td><code>donkeh diagnose project</code></td><td><code>diagnose_project</code></td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2 id="mcp">MCP server</h2>
+        <p>
+            <code>donkeh mcp start</code> hosts the same capability implementations
+            on stdio. Tool results include text content and structured JSON. stdout
+            is reserved for the protocol; diagnostics go to stderr.
+        </p>
+        <div class="code" data-label="Terminal">
 <pre><code>donkeh mcp start --project ./MyApp</code></pre>
-    </div>
+        </div>
+        <p>
+            MCP tool names are flat and explicit, such as <code>project_inspect</code>
+            and <code>csx_validate</code>. Each tool advertises a JSON input schema
+            and returns both a readable text block and <code>structuredContent</code>.
+        </p>
 
-    <h2 id="csx">CSX and CSS intelligence</h2>
-    <p>
-        CSX validation uses the shipped CSX transformer plus project props
-        metadata. CSS validation uses the real tokenizer, data engine and
-        LayoutLab property resolver, not a browser compatibility list.
-    </p>
-    <div class="code" data-label="Terminal">
+        <h2 id="csx">CSX and CSS intelligence</h2>
+        <p>
+            CSX validation uses the shipped CSX transformer plus project props
+            metadata. CSS validation uses the real tokenizer, data engine and
+            LayoutLab property resolver, not a browser compatibility list.
+        </p>
+        <div class="code" data-label="Terminal">
 <pre><code>donkeh csx syntax components --json
+donkeh csx inspect ./Components/Card.cx --json
 donkeh csx validate ./Components/Card.cx --json
 donkeh csx compile ./Components/Card.cx --generated --json
 donkeh css property display --json
 donkeh css validate ./styles.css --json</code></pre>
-    </div>
+        </div>
+        <p>
+            Generated C#, source maps and resolved property/event bindings are opt-in
+            on <code>csx compile</code> so a compile check does not flood an agent's
+            context.
+        </p>
 
-    <h2 id="registration">Package registration</h2>
-    <p>
-        A package adds a <code>donkeh.llm.json</code> manifest at its root. Static
-        capabilities return declared JSON; executable providers implement
-        <code>ILlmCapabilityProvider</code> and are loaded only when the manifest
-        explicitly registers them.
-    </p>
-    <div class="code" data-label="donkeh.llm.json">
+        <h2 id="registration">Package registration</h2>
+        <p>
+            A package adds a <code>donkeh.llm.json</code> manifest at its root. Static
+            capabilities return declared JSON; executable providers implement
+            <code>ILlmCapabilityProvider</code> and are loaded only when the manifest
+            explicitly registers them.
+        </p>
+        <div class="code" data-label="donkeh.llm.json">
 <pre><code>{
   "schemaVersion": 1,
   "package": "Acme.Donkeh.FileExplorer",
@@ -94,20 +215,43 @@ donkeh css validate ./styles.css --json</code></pre>
     }
   ]
 }</code></pre>
-    </div>
-    <p>
-        Names cannot override built-in namespaces or another package's MCP tool.
-        Provider assemblies must stay inside the manifest directory, and the
-        registry never executes shell commands on their behalf.
-    </p>
+        </div>
+        <p>
+            Capability names must use the package's first namespace segment, for
+            example <code>acme.fileexplorer.*</code> for
+            <code>Acme.FileExplorer</code>. Names cannot override built-in namespaces
+            or another package's MCP tool.
+        </p>
 
-    <h2 id="tokens">Token efficiency</h2>
-    <p>
-        Inspect a summary first, then request only the part you need:
-        <code>--properties</code>, <code>--events</code>, <code>--examples</code>,
-        <code>--section</code>, <code>--summary</code> or <code>--limit</code>.
-        Generated CSX output, source maps and resolved bindings are opt-in.
-    </p>
-</main>
+        <h2 id="security">Security boundaries</h2>
+        <div class="callout note">
+            <strong>Explicit package trust</strong>
+            Project inspection reads only selected MSBuild properties,
+            <code>csx.json</code>, package references and restore metadata. Component
+            discovery uses metadata-only assembly inspection. Provider assemblies are
+            the only third-party code loaded by the extension, must stay inside the
+            manifest directory, and run with the same permissions as the user running
+            the CLI.
+        </div>
+
+        <h2 id="tokens">Token efficiency</h2>
+        <p>
+            Inspect a summary first, then request only the part you need:
+            <code>--properties</code>, <code>--events</code>, <code>--examples</code>,
+            <code>--section</code>, <code>--summary</code> or <code>--limit</code>.
+            Diagnostics use stable codes and one-based source locations.
+        </p>
+
+        <div class="page-nav">
+            <a class="prev" href="host-permissions.html"><span>Previous</span>Host permissions</a>
+            <a class="next" href="index.html"><span>Back to</span>Overview</a>
+        </div>
+
+        <footer class="page-footer">
+            <p>Donkeh  -  CSS-driven UI for .NET.</p>
+            <p><a href="https://github.com/barely-sentient/donkeh-ui">Edit this page</a></p>
+        </footer>
+    </main>
+</div>
 </body>
 </html>
