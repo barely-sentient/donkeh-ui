@@ -614,7 +614,26 @@ public sealed partial class LayoutEngine
                 }
 
                 container.Text = layout;
-                container.TextOrigin = new Point(lineX, lineY);
+                float textY = lineY;
+
+                // Single-line form controls use a fixed content height with a
+                // shorter line box. Browsers centre that line vertically; the
+                // generic inline layout would otherwise paint it against the
+                // top edge of the input.
+                string? tagName = container.Node.TagName;
+
+                if (string.Equals(tagName, "input", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(tagName, "select", StringComparison.OrdinalIgnoreCase))
+                {
+                    float spare = content.Height - layout.Size.Height;
+
+                    if (spare > 0)
+                    {
+                        textY += spare * 0.5f;
+                    }
+                }
+
+                container.TextOrigin = new Point(lineX, textY);
 
                 // Advance by the shaped width, but never less than the
                 // measured advance. Some glyph runs paint slightly past the

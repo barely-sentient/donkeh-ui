@@ -3182,22 +3182,22 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// <remarks>Stops descending once an option is found, since options are not nested.</remarks>
     private static void CollectOptions(Node node, List<ElementNode> results)
     {
-        if (node is ElementNode element)
+        if (node is ElementNode element
+            && string.Equals(element.Tag, "option", StringComparison.OrdinalIgnoreCase))
         {
-            if (string.Equals(element.Tag, "option", StringComparison.OrdinalIgnoreCase))
-            {
-                results.Add(element);
-                return;
-            }
+            results.Add(element);
+            return;
+        }
 
-            var children = element.Children;
+        // Option lists are often produced through a fragment (Each/Show/F), so
+        // descend every node kind rather than only ElementNode.
+        var children = node.Children;
 
-            for (var i = 0; i < children.Length; i++)
+        for (var i = 0; i < children.Length; i++)
+        {
+            if (children[i] is Node child)
             {
-                if (children[i] is Node child)
-                {
-                    CollectOptions(child, results);
-                }
+                CollectOptions(child, results);
             }
         }
     }
@@ -3755,25 +3755,46 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         var menu = layout.Menu;
         var innerRadius = constants.AddRadius(CornerRadius.All(7));
 
+        var textColor = box.Style.Color == ComputedStyle.CurrentColor
+            ? 0xFF212529u
+            : box.Style.Color;
+        var background = box.Style.BackgroundColor;
+        bool dark = (background >> 24) == 0
+            ? !IsDarkColor(textColor)
+            : IsDarkColor(background);
+
+        if ((background >> 24) == 0)
+        {
+            background = dark ? 0xFF1E232B : 0xFFFFFFFF;
+        }
+
+        uint borderColor = box.Style.ResolveBorderColor(box.Style.BorderColorTop);
+
+        if ((borderColor >> 24) == 0)
+        {
+            borderColor = dark ? 0xFF3A414D : 0xFFCED4DA;
+        }
+
+        uint hoverRow = dark ? 0xFF2B323D : 0xFFE9ECEF;
+        uint selectedRow = dark ? 0xFF24344F : 0xFFE7F1FF;
+        uint selectedText = dark ? 0xFF8FB3FF : 0xFF0D6EFD;
+
         var border = new BorderSpec(
-            new BorderSide(1, BorderStyle.Solid, 0xFFCED4DA),
-            new BorderSide(1, BorderStyle.Solid, 0xFFCED4DA),
-            new BorderSide(1, BorderStyle.Solid, 0xFFCED4DA),
-            new BorderSide(1, BorderStyle.Solid, 0xFFCED4DA),
+            new BorderSide(1, BorderStyle.Solid, borderColor),
+            new BorderSide(1, BorderStyle.Solid, borderColor),
+            new BorderSide(1, BorderStyle.Solid, borderColor),
+            new BorderSide(1, BorderStyle.Solid, borderColor),
             CornerRadius.All(8));
 
         overlay.Add(Instruction.DrawBorder(menu, constants.AddBorder(border)));
         overlay.AddDrawRoundedRect(
             menu.Deflate(1, 1, 1, 1),
-            0xFFFFFFFF,
+            background,
             checked((ushort)innerRadius));
 
         var fontSize = box.Style.ResolveFontSize(in _lengthContext);
         var lineHeight = box.Style.ResolveLineHeight(in _lengthContext);
         var textY = (layout.RowHeight - lineHeight) * 0.5f;
-        var textColor = box.Style.Color == ComputedStyle.CurrentColor
-            ? 0xFF212529u
-            : box.Style.Color;
         var selected = GetSelectedIndex(_openSelect, options);
         var rowRadius = checked((ushort)constants.AddRadius(CornerRadius.All(4)));
 
@@ -3788,11 +3809,11 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
 
             if (i == _openSelectHover)
             {
-                overlay.AddDrawRoundedRect(row, 0xFFE9ECEF, rowRadius);
+                overlay.AddDrawRoundedRect(row, hoverRow, rowRadius);
             }
             else if (i == selected)
             {
-                overlay.AddDrawRoundedRect(row, 0xFFE7F1FF, rowRadius);
+                overlay.AddDrawRoundedRect(row, selectedRow, rowRadius);
             }
 
             var text = options[i].TextContent ?? GetAttribute(options[i], "value") ?? string.Empty;
@@ -3802,7 +3823,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
                 continue;
             }
 
-            var color = i == selected ? 0xFF0D6EFD : textColor;
+            var color = i == selected ? selectedText : textColor;
             var textStyle = box.Style.ToTextStyle(in _lengthContext, fontSize, color);
             var textId = constants.AddText(text, textStyle);
             var textRect = new Rect(
@@ -3813,6 +3834,15 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
 
             overlay.Add(Instruction.DrawText(textRect, textId));
         }
+    }
+
+    /// <summary>Reports whether a packed ARGB colour is perceptually dark.</summary>
+    private static bool IsDarkColor(uint argb)
+    {
+        float r = ((argb >> 16) & 0xFF) / 255f;
+        float g = ((argb >> 8) & 0xFF) / 255f;
+        float b = (argb & 0xFF) / 255f;
+        return (0.2126f * r + 0.7152f * g + 0.0722f * b) < 0.5f;
     }
 
     /// <summary>
@@ -4494,6 +4524,18 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             x = originX + _measurer.Measure(text.AsSpan(0, index), in textStyle).Width;
             y = originY;
             height = lineHeight;
+
+            // Single-line form controls centre their line box inside the
+            // content box; the caret has to follow the glyphs.
+            if (_focused.Tag is "input" or "select")
+            {
+                float spare = contentHeight - lineHeight;
+
+                if (spare > 0)
+                {
+                    y += spare * 0.5f;
+                }
+            }
         }
 
         if (contentHeight > 0)
@@ -10334,10 +10376,50 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         var inside = (isContents || border.Contains(local.X, local.Y))
             && style.PointerEvents != PointerEvents.None;
 
-        // pointer-events: none makes this box transparent to input but still
-        // lets an explicitly interactive child opt back in, so keep descending.
+        // Pointer-events: none makes this box transparent to input but still
+        // lets an explicitly interactive child opt back in. Positive z-index
+        // subtrees paint above their static siblings (dropdown popups are the
+        // common case), so test those first rather than relying on DOM order.
+        List<(LayoutBox Box, int Index, int Z)>? promoted = null;
+
+        for (var i = 0; i < box.Children.Count; i++)
+        {
+            var child = box.Children[i];
+            int z = MaxPromotedZ(child);
+
+            if (z > 0)
+            {
+                promoted ??= [];
+                promoted.Add((child, i, z));
+            }
+        }
+
+        if (promoted is not null)
+        {
+            promoted.Sort(static (left, right) =>
+            {
+                int byZ = right.Z.CompareTo(left.Z);
+                return byZ != 0 ? byZ : right.Index.CompareTo(left.Index);
+            });
+
+            foreach (var entry in promoted)
+            {
+                var hit = HitTestBox(entry.Box, x, y, worldToLocal, skipFixed);
+
+                if (hit is not null)
+                {
+                    return hit;
+                }
+            }
+        }
+
         for (var i = box.Children.Count - 1; i >= 0; i--)
         {
+            if (promoted is not null && promoted.Exists(entry => entry.Index == i))
+            {
+                continue;
+            }
+
             var hit = HitTestBox(box.Children[i], x, y, worldToLocal, skipFixed);
 
             if (hit is not null)
@@ -10351,6 +10433,22 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         // points that belong to a later sibling (for example the disclosure
         // triangle next to a tree row's content fragment).
         return inside && !isContents ? box : null;
+    }
+
+    /// <summary>
+    /// Returns the highest positive z-index in a subtree, or zero when none is
+    /// promoted. Hit testing uses this to test popovers before static siblings.
+    /// </summary>
+    private static int MaxPromotedZ(LayoutBox box)
+    {
+        int z = box.Style.HasZIndex && box.Style.ZIndex > 0 ? box.Style.ZIndex : 0;
+
+        for (var i = 0; i < box.Children.Count; i++)
+        {
+            z = Math.Max(z, MaxPromotedZ(box.Children[i]));
+        }
+
+        return z;
     }
 
     /// <summary>Climbs from a node to the nearest element ancestor, including itself.</summary>
