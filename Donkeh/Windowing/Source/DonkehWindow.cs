@@ -502,6 +502,36 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// <summary>The element currently receiving <c>dragover</c> and <c>drop</c>.</summary>
     private ElementNode? _dragOver;
 
+    /// <summary>True while a drag image should follow the pointer.</summary>
+    private bool _dragGhostActive;
+
+    /// <summary>The short label painted into the drag image.</summary>
+    private string _dragGhostText = "";
+
+    /// <summary>Background colour of the drag image, taken from the source element.</summary>
+    private uint _dragGhostBackground = 0xFFF3F4F6;
+
+    /// <summary>Border colour of the drag image.</summary>
+    private uint _dragGhostBorder = 0x33000000;
+
+    /// <summary>Text colour of the drag image.</summary>
+    private uint _dragGhostTextColor = 0xFF202124;
+
+    /// <summary>Font family used by the drag image.</summary>
+    private string _dragGhostFontFamily = "Segoe UI";
+
+    /// <summary>Drag image width in window CSS pixels.</summary>
+    private float _dragGhostWidth = 160;
+
+    /// <summary>Drag image height in window CSS pixels.</summary>
+    private float _dragGhostHeight = 34;
+
+    /// <summary>Horizontal grab offset inside the source box.</summary>
+    private float _dragGhostOffsetX = 16;
+
+    /// <summary>Vertical grab offset inside the source box.</summary>
+    private float _dragGhostOffsetY = 16;
+
     /// <summary>True while an inspect-mode press is pending, awaiting its release.</summary>
     private bool _inspectPressed;
 
@@ -3513,7 +3543,8 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
 
         if (_openSelect is null
             && (_focused is null || IsInDevToolsTree(_focused))
-            && !hasHover)
+            && !hasHover
+            && !_dragGhostActive)
         {
             overlay = null!;
             constants = null!;
@@ -3533,8 +3564,56 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         }
 
         BuildHoverOverlay(overlay, constants);
+        BuildDragGhostOverlay(overlay, constants);
 
         return overlay.Count > 0;
+    }
+
+    /// <summary>
+    /// Paints the browser-style drag image beside the pointer. It is rebuilt
+    /// from the overlay buffer every frame and never enters the layout tree, so
+    /// moving it cannot invalidate the app or disturb drop hit testing.
+    /// </summary>
+    /// <param name="overlay">Overlay display list to append to.</param>
+    /// <param name="constants">Constant pool for the label, colours and radius.</param>
+    private void BuildDragGhostOverlay(InstructionBuffer overlay, ConstantPool constants)
+    {
+        if (!_dragGhostActive || _dragGhostText.Length == 0)
+        {
+            return;
+        }
+
+        var width = MathF.Min(_dragGhostWidth, MathF.Max(48, _lastWidth - 16));
+        var height = MathF.Min(_dragGhostHeight, 72);
+        var x = _mouseX - _dragGhostOffsetX + 12;
+        var y = _mouseY - _dragGhostOffsetY + 12;
+
+        x = Math.Clamp(x, 4, MathF.Max(4, _lastWidth - width - 4));
+        y = Math.Clamp(y, 4, MathF.Max(4, _lastHeight - height - 4));
+
+        var rect = new Rect(x, y, width, height);
+        var radius = checked((ushort)constants.AddRadius(CornerRadius.All(6)));
+
+        overlay.AddDrawRoundedRect(new Rect(x + 2, y + 3, width, height), 0x33000000, radius);
+        overlay.AddDrawRoundedRect(rect, _dragGhostBackground, radius);
+
+        var border = _dragGhostBorder == 0 ? 0x33000000 : _dragGhostBorder;
+        overlay.AddDrawRect(new Rect(x, y, width, 1), border);
+        overlay.AddDrawRect(new Rect(x, y + height - 1, width, 1), border);
+        overlay.AddDrawRect(new Rect(x, y, 1, height), border);
+        overlay.AddDrawRect(new Rect(x + width - 1, y, 1, height), border);
+
+        var textStyle = TextStyle.Default with
+        {
+            FontFamily = _dragGhostFontFamily,
+            FontSize = 12,
+            FontWeight = 600,
+            Color = _dragGhostTextColor,
+            WhiteSpace = WhiteSpace.NoWrap,
+        };
+
+        var textId = constants.AddText(_dragGhostText, textStyle);
+        overlay.Add(Instruction.DrawText(rect.Deflate(11, 4, 9, 4), textId));
     }
 
     /// <summary>
@@ -7480,9 +7559,16 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
 
             if (appliedX != 0 || appliedY != 0)
             {
+                // The content moved under a stationary pointer, so re-run hit
+                // testing. Without this the previous :hover target keeps its
+                // highlight even though it has scrolled away.
+                var hovered = HitTest(_mouseX, _mouseY);
+                SetHovered(hovered);
+                UpdateCursor(hovered);
+
                 // Target the element under the pointer and let the handler walk
                 // up the tree, matching how the other input events bubble.
-                Invoke(HitTest(_mouseX, _mouseY), "scroll", appliedX, appliedY);
+                Invoke(hovered, "scroll", appliedX, appliedY);
             }
         }
     }
@@ -9661,6 +9747,8 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             return;
         }
 
+        CaptureDragGhost(source);
+
         var start = new DragEvent("dragstart", _dragData, x, y, source)
         {
             Target = source
@@ -9782,7 +9870,133 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         _dragPending = false;
         _dragActive = false;
         _dragOver = null;
+        _dragGhostActive = false;
+        _dragGhostText = "";
     }
+
+    /// <summary>
+    /// Captures a browser-style drag image from the source element. The box,
+    /// background, border and text are recorded once at drag start; the image
+    /// itself is painted from the overlay display list so it never affects
+    /// layout or hit testing while the pointer moves.
+    /// </summary>
+    /// <param name="source">The draggable element that started the drag.</param>
+    private void CaptureDragGhost(ElementNode source)
+    {
+        _dragGhostActive = false;
+        _dragGhostText = "";
+
+        if (LayoutForNode(source) is not { } layout
+            || !layout.TryGetBox(source, out var box))
+        {
+            return;
+        }
+
+        var rect = PaintedBorderBox(box);
+
+        if (rect.Width <= 0 || rect.Height <= 0)
+        {
+            return;
+        }
+
+        var style = box.Style;
+        var background = NearestBackground(source, layout);
+
+        var text = DragGhostLabel(source);
+
+        if (text.Length == 0)
+        {
+            return;
+        }
+
+        _dragGhostBackground = background;
+        _dragGhostBorder = style.ResolveBorderColor(style.BorderColorTop);
+        _dragGhostTextColor = style.Color == ComputedStyle.CurrentColor ? 0xFF202124 : style.Color;
+        _dragGhostFontFamily = string.IsNullOrWhiteSpace(style.FontFamily) ? "Segoe UI" : style.FontFamily;
+        _dragGhostWidth = Math.Clamp(rect.Width, 96, 280);
+        _dragGhostHeight = Math.Clamp(rect.Height, 28, 72);
+        _dragGhostOffsetX = Math.Clamp(_dragStartX - rect.X, 0, Math.Max(0, rect.Width));
+        _dragGhostOffsetY = Math.Clamp(_dragStartY - rect.Y, 0, Math.Max(0, rect.Height));
+        _dragGhostText = text;
+        _dragGhostActive = true;
+    }
+
+    /// <summary>
+    /// Finds the first opaque background at or above the source. Palette rows are
+    /// often transparent, so this keeps the drag image looking like a real tile
+    /// instead of a floating white rectangle.
+    /// </summary>
+    private static uint NearestBackground(ElementNode source, LayoutResult layout)
+    {
+        for (var node = (IgniteSupportedDomNode?)source; node is not null; node = node.Parent)
+        {
+            if (node is ElementNode element
+                && layout.TryGetBox(element, out var box)
+                && (box.Style.BackgroundColor >> 24) != 0)
+            {
+                return box.Style.BackgroundColor;
+            }
+        }
+
+        return 0xFFF7F8FA;
+    }
+
+    /// <summary>
+    /// Picks the cleanest available label for a drag image. Applications can set
+    /// <c>data-drag-label</c>; aria labels and titles are sensible fallbacks, and
+    /// the element's text is the final option.
+    /// </summary>
+    private static string DragGhostLabel(ElementNode source)
+    {
+        foreach (var name in new[] { "data-drag-label", "aria-label", "title" })
+        {
+            if (source.TryGetAttribute(name, out var value) && !string.IsNullOrWhiteSpace(value))
+            {
+                return Shorten(Flatten(value), 46);
+            }
+        }
+
+        return Shorten(Flatten(source.TextContent), 46);
+    }
+
+    /// <summary>Collapses whitespace and removes control characters from a label.</summary>
+    private static string Flatten(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "";
+        }
+
+        var builder = new System.Text.StringBuilder(value.Length);
+        var space = false;
+
+        foreach (var ch in value)
+        {
+            if (char.IsControl(ch) && ch is not '\n' and not '\r' and not '\t')
+            {
+                continue;
+            }
+
+            if (char.IsWhiteSpace(ch))
+            {
+                space = true;
+                continue;
+            }
+
+            if (space && builder.Length > 0)
+            {
+                builder.Append(' ');
+            }
+
+            space = false;
+            builder.Append(ch);
+        }
+
+        return builder.ToString().Trim();
+    }
+
+    private static string Shorten(string value, int limit) =>
+        value.Length <= limit ? value : value[..(limit - 1)].TrimEnd() + "…";
 
     /// <summary>
     /// Selects an app element from an inspect-mode pick, expands the tree to it and
@@ -9983,11 +10197,12 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         }
 
         // Fixed boxes are painted after the normal tree, so they are tested
-        // first and in reverse order. Starting at the fixed box with zero
-        // scroll also keeps ancestor scroll offsets out of the hit test.
+        // first and in reverse order. Starting at the fixed box with the
+        // identity transform also keeps ancestor scroll and transforms out of
+        // the hit test.
         for (var i = _hitFixedBoxes.Count - 1; i >= 0; i--)
         {
-            var hit = HitTestBox(_hitFixedBoxes[i], x, y, 0, 0, skipFixed: false);
+            var hit = HitTestBox(_hitFixedBoxes[i], x, y, Matrix3x2.Identity, skipFixed: false);
 
             if (hit is not null)
             {
@@ -9995,7 +10210,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             }
         }
 
-        return HitTestBox(root, x, y, 0, 0, skipFixed: true);
+        return HitTestBox(root, x, y, Matrix3x2.Identity, skipFixed: true);
     }
 
     /// <summary>
@@ -10029,15 +10244,18 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// <param name="box">Subtree root.</param>
     /// <param name="x">Pointer X in window CSS pixels.</param>
     /// <param name="y">Pointer Y in window CSS pixels.</param>
-    /// <param name="scrollX">Accumulated horizontal scroll offset from ancestors.</param>
-    /// <param name="scrollY">Accumulated vertical scroll offset from ancestors.</param>
+    /// <param name="worldToLocal">
+    /// Accumulated inverse transform mapping window points into this box's
+    /// unscrolled, untransformed layout space.
+    /// </param>
     /// <param name="skipFixed">Skip fixed-position boxes, which are tested separately.</param>
     /// <returns>The deepest hit box, or <see langword="null"/>.</returns>
     /// <remarks>
     /// <para>
-    /// Layout boxes keep unscrolled coordinates, so every containment test applies the
-    /// accumulated ancestor scroll offset. Scroll containers additionally clip their
-    /// children to the padding box and add their own offset before recursing.
+    /// Layout boxes keep unscrolled, untransformed coordinates. Every containment
+    /// test therefore maps the pointer through the accumulated scroll and CSS
+    /// transform chain first. Scroll containers clip their children to the padding
+    /// box and add their own offset before recursing.
     /// </para>
     /// <para>
     /// A <c>display: contents</c> box has no geometry of its own: it is never
@@ -10045,12 +10263,11 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// swallow a point meant for a sibling.
     /// </para>
     /// </remarks>
-    private static LayoutBox? HitTestBox(
+    private LayoutBox? HitTestBox(
         LayoutBox box,
         float x,
         float y,
-        float scrollX,
-        float scrollY,
+        Matrix3x2 worldToLocal,
         bool skipFixed)
     {
         if (box.Style.Display == Display.None || box.Style.Visibility is Visibility.Hidden or Visibility.Collapse)
@@ -10063,15 +10280,39 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             return null;
         }
 
-        // Layout boxes keep unscrolled absolute coordinates. The display list
-        // translates a scroll container's descendants by -ScrollOffset, so hit
-        // testing has to apply the same accumulated translation.
-        var painted = box.BorderBox.Translate(-scrollX, -scrollY);
+        var style = box.Style;
+        var border = box.BorderBox;
+
+        // CSS transforms are paint-time matrices. A hit test must invert them
+        // before comparing the pointer with the box's unscaled layout geometry;
+        // otherwise a scaled canvas highlights the element above the cursor.
+        if (style.Transform is { } transform && !transform.IsIdentity)
+        {
+            var matrix = transform.Resolve(border.Width, border.Height, in _lengthContext);
+
+            if (!matrix.IsIdentity)
+            {
+                float originX = border.X + style.TransformOriginX.ResolveOr(
+                    in _lengthContext, border.Width, border.Width * 0.5f);
+                float originY = border.Y + style.TransformOriginY.ResolveOr(
+                    in _lengthContext, border.Height, border.Height * 0.5f);
+                var centered = Matrix3x2.CreateTranslation(-originX, -originY)
+                               * matrix
+                               * Matrix3x2.CreateTranslation(originX, originY);
+
+                if (Matrix3x2.Invert(centered, out var inverse))
+                {
+                    worldToLocal *= inverse;
+                }
+            }
+        }
+
+        var local = Vector2.Transform(new Vector2(x, y), worldToLocal);
 
         // A display:contents box has no box of its own; its children are laid
         // out in the parent. Never reject a point against its (often empty)
         // border box or the children can never be hit.
-        var isContents = box.IsContents || box.Style.Display == Display.Contents;
+        var isContents = box.IsContents || style.Display == Display.Contents;
 
         // Clipping containers reject points outside their padding box before
         // their subtree is considered. Everything else keeps descending even
@@ -10080,25 +10321,24 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         // and must still receive pointer input.
         if (!isContents && box.IsScrollContainer)
         {
-            var clip = box.PaddingBox.Translate(-scrollX, -scrollY);
-
-            if (!clip.Contains(x, y))
+            if (!box.PaddingBox.Contains(local.X, local.Y))
             {
                 return null;
             }
 
-            scrollX += box.ScrollOffsetX;
-            scrollY += box.ScrollOffsetY;
+            // Child layout coordinates are unscrolled. Convert the pointer into
+            // that space by adding the container's scroll offset back in.
+            worldToLocal *= Matrix3x2.CreateTranslation(box.ScrollOffsetX, box.ScrollOffsetY);
         }
 
-        var inside = (isContents || painted.Contains(x, y))
-            && box.Style.PointerEvents != PointerEvents.None;
+        var inside = (isContents || border.Contains(local.X, local.Y))
+            && style.PointerEvents != PointerEvents.None;
 
         // pointer-events: none makes this box transparent to input but still
         // lets an explicitly interactive child opt back in, so keep descending.
         for (var i = box.Children.Count - 1; i >= 0; i--)
         {
-            var hit = HitTestBox(box.Children[i], x, y, scrollX, scrollY, skipFixed);
+            var hit = HitTestBox(box.Children[i], x, y, worldToLocal, skipFixed);
 
             if (hit is not null)
             {
