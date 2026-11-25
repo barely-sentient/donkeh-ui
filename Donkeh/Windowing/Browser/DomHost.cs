@@ -121,6 +121,10 @@ public sealed class DomHost
     /// <param name="modifiers">
     /// The modifier keys held during a key event, or zero elsewhere.
     /// </param>
+    /// <param name="repeat">
+    /// Whether a key event is an auto-repeat of a held key, matching
+    /// <c>KeyboardEvent.repeat</c>.
+    /// </param>
     /// <returns>A task that completes once the handler has run.</returns>
     [JSInvokable("HandleEvent")]
     public Task HandleEventAsync(
@@ -131,7 +135,8 @@ public sealed class DomHost
         double y,
         string? text,
         string? value,
-        int modifiers = 0)
+        int modifiers = 0,
+        bool repeat = false)
     {
         if (!_nodes.TryGetValue(handlerId, out var handlerNode)
             || handlerNode is not ElementNode handler)
@@ -260,7 +265,7 @@ public sealed class DomHost
             case "keydown":
                 var key = MapKey(text);
                 var chord = KeyChord.Format(key, eventModifiers);
-                InvokeEvent(handler, target, new KeyDownEvent(key, eventModifiers, chord));
+                InvokeEvent(handler, target, new KeyDownEvent(key, eventModifiers, chord, repeat));
 
                 // Desktop commits an edit and raises change on Enter even when a
                 // keydown handler also runs, so the browser path does the same.

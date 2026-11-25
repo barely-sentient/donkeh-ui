@@ -68,6 +68,16 @@ public sealed class EventTests
         Assert.Equal("Z", keyDown.Key);
         Assert.Equal("Ctrl+Shift+Z", keyDown.Chord);
         Assert.Equal("keydown", keyDown.Type);
+        Assert.False(keyDown.Repeat);
+    }
+
+    [Fact]
+    public void KeyDownEventCanBeMarkedAsAnAutoRepeat()
+    {
+        var keyDown = new KeyDownEvent("Left", repeat: true);
+
+        Assert.True(keyDown.Repeat);
+        Assert.Equal("Left", keyDown.Chord);
     }
 
     [Fact]

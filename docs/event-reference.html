@@ -158,7 +158,7 @@
                     <tr><td><code>InputEvent</code>, <code>ChangeEvent</code></td><td><code>Event</code></td><td><code>Value</code>, the current or committed control text.</td></tr>
                     <tr><td><code>PasteEvent</code></td><td><code>Event</code></td><td><code>Text</code>, the pasted text.</td></tr>
                     <tr><td><code>SubmitEvent</code></td><td><code>Event</code></td><td>No extra fields yet.</td></tr>
-                    <tr><td><code>KeyDownEvent</code></td><td><code>Event</code></td><td><code>Key</code>, <code>Modifiers</code> and the formatted <code>Chord</code>.</td></tr>
+                    <tr><td><code>KeyDownEvent</code></td><td><code>Event</code></td><td><code>Key</code>, <code>Modifiers</code>, the formatted <code>Chord</code> and the <code>Repeat</code> flag.</td></tr>
                     <tr><td><code>FocusEvent</code>, <code>BlurEvent</code></td><td><code>Event</code></td><td>No extra fields yet.</td></tr>
                     <tr><td><code>MediaEvent</code></td><td><code>Event</code></td><td><code>Time</code>, the playback position in seconds.</td></tr>
                     <tr><td><code>PlayEvent</code>, <code>PauseEvent</code>, <code>EndedEvent</code>, <code>TimeUpdateEvent</code></td><td><code>MediaEvent</code></td><td>Concrete playback phases.</td></tr>
@@ -249,7 +249,7 @@ H("div").On("click", new Action&lt;ClickEvent&gt;(
                     <tr><td><code>dragleave</code></td><td><code>OnDragLeave</code></td><td> - </td><td><code>DragEvent</code></td><td>Shared <code>DataTransfer</code>, source and coordinates.</td></tr>
                     <tr><td><code>drop</code></td><td><code>OnDrop</code></td><td> - </td><td><code>DragEvent</code></td><td>Shared <code>DataTransfer</code>, source and coordinates.</td></tr>
                     <tr><td><code>dragend</code></td><td><code>OnDragEnd</code></td><td> - </td><td><code>DragEvent</code></td><td>Shared <code>DataTransfer</code>, source and coordinates.</td></tr>
-                    <tr><td><code>keydown</code></td><td><code>OnKeyDownEvent</code></td><td><code>OnKeyDown</code></td><td><code>KeyDownEvent</code></td><td>Key name, modifier flags and formatted chord.</td></tr>
+                    <tr><td><code>keydown</code></td><td><code>OnKeyDownEvent</code></td><td><code>OnKeyDown</code></td><td><code>KeyDownEvent</code></td><td>Key name, modifier flags, formatted chord and repeat flag.</td></tr>
                     <tr><td><code>input</code></td><td><code>OnInputEvent</code></td><td><code>OnInput</code></td><td><code>InputEvent</code></td><td>Current control text.</td></tr>
                     <tr><td><code>change</code></td><td><code>OnChangeEvent</code></td><td><code>OnChange</code></td><td><code>ChangeEvent</code></td><td>Committed control value.</td></tr>
                     <tr><td><code>submit</code></td><td><code>OnSubmitEvent</code></td><td><code>OnSubmit</code></td><td><code>SubmitEvent</code></td><td>No extra fields. Browser host only.</td></tr>
@@ -340,7 +340,10 @@ H("div").On("click", new Action&lt;ClickEvent&gt;(
         <p>
             <code>keydown</code> is delivered to the focused element. The simple
             handler receives the formatted chord, while <code>KeyDownEvent</code>
-            exposes the key on its own and the modifier flags separately.
+            exposes the key on its own, the modifier flags separately and a
+            <code>Repeat</code> flag for auto-repeats of a held key. Arrow keys,
+            Home/End, PageUp/PageDown, Backspace and Delete repeat while held, as
+            does Enter inside a <code>textarea</code>.
         </p>
 
         <div class="code" data-label="Keyboard shortcut">
@@ -376,8 +379,9 @@ H("div").On("click", new Action&lt;ClickEvent&gt;(
         <p>
             <code>input</code> fires while a text control changes and carries the
             current text. <code>change</code> fires when the value is committed: on
-            Enter or blur for text controls, when a checkbox, radio, range or select
-            value is finalised. <code>paste</code> carries the pasted text. On the
+            blur for text controls, on Enter for single-line inputs, when a checkbox,
+            radio, range or select value is finalised. Enter in a <code>textarea</code>
+            inserts a line break instead of committing. <code>paste</code> carries the pasted text. On the
             desktop and Android hosts, a paste handler owns the edit and the host does
             not also insert the text; the browser bridge prevents the native paste for
             the same reason.

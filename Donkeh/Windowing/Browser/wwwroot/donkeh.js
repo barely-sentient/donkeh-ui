@@ -445,7 +445,7 @@ function onKeyDown(event) {
     const modifiers = modifiersOf(event);
 
     if (handler || (textControl && event.key === "Enter")) {
-        call(handler || target, target, "keydown", 0, 0, event.key, readValue(target), modifiers);
+        call(handler || target, target, "keydown", 0, 0, event.key, readValue(target), modifiers, event.repeat);
     }
 
     if (event.key === "Escape" && textControl) {
@@ -499,7 +499,7 @@ function modifiersOf(event) {
         | (event.metaKey ? 8 : 0);
 }
 
-function call(handler, target, type, x, y, text, value, modifiers = 0) {
+function call(handler, target, type, x, y, text, value, modifiers = 0, repeat = false) {
     if (!dotNetRef || !handler || handler.__donkehId === undefined) {
         return;
     }
@@ -517,7 +517,8 @@ function call(handler, target, type, x, y, text, value, modifiers = 0) {
         y,
         text,
         value,
-        modifiers);
+        modifiers,
+        repeat);
 }
 
 function asElement(node) {

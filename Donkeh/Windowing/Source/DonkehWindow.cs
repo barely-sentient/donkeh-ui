@@ -599,6 +599,30 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// <summary>Timestamp the caret blink cycle was last restarted.</summary>
     private long _caretBlinkStart;
 
+    /// <summary>
+    /// Keys whose key-down has been seen without a matching key-up, used to tell
+    /// a native auto-repeat from a fresh press on hosts that deliver both.
+    /// </summary>
+    private readonly HashSet<Key> _heldKeys = [];
+
+    /// <summary>Key currently driven by the host's synthetic auto-repeat, or null.</summary>
+    private Key? _repeatKey;
+
+    /// <summary>Keyboard that produced the key being auto-repeated.</summary>
+    private IKeyboard? _repeatKeyboard;
+
+    /// <summary>Element focused when the repeat began; a focus change ends it.</summary>
+    private ElementNode? _repeatTarget;
+
+    /// <summary>Stopwatch timestamp at which the next auto-repeat step is due.</summary>
+    private long _repeatNextTicks;
+
+    /// <summary>Delay before a held editing key starts repeating, matching common OS defaults.</summary>
+    private const double KeyRepeatDelaySeconds = 0.5;
+
+    /// <summary>Interval between auto-repeat steps, roughly thirty per second.</summary>
+    private const double KeyRepeatIntervalSeconds = 0.031;
+
     /// <summary>Committed option index per <c>select</c> element, overriding markup.</summary>
     private readonly Dictionary<ElementNode, int> _selectIndices = [];
 
@@ -1403,6 +1427,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         view.Load += OnLoad;
         view.Render += OnRender;
         view.Resize += OnResize;
+        view.FocusChanged += OnFocusChanged;
         view.Closing += OnClosing;
         view.Run();
 
@@ -1487,6 +1512,22 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         }
 
         _needsLayout = true;
+    }
+
+    /// <summary>
+    /// Drops held-key and auto-repeat state when the native window loses focus, so
+    /// a key released in another application cannot keep moving the caret.
+    /// </summary>
+    /// <param name="focused">Whether the view now owns keyboard focus.</param>
+    private void OnFocusChanged(bool focused)
+    {
+        if (focused)
+        {
+            return;
+        }
+
+        _heldKeys.Clear();
+        StopKeyRepeat();
     }
 
     /// <summary>
@@ -2240,6 +2281,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         ProcessPendingMouseMove();
         UpdateLongPress();
         UpdatePointerAutoScroll();
+        UpdateKeyRepeat();
 
         BeforeFrame?.Invoke(this, delta);
 
@@ -4180,14 +4222,19 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     }
 
     /// <summary>
-    /// Moves the caret one visual line up or down in a <c>textarea</c>, keeping
-    /// the preferred horizontal position across short lines.
+    /// Moves the caret one visual line, or one visible page, up or down in a
+    /// <c>textarea</c>, keeping the preferred horizontal position across short
+    /// lines.
     /// </summary>
     /// <param name="down">
     /// <see langword="true"/> to move down, <see langword="false"/> to move up.
     /// </param>
     /// <param name="extend">
     /// <see langword="true"/> to extend the selection, as Shift+Up/Down does.
+    /// </param>
+    /// <param name="byPage">
+    /// <see langword="true"/> to move by the number of lines that fit in the
+    /// control, as PageUp/PageDown does; <see langword="false"/> for one line.
     /// </param>
     /// <returns>
     /// <see langword="true"/> when the key belongs to a textarea and was consumed,
@@ -4197,10 +4244,10 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// <remarks>
     /// Moving past the first line places the caret at the start of the buffer and
     /// moving past the last line places it at the end, matching browser
-    /// textareas. Single-line inputs do not handle Up or Down, so the key keeps
-    /// its normal meaning outside the control.
+    /// textareas. Single-line inputs do not handle Up or Down here; the caller
+    /// falls back to <see cref="MoveCaretToBufferEdge"/>.
     /// </remarks>
-    private bool MoveCaretVertically(bool down, bool extend)
+    private bool MoveCaretVertically(bool down, bool extend, bool byPage = false)
     {
         if (_focused is null
             || _focused.Tag != "textarea"
@@ -4264,6 +4311,14 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         var targetLine = currentLine + (down ? 1 : -1);
         int target;
 
+        if (byPage)
+        {
+            var lineHeight = MathF.Max(1, layout.Lines[0].Height);
+            var visibleLines = MathF.Max(1, MathF.Floor(box.ContentBox.Height / lineHeight));
+            var pageLines = Math.Max(1, (int)visibleLines - 1);
+            targetLine = currentLine + (down ? pageLines : -pageLines);
+        }
+
         if (targetLine < 0)
         {
             target = 0;
@@ -4283,6 +4338,46 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         }
 
         _caretDesiredX = desiredX;
+
+        if (extend)
+        {
+            ExtendControlSelection(target);
+        }
+        else
+        {
+            _caretIndex = target;
+            ClearControlSelectionForCaretMove();
+            ResetCaretBlink();
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Moves the caret to the start or end of a single-line text control, which is
+    /// what Up/Down, PageUp and PageDown do in a browser input.
+    /// </summary>
+    /// <param name="toEnd">
+    /// <see langword="true"/> for the end of the buffer, <see langword="false"/> for
+    /// the start.
+    /// </param>
+    /// <param name="extend">
+    /// <see langword="true"/> to extend the selection to that edge.
+    /// </param>
+    /// <returns>
+    /// <see langword="true"/> when the focused element is a single-line text control.
+    /// </returns>
+    private bool MoveCaretToBufferEdge(bool toEnd, bool extend)
+    {
+        if (_focused is null
+            || !IsTextControl(_focused)
+            || _focused.Tag == "textarea")
+        {
+            return false;
+        }
+
+        _caretDesiredX = null;
+        var target = toEnd ? _editText?.Length ?? 0 : 0;
 
         if (extend)
         {
@@ -8169,6 +8264,10 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// The keyboard that reported the event, read for modifiers and clipboard.
     /// </param>
     /// <param name="key">The pressed key.</param>
+    /// <param name="isRepeat">
+    /// <see langword="true"/> for a synthetic auto-repeat step of a held key; such
+    /// events skip the held-key bookkeeping and mark <c>keydown</c> as repeating.
+    /// </param>
     /// <remarks>
     /// <para>Order of handling:</para>
     /// <list type="bullet">
@@ -8197,24 +8296,35 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// its dropdown.
     /// </description></item>
     /// <item><description>
-    /// Backspace, Delete, arrows, Home/End, Enter, Escape and Tab edit text, commit
-    /// or move focus, with Ctrl switching between character and word steps and
-    /// Shift extending the selection.
+    /// Backspace, Delete, arrows, Home/End, PageUp/PageDown, Enter, Escape and Tab
+    /// edit text, commit or move focus, with Ctrl switching between character and
+    /// word steps and Shift extending the selection.
+    /// </description></item>
+    /// <item><description>
+    /// A held editing or navigation key auto-repeats after the usual OS delay and
+    /// dispatches <c>keydown</c> with <see cref="KeyDownEvent.Repeat"/> set, while
+    /// typed characters repeat through the platform's character stream.
     /// </description></item>
     /// </list>
     /// <para>
-    /// Enter commits the working text, dispatches <c>change</c> and relayouts;
-    /// Escape drops focus without committing. In the inspector, Enter on a value
+    /// Enter commits the working text, dispatches <c>change</c> and relayouts, except
+    /// in a <c>textarea</c> where Enter inserts a line break; Escape drops focus
+    /// without committing. In the inspector, Enter on a value
     /// field also advances to the next row via
     /// <see cref="DevToolsState.AdvanceAfterCommit"/>.
     /// </para>
     /// </remarks>
-    private void OnKeyDown(IKeyboard keyboard, Key key)
+    private void OnKeyDown(IKeyboard keyboard, Key key, bool isRepeat = false)
     {
         var control = keyboard.IsKeyPressed(Key.ControlLeft) || keyboard.IsKeyPressed(Key.ControlRight);
         var shift = keyboard.IsKeyPressed(Key.ShiftLeft) || keyboard.IsKeyPressed(Key.ShiftRight);
         var alt = keyboard.IsKeyPressed(Key.AltLeft) || keyboard.IsKeyPressed(Key.AltRight);
         var meta = keyboard.IsKeyPressed(Key.SuperLeft) || keyboard.IsKeyPressed(Key.SuperRight);
+
+        if (!isRepeat)
+        {
+            UpdateKeyRepeatForPress(keyboard, key);
+        }
 
         var modifiers = KeyModifiers.None;
 
@@ -8280,7 +8390,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         // the same keydown delegate fires on desktop and in the browser. Modifiers
         // are folded into the key text, which keeps the delegate a plain string
         // while still letting a handler tell Ctrl+C from C.
-        Invoke(_focused, "keydown", KeyChord.Format(key.ToString(), modifiers), modifiers);
+        Invoke(_focused, "keydown", KeyChord.Format(key.ToString(), modifiers), modifiers, isRepeat);
 
         if (key == Key.V && control && IsTextControl(_focused))
         {
@@ -8429,9 +8539,34 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         {
             case Key.Up:
             case Key.Down:
-                if (!control && MoveCaretVertically(key == Key.Down, shift))
+                if (!control)
                 {
-                    return;
+                    if (MoveCaretVertically(key == Key.Down, shift))
+                    {
+                        return;
+                    }
+
+                    if (MoveCaretToBufferEdge(key == Key.Down, shift))
+                    {
+                        return;
+                    }
+                }
+
+                break;
+
+            case Key.PageUp:
+            case Key.PageDown:
+                if (!control)
+                {
+                    if (MoveCaretVertically(key == Key.PageDown, shift, byPage: true))
+                    {
+                        return;
+                    }
+
+                    if (MoveCaretToBufferEdge(key == Key.PageDown, shift))
+                    {
+                        return;
+                    }
                 }
 
                 break;
@@ -8575,6 +8710,26 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
                 break;
 
             case Key.Enter:
+                if (_focused.Tag == "textarea")
+                {
+                    // Enter is content, not a commit, in a multi-line control.
+                    if (_selection is { IsControl: false })
+                    {
+                        ClearSelection();
+                    }
+
+                    DeleteControlSelectionCore();
+                    _caretDesiredX = null;
+                    _editText ??= string.Empty;
+                    _caretIndex = Math.Clamp(_caretIndex, 0, _editText.Length);
+                    _editText = _editText.Insert(_caretIndex, "\n");
+                    _caretIndex++;
+                    ResetCaretBlink();
+                    CascadeEdit(_focused);
+                    Invoke(_focused, "input", _editText);
+                    break;
+                }
+
                 if (IsInDevToolsTree(_focused) && _focused.HasClass("dt-value-input"))
                 {
                     _devTools.AdvanceAfterCommit = true;
@@ -8649,11 +8804,21 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         return index;
     }
 
-    /// <summary>Forwards a key release to a focused webview's browser.</summary>
+    /// <summary>
+    /// Clears held-key bookkeeping and auto-repeat for a released key, then
+    /// forwards the release to a focused webview's browser.
+    /// </summary>
     /// <param name="keyboard">Keyboard providing modifier state.</param>
     /// <param name="key">The released key.</param>
     private void OnKeyUp(IKeyboard keyboard, Key key)
     {
+        _heldKeys.Remove(key);
+
+        if (_repeatKey == key)
+        {
+            StopKeyRepeat();
+        }
+
         if (_webViewFocused is null || _webViewHost is null)
         {
             return;
@@ -8669,6 +8834,124 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             WebViewHost.ToVirtualKey(key),
             GetCefKeyModifiers(control, shift, alt));
     }
+
+    /// <summary>
+    /// Starts, switches or ends synthetic auto-repeat when a key is pressed.
+    /// </summary>
+    /// <param name="keyboard">Keyboard that delivered the press.</param>
+    /// <param name="key">The pressed key.</param>
+    /// <remarks>
+    /// <para>
+    /// GLFW reports presses and releases but not its repeat callbacks, so Silk.NET
+    /// never turns a held key into repeated <c>KeyDown</c> events. The host therefore
+    /// repeats the editing and navigation keys itself on the frame clock. Character
+    /// repeats continue to arrive through the platform's character stream.
+    /// </para>
+    /// <para>
+    /// A platform that does deliver repeats is detected from the held-key set and
+    /// left to drive its own stream, so the two mechanisms never run together.
+    /// </para>
+    /// <para>
+    /// Modifier presses do not cancel the repeat: pressing Shift while an arrow is
+    /// held must keep moving so the repeat can extend the selection.
+    /// </para>
+    /// </remarks>
+    private void UpdateKeyRepeatForPress(IKeyboard keyboard, Key key)
+    {
+        if (!_heldKeys.Add(key))
+        {
+            // A second key-down without a key-up is the platform's own repeat.
+            // Let it drive the editing path and retire any synthetic stream.
+            if (_repeatKey == key)
+            {
+                StopKeyRepeat();
+            }
+
+            return;
+        }
+
+        if (IsModifierKey(key))
+        {
+            return;
+        }
+
+        if (_webViewFocused is null
+            && _focused is not null
+            && (IsRepeatableEditKey(key)
+                || (key == Key.Enter && _focused.Tag == "textarea")))
+        {
+            _repeatKey = key;
+            _repeatKeyboard = keyboard;
+            _repeatTarget = _focused;
+            _repeatNextTicks = Stopwatch.GetTimestamp()
+                + (long)(KeyRepeatDelaySeconds * Stopwatch.Frequency);
+            return;
+        }
+
+        StopKeyRepeat();
+    }
+
+    /// <summary>
+    /// Fires the held editing key again once its repeat deadline passes.
+    /// </summary>
+    /// <remarks>
+    /// Runs once per frame before the UI flush. The repeat stops as soon as the
+    /// target loses focus, a webview takes the keyboard, or the key is no longer
+    /// reported as pressed, which covers releases that never reached the window.
+    /// </remarks>
+    private void UpdateKeyRepeat()
+    {
+        if (_repeatKey is not { } key || _repeatKeyboard is not { } keyboard)
+        {
+            return;
+        }
+
+        if (!ReferenceEquals(_focused, _repeatTarget)
+            || _webViewFocused is not null
+            || !keyboard.IsKeyPressed(key))
+        {
+            StopKeyRepeat();
+            return;
+        }
+
+        var now = Stopwatch.GetTimestamp();
+
+        if (now < _repeatNextTicks)
+        {
+            return;
+        }
+
+        _repeatNextTicks = now + (long)(KeyRepeatIntervalSeconds * Stopwatch.Frequency);
+        OnKeyDown(keyboard, key, isRepeat: true);
+    }
+
+    /// <summary>Clears the synthetic auto-repeat state.</summary>
+    private void StopKeyRepeat()
+    {
+        _repeatKey = null;
+        _repeatKeyboard = null;
+        _repeatTarget = null;
+    }
+
+    /// <summary>Reports whether a key is a modifier that must not cancel a repeat.</summary>
+    /// <param name="key">The key to test.</param>
+    /// <returns><see langword="true"/> for Shift, Ctrl, Alt and Super keys.</returns>
+    private static bool IsModifierKey(Key key) => key
+        is Key.ShiftLeft or Key.ShiftRight
+        or Key.ControlLeft or Key.ControlRight
+        or Key.AltLeft or Key.AltRight
+        or Key.SuperLeft or Key.SuperRight;
+
+    /// <summary>
+    /// Reports whether a key moves the caret or edits text and should repeat while
+    /// held. Character keys repeat through the platform's character stream instead.
+    /// </summary>
+    /// <param name="key">The key to test.</param>
+    /// <returns><see langword="true"/> for the editing and navigation keys.</returns>
+    private static bool IsRepeatableEditKey(Key key) => key
+        is Key.Left or Key.Right or Key.Up or Key.Down
+        or Key.Home or Key.End or Key.PageUp or Key.PageDown
+        or Key.Backspace or Key.Delete;
 
     /// <summary>
     /// Inserts a typed character into the focused control, replacing any control
@@ -9416,7 +9699,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// Hover is stored on the whole ancestor chain because CSS <c>:hover</c> matches
     /// every ancestor of the pointed element, not just the leaf. A no-op move keeps
     /// the previous chain. Both events are dispatched through
-    /// <see cref="Invoke(ElementNode?, string, string?, KeyModifiers)"/>, which walks up to the
+    /// <see cref="Invoke(ElementNode?, string, string?, KeyModifiers, bool)"/>, which walks up to the
     /// nearest handler.
     /// </remarks>
     private void SetHovered(ElementNode? element)
@@ -10539,6 +10822,9 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// parameterless handler instead.
     /// </param>
     /// <param name="modifiers">The modifier keys held when a key event is dispatched.</param>
+    /// <param name="repeat">
+    /// Whether a keyboard event is an auto-repeat of a held key.
+    /// </param>
     /// <remarks>
     /// <para>
     /// Bubbling is modelled by walking parents and invoking only the first handler
@@ -10555,7 +10841,8 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
         ElementNode? element,
         string eventName,
         string? value = null,
-        KeyModifiers modifiers = KeyModifiers.None)
+        KeyModifiers modifiers = KeyModifiers.None,
+        bool repeat = false)
     {
         IgniteSupportedDomNode? node = element;
 
@@ -10567,7 +10854,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             {
                 try
                 {
-                    var uiEvent = CreateEvent(eventName, value, modifiers);
+                    var uiEvent = CreateEvent(eventName, value, modifiers, repeat);
                     PrepareEvent(uiEvent, element, current);
 
                     if (uiEvent.TryInvoke(handler))
@@ -10607,7 +10894,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// <summary>
     /// Creates the concrete payload for a named event.
     /// </summary>
-    private Event CreateEvent(string eventName, string? value, KeyModifiers modifiers)
+    private Event CreateEvent(string eventName, string? value, KeyModifiers modifiers, bool repeat)
     {
         var mouseModifiers = modifiers == KeyModifiers.None
             ? CurrentInputModifiers()
@@ -10624,7 +10911,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
             "change" => new ChangeEvent(value ?? string.Empty),
             "paste" => new PasteEvent(value ?? string.Empty),
             "submit" => new SubmitEvent(),
-            "keydown" => new KeyDownEvent(value ?? string.Empty, modifiers, value),
+            "keydown" => new KeyDownEvent(value ?? string.Empty, modifiers, value, repeat),
             "focus" => new FocusEvent(),
             "blur" => new BlurEvent(),
             "play" => new PlayEvent(),
@@ -10728,7 +11015,7 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// <param name="y">The second value, typically a vertical delta.</param>
     /// <remarks>
     /// The parent walk and exception handling match the other
-    /// <see cref="Invoke(ElementNode?, string, string?, KeyModifiers)"/> overload: only the nearest
+    /// <see cref="Invoke(ElementNode?, string, string?, KeyModifiers, bool)"/> overload: only the nearest
     /// handler runs, so an event never fires twice, and a throwing handler cannot
     /// tear down the frame loop.
     /// </remarks>

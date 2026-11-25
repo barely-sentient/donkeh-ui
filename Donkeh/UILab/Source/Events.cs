@@ -630,15 +630,20 @@ namespace Donkeh.UILab
         /// The key name prefixed with its modifiers, for example
         /// <c>Ctrl+Shift+Z</c>.
         /// </param>
+        /// <param name="repeat">
+        /// Whether the event is an auto-repeat of a key that is still held.
+        /// </param>
         public KeyDownEvent(
             string key,
             KeyModifiers modifiers = KeyModifiers.None,
-            string? chord = null)
+            string? chord = null,
+            bool repeat = false)
             : base("keydown")
         {
             Key = key ?? string.Empty;
             Modifiers = modifiers;
             Chord = chord ?? KeyChord.Format(Key, modifiers);
+            Repeat = repeat;
         }
 
         /// <summary>Gets the key name without modifiers, such as <c>Enter</c>.</summary>
@@ -649,6 +654,12 @@ namespace Donkeh.UILab
 
         /// <summary>Gets the key and modifiers in the same form as <c>OnKeyDown</c>.</summary>
         public string Chord { get; }
+
+        /// <summary>
+        /// Gets whether this event is an auto-repeat of a key that is still held,
+        /// matching the browser <c>KeyboardEvent.repeat</c> flag.
+        /// </summary>
+        public bool Repeat { get; }
 
         internal override bool TryInvoke(Delegate handler)
         {
