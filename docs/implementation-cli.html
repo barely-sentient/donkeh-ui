@@ -119,12 +119,15 @@
 
         <h2 id="shape">Command surface</h2>
         <div class="code" data-label="Terminal">
-<pre><code>donkeh new project [&lt;directory&gt;] [--name &lt;name&gt;] [--type application|framework] [--framework &lt;path&gt;] [--force]
-donkeh new component &lt;name&gt; [--project &lt;path&gt;] [--force]
+<pre><code>donkeh new project [&lt;directory&gt;] [--name &lt;name&gt;] [--type application|framework] [--framework &lt;path&gt;] [--csharp] [--force]
+donkeh new component &lt;name&gt; [--project &lt;path&gt;] [--csx|--csharp] [--force]
 donkeh enable-target &lt;desktop|android|web&gt; [--project &lt;path&gt;]
 donkeh enable-feature &lt;hot-reload&gt; [--project &lt;path&gt;]
+donkeh run [--project &lt;path&gt;] [-- &lt;app args&gt;]
 donkeh watch [--project &lt;path&gt;] [-- &lt;app args&gt;]
 donkeh upgrade project [--version &lt;version&gt;] [--project &lt;path&gt;]
+donkeh use-local &lt;framework path&gt; [--project &lt;path&gt;]
+donkeh use-nuget [--version &lt;version&gt;] [--project &lt;path&gt;]
 donkeh --help
 donkeh --version</code></pre>
         </div>
@@ -191,12 +194,13 @@ donkeh --version</code></pre>
 
         <h2 id="project">Project generation</h2>
         <p>
-            <code>ProjectGenerator</code> creates the project file, <code>Program.cs</code>
-            and <code>.gitignore</code>, plus the checkout targets file when needed. The
-            generated app is intentionally minimal:
+            <code>ProjectGenerator</code> creates the project file, a CSX
+            <code>Program.cx</code> with <code>csx.json</code> (or <code>Program.cs</code>
+            with <code>--csharp</code>) and <code>.gitignore</code>, plus the checkout
+            targets file when needed. The generated app is intentionally minimal:
         </p>
 
-        <div class="code" data-label="Program.cs">
+        <div class="code" data-label="Program.cx">
 <pre class="csx"><code>[AppRoot(Title = "My app")]
 public sealed class App : Component
 {
@@ -249,13 +253,15 @@ public sealed class App : Component
 ├── Acme.Components.sln
 ├── src/
 │   ├── Acme.Components.csproj     // packable library
+│   ├── csx.json
 │   └── Components/
 │       └── HelloCard/
-│           ├── HelloCard.cs
+│           ├── HelloCard.cx
 │           └── HelloCard.css
 ├── test-container/
 │   ├── TestContainer.csproj       // executable, references ../src
-│   ├── Program.cs                 // AppRoot + reflection gallery
+│   ├── csx.json
+│   ├── Program.cx                 // AppRoot + reflection gallery
 │   └── Styles/
 │       └── gallery.css
 ├── .gitignore
@@ -273,8 +279,8 @@ public sealed class App : Component
         <div class="code" data-label="Terminal">
 <pre><code>donkeh new project Acme.Components --type framework
 cd Acme.Components
-donkeh enable-feature hot-reload
-donkeh watch
+donkeh new component FileList
+donkeh run
 
 # publish when ready
 dotnet pack src/Acme.Components.csproj -c Release</code></pre>
@@ -282,23 +288,25 @@ dotnet pack src/Acme.Components.csproj -c Release</code></pre>
 
         <p>
             The generated README records the same preview and publish commands. Adding a
-            component with <code>donkeh new component</code> from the project root does
-            not currently target the library automatically; pass
-            <code>--project src/Acme.Components.csproj</code>, or run the command from
-            <code>src/</code>.
+            component with <code>donkeh new component</code> from the project root
+            targets the library under <code>src/</code> automatically. The component
+            lands in <code>src/Components/</code> and the library project receives the
+            embedded-resource entry.
         </p>
 
         <h2 id="component">Component generation</h2>
         <p>
             <code>new component FileList</code> finds the project, reads its
             <code>RootNamespace</code>, normalises the component name and writes one folder
-            per component:
+            per component. CSX projects get <code>FileList.cx</code>; plain C#
+            projects get <code>FileList.cs</code>. <code>--csx</code> and
+            <code>--csharp</code> override the project's mode.
         </p>
 
         <div class="tree">src/
 └── Components/
     └── FileList/
-        ├── FileList.cs
+        ├── FileList.cx
         └── FileList.css</div>
 
         <p>
@@ -306,7 +314,7 @@ dotnet pack src/Acme.Components.csproj -c Release</code></pre>
             registers its stylesheet with an assembly attribute:
         </p>
 
-        <div class="code" data-label="FileList.cs">
+        <div class="code" data-label="FileList.cx">
 <pre class="csx"><code>public sealed class FileList : Component
 {
     public override Node Render() =&gt;
@@ -357,6 +365,23 @@ public sealed class FileList : Component
             is valid XML, but falls back to the project file name if parsing fails. That
             keeps a messy but buildable project editable without making XML parsing a hard
             requirement.
+        </p>
+
+        <h2 id="run">Running and mode switching</h2>
+        <p>
+            <code>donkeh run</code> resolves the executable project the same way
+            <code>watch</code> does: a framework root selects <code>test-container</code>,
+            while an application selects its own project. CSX projects are transformed
+            through <code>csx</code> first, and referenced CSX projects are built before
+            the run so library edits are visible. Plain C# projects fall back to
+            <code>dotnet run</code>.
+        </p>
+        <p>
+            <code>use-local</code> and <code>use-nuget</code> inspect a framework root and
+            update both projects. The component library switches between the
+            <code>Donkeh.UILab</code> package and a project reference; the test container
+            switches between the published host package and the checkout's framework
+            imports.
         </p>
 
         <h2 id="targets">Target wiring</h2>
@@ -495,6 +520,7 @@ donkeh upgrade project</code></pre>
                     <tr><td><code>ComponentGenerator.cs</code></td><td>Folder layout, component template, namespace and stylesheet registration.</td></tr>
                     <tr><td><code>TargetEnabler.cs</code></td><td>Property/TFM/package edits for Android and browser targets.</td></tr>
                     <tr><td><code>FeatureEnabler.cs</code></td><td>Debug-only hot reload references and executable-project selection.</td></tr>
+                    <tr><td><code>RunService.cs</code></td><td>Transforms CSX sources, builds referenced CSX projects and runs the selected project.</td></tr>
                     <tr><td><code>WatchService.cs</code></td><td>Runs the project with <code>DONKEH_HOT_RELOAD=1</code> and forwards app arguments.</td></tr>
                     <tr><td><code>CsprojEditor.cs</code></td><td>Minimal formatting-preserving resource, version and item-group edits.</td></tr>
                     <tr><td><code>Identifiers.cs</code></td><td>PascalCase, namespace and kebab-case policy.</td></tr>

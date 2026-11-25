@@ -27,8 +27,11 @@ Build apps for desktop, Android and the browser with C# components and real CSS.
 dotnet tool install --global Donkeh.CliTool
 donkeh new project MyApp
 cd MyApp
-dotnet run
+donkeh run
 ```
+
+Projects and components use CSX (`.cx`) by default. Pass `--csharp` to
+`new project` or `new component` for plain C# files.
 
 Add a component at any time:
 
@@ -36,7 +39,7 @@ Add a component at any time:
 donkeh new component FileList
 ```
 
-That creates `src/Components/FileList/FileList.cs` and `FileList.css`, already
+That creates `src/Components/FileList/FileList.cx` and `FileList.css`, already
 registered with the project.
 
 Add another platform when you need it:
@@ -59,8 +62,12 @@ gallery:
 ```powershell
 donkeh new project Acme.Components --type framework
 cd Acme.Components
-dotnet watch --project test-container run
+donkeh run
 ```
+
+`donkeh new component` from the framework root adds the component to the library
+under `src/`. `donkeh use-local` and `donkeh use-nuget` switch both the library
+and the test container.
 
 ## Learn
 

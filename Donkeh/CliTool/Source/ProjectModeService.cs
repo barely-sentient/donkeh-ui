@@ -6,18 +6,57 @@ namespace Donkeh.Cli;
 /// <summary>Switches a project between a local framework checkout and NuGet packages.</summary>
 internal static class ProjectModeService
 {
-    /// <summary>Points a project at a local framework checkout.</summary>
+    /// <summary>Points projects at a local framework checkout.</summary>
     /// <param name="frameworkPath">Framework repository, <c>Donkeh</c> directory or solution file.</param>
     /// <param name="projectPath">Optional project file or project directory.</param>
-    /// <returns>The updated project file.</returns>
-    public static string UseLocal(string frameworkPath, string? projectPath)
+    /// <returns>The updated project files.</returns>
+    /// <remarks>
+    /// A framework root contains two projects: the component library under
+    /// <c>src</c> and the test container. Both are switched so the preview keeps
+    /// building against the same framework source.
+    /// </remarks>
+    public static IReadOnlyList<string> UseLocal(string frameworkPath, string? projectPath)
     {
         var framework = FrameworkLocator.Find(frameworkPath)
             ?? throw new CliException(
                 $"Could not find a Donkeh framework at '{frameworkPath}'. " +
                 "Pass the repository root, Donkeh directory or solution file.");
 
-        var projectFile = ComponentGenerator.FindProject(projectPath);
+        var projectFiles = ComponentGenerator.FindModeProjects(projectPath);
+
+        foreach (var projectFile in projectFiles)
+        {
+            UseLocalProject(projectFile, framework);
+        }
+
+        return projectFiles;
+    }
+
+    /// <summary>Points projects at the published NuGet packages.</summary>
+    /// <param name="requestedVersion">Version to use, or <see langword="null"/> for the latest stable release.</param>
+    /// <param name="projectPath">Optional project file or project directory.</param>
+    /// <returns>The updated project files.</returns>
+    /// <remarks>
+    /// A framework root contains two projects: the component library under
+    /// <c>src</c> and the test container. Both are switched.
+    /// </remarks>
+    public static IReadOnlyList<string> UseNuget(string? requestedVersion, string? projectPath)
+    {
+        var projectFiles = ComponentGenerator.FindModeProjects(projectPath);
+        var version = string.IsNullOrWhiteSpace(requestedVersion)
+            ? UpgradeService.GetLatestVersion()
+            : UpgradeService.NormalizeVersion(requestedVersion);
+
+        foreach (var projectFile in projectFiles)
+        {
+            UseNugetProject(projectFile, version);
+        }
+
+        return projectFiles;
+    }
+
+    private static void UseLocalProject(string projectFile, string framework)
+    {
         var (projectText, newLine) = TextFiles.Read(projectFile);
         var updated = projectText;
 
@@ -36,6 +75,10 @@ internal static class ProjectModeService
                 updated = InsertConditionalImport(updated, newLine, propsPath);
             }
         }
+        else if (!IsExecutable(projectText))
+        {
+            updated = ConvertLibraryToCheckout(updated, newLine, projectFile, framework);
+        }
         else
         {
             updated = ConvertToCheckout(updated, newLine, projectFile, framework);
@@ -47,20 +90,11 @@ internal static class ProjectModeService
         }
 
         Restore(projectFile);
-        return projectFile;
     }
 
-    /// <summary>Points a project at the published NuGet packages.</summary>
-    /// <param name="requestedVersion">Version to use, or <see langword="null"/> for the latest stable release.</param>
-    /// <param name="projectPath">Optional project file or project directory.</param>
-    /// <returns>The updated project file.</returns>
-    public static string UseNuget(string? requestedVersion, string? projectPath)
+    private static void UseNugetProject(string projectFile, string version)
     {
-        var projectFile = ComponentGenerator.FindProject(projectPath);
         var (projectText, newLine) = TextFiles.Read(projectFile);
-        var version = string.IsNullOrWhiteSpace(requestedVersion)
-            ? UpgradeService.GetLatestVersion()
-            : UpgradeService.NormalizeVersion(requestedVersion);
         var updated = projectText;
 
         if (CsprojEditor.HasProperty(projectText, "UseLocalDonkeh"))
@@ -73,6 +107,14 @@ internal static class ProjectModeService
             updated = CsprojEditor.RemoveProperty(updated, "TargetFrameworks");
             updated = CsprojEditor.SetProperty(updated, newLine, "TargetFramework", "net10.0");
             RemoveDirectoryBuildTargets(projectFile);
+
+            if (!IsExecutable(projectText))
+            {
+                // A component library references Donkeh.UILab directly in
+                // checkout mode; the package reference replaces that project
+                // reference.
+                updated = CsprojEditor.RemoveProjectReferences(updated, "Donkeh.UILab.csproj");
+            }
         }
 
         updated = CsprojEditor.SetDonkehVersion(updated, newLine, version);
@@ -113,7 +155,6 @@ internal static class ProjectModeService
         }
 
         Restore(projectFile);
-        return projectFile;
     }
 
     private static string ConvertToCheckout(
@@ -139,6 +180,27 @@ internal static class ProjectModeService
         updated = CsprojEditor.AddImportAfterProject(updated, newLine, propsPath);
 
         WriteDirectoryBuildTargets(projectFile, framework);
+        return updated;
+    }
+
+    private static string ConvertLibraryToCheckout(
+        string projectText,
+        string newLine,
+        string projectFile,
+        string framework)
+    {
+        // A component library only needs Donkeh.UILab. Importing the host
+        // build assets would add the windowing host it does not use.
+        var updated = CsprojEditor.RemoveDonkehPackageReferences(projectText);
+        updated = CsprojEditor.RemoveImports(updated, "Donkeh.props");
+        updated = CsprojEditor.RemoveProperty(updated, "TargetFrameworks");
+        updated = CsprojEditor.SetProperty(updated, newLine, "TargetFramework", "net10.0");
+
+        var uiLab = RelativePath(
+            projectFile,
+            Path.Combine(framework, "UILab", "Source", "Donkeh.UILab.csproj"));
+        updated = CsprojEditor.EnsureProjectReference(updated, newLine, uiLab);
+        RemoveDirectoryBuildTargets(projectFile);
         return updated;
     }
 

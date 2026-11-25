@@ -11,7 +11,8 @@ public sealed class GeneratorTests
             directory.Path,
             "SampleApp",
             FrameworkLocator.Find(null),
-            force: false);
+            force: false,
+            csx: false);
 
         Assert.Equal(4, files.Count);
         Assert.True(File.Exists(Path.Combine(directory.Path, "SampleApp.csproj")));
@@ -39,7 +40,8 @@ public sealed class GeneratorTests
             directory.Path,
             "SampleApp",
             frameworkRoot: null,
-            force: false);
+            force: false,
+            csx: false);
 
         Assert.Equal(3, files.Count);
         Assert.False(File.Exists(Path.Combine(directory.Path, "Directory.Build.targets")));
@@ -219,7 +221,8 @@ public sealed class GeneratorTests
             "Acme.Components",
             frameworkRoot: null,
             force: false,
-            kind: ProjectKind.Framework);
+            kind: ProjectKind.Framework,
+            csx: false);
 
         Assert.Equal(9, files.Count);
         Assert.True(File.Exists(Path.Combine(directory.Path, "src", "Acme.Components.csproj")));
@@ -250,6 +253,121 @@ public sealed class GeneratorTests
         Assert.Contains("C(type)", program, StringComparison.Ordinal);
         Assert.Contains("[ModuleInitializer]", program, StringComparison.Ordinal);
         Assert.DoesNotContain("Donkeh.HotReload", container, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NewProjectDefaultsToCsx()
+    {
+        using var directory = new TemporaryDirectory();
+
+        var files = ProjectGenerator.Generate(
+            directory.Path,
+            "SampleApp",
+            frameworkRoot: null,
+            force: false);
+
+        Assert.True(File.Exists(Path.Combine(directory.Path, "Program.cx")));
+        Assert.False(File.Exists(Path.Combine(directory.Path, "Program.cs")));
+        Assert.True(File.Exists(Path.Combine(directory.Path, "csx.json")));
+        Assert.Contains(Path.Combine(directory.Path, "Program.cx"), files);
+        Assert.Contains(Path.Combine(directory.Path, "csx.json"), files);
+    }
+
+    [Fact]
+    public void NewFrameworkProjectDefaultsToCsx()
+    {
+        using var directory = new TemporaryDirectory();
+
+        var files = ProjectGenerator.Generate(
+            directory.Path,
+            "Acme.Components",
+            frameworkRoot: null,
+            force: false,
+            kind: ProjectKind.Framework);
+
+        var component = Path.Combine(
+            directory.Path,
+            "src",
+            "Components",
+            "HelloCard",
+            "HelloCard.cx");
+
+        Assert.True(File.Exists(component));
+        Assert.False(File.Exists(Path.Combine(
+            directory.Path,
+            "src",
+            "Components",
+            "HelloCard",
+            "HelloCard.cs")));
+        Assert.True(File.Exists(Path.Combine(directory.Path, "src", "csx.json")));
+        Assert.True(File.Exists(Path.Combine(directory.Path, "test-container", "csx.json")));
+        Assert.True(File.Exists(Path.Combine(directory.Path, "test-container", "Program.cx")));
+        Assert.Contains(component, files);
+    }
+
+    [Fact]
+    public void NewComponentInFrameworkRootTargetsLibrary()
+    {
+        using var directory = new TemporaryDirectory();
+
+        ProjectGenerator.Generate(
+            directory.Path,
+            "Acme.Components",
+            frameworkRoot: null,
+            force: false,
+            kind: ProjectKind.Framework);
+
+        ComponentGenerator.Generate("status-badge", directory.Path, force: false);
+
+        var componentFile = Path.Combine(
+            directory.Path,
+            "src",
+            "Components",
+            "StatusBadge",
+            "StatusBadge.cx");
+        var cssFile = Path.Combine(
+            directory.Path,
+            "src",
+            "Components",
+            "StatusBadge",
+            "StatusBadge.css");
+        var library = File.ReadAllText(Path.Combine(directory.Path, "src", "Acme.Components.csproj"));
+        var component = File.ReadAllText(componentFile);
+
+        Assert.True(File.Exists(componentFile));
+        Assert.True(File.Exists(cssFile));
+        Assert.False(Directory.Exists(Path.Combine(directory.Path, "src", "src")));
+        Assert.Contains(
+            "<EmbeddedResource Include=\"Components/StatusBadge/StatusBadge.css\" />",
+            library,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "[assembly: Donkeh.UILab.Stylesheet(\"Components/StatusBadge/StatusBadge.css\")]",
+            component,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ModeSwitchingFindsBothFrameworkProjects()
+    {
+        using var directory = new TemporaryDirectory();
+
+        ProjectGenerator.Generate(
+            directory.Path,
+            "Acme.Components",
+            frameworkRoot: null,
+            force: false,
+            kind: ProjectKind.Framework);
+
+        var projects = ComponentGenerator.FindModeProjects(directory.Path);
+
+        Assert.Equal(2, projects.Count);
+        Assert.Contains(projects, project => project.EndsWith(
+            Path.Combine("src", "Acme.Components.csproj"),
+            StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(projects, project => project.EndsWith(
+            Path.Combine("test-container", "TestContainer.csproj"),
+            StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -378,7 +496,7 @@ public sealed class GeneratorTests
             force: false);
 
         var projectFile = Path.Combine(directory.Path, "SampleApp.csproj");
-        ComponentGenerator.Generate("my-widget", projectFile, force: false);
+        ComponentGenerator.Generate("my-widget", projectFile, force: false, csx: false);
 
         var componentFile = Path.Combine(
             directory.Path,
@@ -414,6 +532,34 @@ public sealed class GeneratorTests
     }
 
     [Fact]
+    public void NewComponentFollowsPlainCSharpProject()
+    {
+        using var directory = new TemporaryDirectory();
+
+        ProjectGenerator.Generate(
+            directory.Path,
+            "SampleApp",
+            frameworkRoot: null,
+            force: false,
+            csx: false);
+
+        ComponentGenerator.Generate("Card", directory.Path, force: false);
+
+        Assert.True(File.Exists(Path.Combine(
+            directory.Path,
+            "src",
+            "Components",
+            "Card",
+            "Card.cs")));
+        Assert.False(File.Exists(Path.Combine(
+            directory.Path,
+            "src",
+            "Components",
+            "Card",
+            "Card.cx")));
+    }
+
+    [Fact]
     public void ExistingComponentRequiresForce()
     {
         using var directory = new TemporaryDirectory();
@@ -425,10 +571,10 @@ public sealed class GeneratorTests
             force: false);
 
         var projectFile = Path.Combine(directory.Path, "SampleApp.csproj");
-        ComponentGenerator.Generate("Card", projectFile, force: false);
+        ComponentGenerator.Generate("Card", projectFile, force: false, csx: false);
 
         Assert.Throws<CliException>(() =>
-            ComponentGenerator.Generate("Card", projectFile, force: false));
+            ComponentGenerator.Generate("Card", projectFile, force: false, csx: false));
     }
 
     [Fact]

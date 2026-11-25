@@ -218,11 +218,12 @@ public static class BuiltInCapabilities
             Category = "Components",
             Summary = "Generate a component using the project's documented conventions.",
             Description = "Creates the component source, stylesheet and EmbeddedResource entry through the same generator used by 'donkeh new component'.",
-            Usage = "donkeh component scaffold <name> [--project <path>] [--csx] [--force] [--dry-run] [--json]",
+            Usage = "donkeh component scaffold <name> [--project <path>] [--csx|--csharp] [--force] [--dry-run] [--json]",
             Arguments =
             [
                 new() { Name = "name", Description = "New component name.", Type = "string", Required = true },
-                new() { Name = "csx", Description = "Generate a .cx component even when the project is not CSX-dominant.", Type = "boolean" },
+                new() { Name = "csx", Description = "Force a CSX (.cx) component even in a plain C# project.", Type = "boolean" },
+                new() { Name = "csharp", Description = "Generate a plain C# (.cs) component instead of CSX (.cx).", Type = "boolean" },
                 new() { Name = "force", Description = "Overwrite existing component files.", Type = "boolean" },
                 new() { Name = "dryRun", Description = "Report the files that would be created without writing them.", Type = "boolean" },
                 ProjectArgument,

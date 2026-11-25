@@ -168,14 +168,16 @@ donkeh new project .
 # or create a new directory and project
 donkeh new project MyApp
 
-# CSX variant: generates Program.cx and csx.json
-donkeh new project MyApp --csx</code></pre>
+# plain C# variant: generates Program.cs instead of Program.cx
+donkeh new project MyApp --csharp</code></pre>
         </div>
 
         <p>
-            The project defaults to desktop. The generated <code>Program.cs</code>
-            contains a single attributed root component, so there is no <code>Main</code>
-            to write and no platform-specific entry-point code.
+            The project defaults to desktop and uses CSX: it generates
+            <code>Program.cx</code> plus <code>csx.json</code>. The source contains a
+            single attributed root component, so there is no <code>Main</code> to write
+            and no platform-specific entry-point code. Run it with <code>donkeh run</code>
+            so the CSX sources are transformed first.
         </p>
 
         <p>
@@ -187,16 +189,15 @@ donkeh new project MyApp --csx</code></pre>
         <div class="code" data-label="Terminal">
 <pre><code>donkeh new project Acme.Components --type framework
 cd Acme.Components
-donkeh enable-feature hot-reload
-donkeh watch</code></pre>
+donkeh run</code></pre>
         </div>
 
         <p>
-            The test container references the library directly.
-            <code>enable-feature</code> adds the development-only reloader and
-            <code>watch</code> runs the gallery in Debug. Supported C# edits and CSS
-            edits update the live preview; unsupported C# edits restart the app. When
-            the library is ready:
+            The test container references the library directly. <code>donkeh run</code>
+            transforms both CSX projects, then opens the gallery in Debug. Add
+            <code>--csharp</code> when generating the project to use plain C# and the
+            <code>enable-feature hot-reload</code> / <code>donkeh watch</code> loop
+            instead. When the library is ready:
         </p>
 
         <div class="code" data-label="Terminal">
@@ -207,13 +208,15 @@ donkeh watch</code></pre>
 ├── Acme.Components.sln
 ├── src/
 │   ├── Acme.Components.csproj
+│   ├── csx.json
 │   └── Components/
 │       └── HelloCard/
-│           ├── HelloCard.cs
+│           ├── HelloCard.cx
 │           └── HelloCard.css
 ├── test-container/
 │   ├── TestContainer.csproj
-│   ├── Program.cs
+│   ├── csx.json
+│   ├── Program.cx
 │   └── Styles/
 │       └── gallery.css
 └── README.md</div>
@@ -227,12 +230,13 @@ donkeh watch</code></pre>
         <h2 id="structure">Directory structure</h2>
         <div class="tree">MyApp/
 ├── MyApp.csproj
-├── Program.cs
+├── Program.cx
+├── csx.json
 ├── .gitignore
 ├── src/
 │   └── Components/
 │       └── FileList/
-│           ├── FileList.cs
+│           ├── FileList.cx
 │           └── FileList.css
 ├── Assets/
 │   └── logo.png
@@ -254,7 +258,7 @@ donkeh watch</code></pre>
             named properties replace the old <code>IDonkehApp.Settings</code> object.
         </p>
 
-        <div class="code" data-label="Program.cs">
+        <div class="code" data-label="Program.cx">
 <pre class="csx"><code>using Donkeh.Hosting;
 using Donkeh.UILab;
 using static Donkeh.UILab.HtmlHelper;
@@ -267,7 +271,7 @@ using static Donkeh.UILab.HtmlHelper;
 public sealed class App : Component
 {
     public override Node Render() =>
-        &lt;Div ClassName="app" /&gt;;
+        &lt;div className="app" /&gt;;
 }</code></pre>
 <pre class="csharp"><code>using Donkeh.Hosting;
 using Donkeh.UILab;
@@ -354,20 +358,24 @@ donkeh enable-target web</code></pre>
         <p>
             If you love JSX in JS/TS, you will love CSX. Donkeh ships a full UI
             framework you can author with markup-like components, real CSS and a
-            reconciled tree. It is optional and every example has a plain-C#
-            fallback. See the <a href="csx.html">CSX syntax</a> page for the setup
-            guide, editor plugins and side-by-side examples.
+            reconciled tree. New projects and components use CSX by default, and
+            every example has a plain-C# fallback with <code>--csharp</code>. See the
+            <a href="csx.html">CSX syntax</a> page for the setup guide, editor plugins
+            and side-by-side examples.
         </p>
         <div class="code" data-label="Terminal">
-<pre><code>dotnet tool install --global CSX.CliTool --version 1.0.1
-csx run</code></pre>
+<pre><code>dotnet tool install --global Donkeh.CliTool --version 1.0.52
+donkeh run</code></pre>
         </div>
 
         <h2 id="build-run">Build and run</h2>
         <p>From the project directory:</p>
 
         <div class="code" data-label="Terminal">
-<pre><code># desktop, the default host
+<pre><code># desktop, the default host (transforms CSX first)
+donkeh run
+
+# plain C# projects, or after a CSX transform
 dotnet run
 
 # build every enabled target

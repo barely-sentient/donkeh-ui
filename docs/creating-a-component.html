@@ -119,22 +119,28 @@
         <p>Run this from the project directory:</p>
 
         <div class="code" data-label="Terminal">
-<pre><code>donkeh new component FileList</code></pre>
+<pre><code>donkeh new component FileList
+
+# plain C# instead of CSX
+donkeh new component FileList --csharp</code></pre>
         </div>
 
-        <p>That creates one folder per component:</p>
+        <p>
+            New projects use CSX, so components are generated as <code>.cx</code> by
+            default; plain C# projects get <code>.cs</code>. In a framework project
+            the component is added to the library under <code>src/</code>:
+        </p>
 
         <div class="tree">src/
 └── Components/
     └── FileList/
-        ├── FileList.cs
+        ├── FileList.cx
         └── FileList.css</div>
 
         <p>It also updates the project file and writes the assembly attribute:</p>
 
-        <div class="code" data-label="FileList/FileList.cs">
+        <div class="code" data-label="FileList/FileList.cx">
 <pre class="csx"><code>using Donkeh.UILab;
-using static Donkeh.UILab.HtmlHelper;
 
 [assembly: Donkeh.UILab.Stylesheet("src/Components/FileList/FileList.css")]
 
@@ -596,13 +602,19 @@ return H("div", new Props { ClassName = "list" }, rows);</code></pre>
 
         <h2 id="hot-reload">Hot reload</h2>
         <p>
-            Hot reload is opt-in. Enable it once for the executable project:
+            Hot reload is opt-in for plain C# projects. Enable it once for the
+            executable project:
         </p>
 
         <div class="code" data-label="Terminal">
 <pre><code>donkeh enable-feature hot-reload
 donkeh watch</code></pre>
         </div>
+
+        <p>
+            CSX projects use <code>donkeh run</code>, which transforms the
+            <code>.cx</code> sources before starting the app.
+        </p>
 
         <p>
             The first command adds a reference that exists only in the Debug

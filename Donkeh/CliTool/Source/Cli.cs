@@ -128,6 +128,11 @@ public static partial class Cli
             return RunWatch(args[1..]);
         }
 
+        if (string.Equals(args[0], "run", StringComparison.OrdinalIgnoreCase))
+        {
+            return RunRun(args[1..]);
+        }
+
         if (string.Equals(args[0], "enable-target", StringComparison.OrdinalIgnoreCase))
         {
             return RunEnableTarget(args[1..]);
@@ -167,9 +172,7 @@ public static partial class Cli
 
     private static int RunNewProject(string[] args)
     {
-        var csx = args.Contains("--csx", StringComparer.OrdinalIgnoreCase);
-        var filtered = args.Where(argument =>
-            !string.Equals(argument, "--csx", StringComparison.OrdinalIgnoreCase)).ToArray();
+        var (csx, filtered) = ParseCsxArguments(args);
         var arguments = ParsedArguments.Parse(filtered, ["name", "framework", "type"]);
 
         if (arguments.Help)
@@ -200,7 +203,13 @@ public static partial class Cli
         }
 
         var framework = FrameworkLocator.Find(arguments.Value("framework"));
-        var files = ProjectGenerator.Generate(target, name, framework, arguments.Force, kind, csx);
+        var files = ProjectGenerator.Generate(
+            target,
+            name,
+            framework,
+            arguments.Force,
+            kind,
+            csx ?? true);
 
         Console.WriteLine($"Created Donkeh project in {Path.GetFullPath(target)}");
 
@@ -227,9 +236,7 @@ public static partial class Cli
             Console.WriteLine($"  cd {directoryName}");
         }
 
-        Console.WriteLine(kind == ProjectKind.Framework
-            ? "  dotnet watch --project test-container run"
-            : "  dotnet run");
+        Console.WriteLine("  donkeh run");
         return 0;
     }
 
@@ -282,7 +289,7 @@ public static partial class Cli
                 Console.WriteLine("  dotnet build -f net10.0-browser --no-restore");
                 break;
             default:
-                Console.WriteLine("  dotnet run");
+                Console.WriteLine("  donkeh run");
                 break;
         }
 
@@ -329,14 +336,14 @@ public static partial class Cli
                 "Expected a framework path. Example: donkeh use-local ../donkeh-ui.sln");
         }
 
-        var projectFile = ProjectModeService.UseLocal(
+        var projectFiles = ProjectModeService.UseLocal(
             arguments.Positionals[0],
             arguments.Value("project"));
 
-        Console.WriteLine($"Using local framework in {projectFile}");
+        WriteModeTargets("Using local framework in", projectFiles);
         Console.WriteLine();
         Console.WriteLine("Next:");
-        Console.WriteLine("  dotnet run");
+        Console.WriteLine("  donkeh run");
         return 0;
     }
 
@@ -356,15 +363,32 @@ public static partial class Cli
                 "Expected no positional arguments. Example: donkeh use-nuget --version 1.0.29");
         }
 
-        var projectFile = ProjectModeService.UseNuget(
+        var projectFiles = ProjectModeService.UseNuget(
             arguments.Value("version"),
             arguments.Value("project"));
 
-        Console.WriteLine($"Using NuGet packages in {projectFile}");
+        WriteModeTargets("Using NuGet packages in", projectFiles);
         Console.WriteLine();
         Console.WriteLine("Next:");
-        Console.WriteLine("  dotnet run");
+        Console.WriteLine("  donkeh run");
         return 0;
+    }
+
+    private static void WriteModeTargets(string message, IReadOnlyList<string> projectFiles)
+    {
+        if (projectFiles.Count == 1)
+        {
+            Console.WriteLine($"{message} {projectFiles[0]}");
+            return;
+        }
+
+        Console.WriteLine(message + ":");
+        Console.WriteLine($"  {projectFiles[0]}");
+
+        foreach (var projectFile in projectFiles.Skip(1))
+        {
+            Console.WriteLine($"  and {projectFile}");
+        }
     }
 
     private static int RunEnableFeature(string[] args)
@@ -415,11 +439,77 @@ public static partial class Cli
         return WatchService.Run(arguments.Value("project"), appArguments);
     }
 
+    private static int RunRun(string[] args)
+    {
+        var separator = Array.IndexOf(args, "--");
+        var commandArgs = separator < 0 ? args : args[..separator];
+        var appArguments = separator < 0 ? [] : args[(separator + 1)..];
+        var arguments = ParsedArguments.Parse(commandArgs, ["project"]);
+
+        if (arguments.Help)
+        {
+            PrintRunHelp();
+            return 0;
+        }
+
+        if (arguments.Positionals.Count != 0)
+        {
+            throw new CliException("Expected no positional arguments. Run 'donkeh run --help'.");
+        }
+
+        return RunService.Run(arguments.Value("project"), appArguments);
+    }
+
+    /// <summary>
+    /// Reads the CSX switches shared by project and component generation.
+    /// <c>--csx</c> forces CSX, <c>--csharp</c> forces plain C#, and the default
+    /// lets the generator follow the project.
+    /// </summary>
+    private static (bool? Csx, string[] Remaining) ParseCsxArguments(string[] args)
+    {
+        bool? csx = null;
+        var forceCsx = false;
+        var forceCsharp = false;
+        var remaining = new List<string>();
+
+        foreach (var argument in args)
+        {
+            if (string.Equals(argument, "--csx", StringComparison.OrdinalIgnoreCase))
+            {
+                forceCsx = true;
+                continue;
+            }
+
+            if (string.Equals(argument, "--csharp", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(argument, "--cs", StringComparison.OrdinalIgnoreCase))
+            {
+                forceCsharp = true;
+                continue;
+            }
+
+            remaining.Add(argument);
+        }
+
+        if (forceCsx && forceCsharp)
+        {
+            throw new CliException("Use either --csx or --csharp, not both.");
+        }
+
+        if (forceCsx)
+        {
+            csx = true;
+        }
+        else if (forceCsharp)
+        {
+            csx = false;
+        }
+
+        return (csx, [.. remaining]);
+    }
+
     private static int RunNewComponent(string[] args)
     {
-        var csx = args.Contains("--csx", StringComparer.OrdinalIgnoreCase);
-        var filtered = args.Where(argument =>
-            !string.Equals(argument, "--csx", StringComparison.OrdinalIgnoreCase)).ToArray();
+        var (csx, filtered) = ParseCsxArguments(args);
         var arguments = ParsedArguments.Parse(filtered, ["project"]);
 
         if (arguments.Help)
@@ -466,10 +556,11 @@ public static partial class Cli
             donkeh {Version}
 
             Usage:
-              donkeh new project [<directory>] [--name <name>] [--type application|framework] [--framework <path>] [--csx] [--force]
-              donkeh new component <name> [--project <path>] [--csx] [--force]
+              donkeh new project [<directory>] [--name <name>] [--type application|framework] [--framework <path>] [--csharp] [--force]
+              donkeh new component <name> [--project <path>] [--csx|--csharp] [--force]
               donkeh enable-target <desktop|android|web> [--project <path>]
               donkeh enable-feature <hot-reload> [--project <path>]
+              donkeh run [--project <path>] [-- <app args>]
               donkeh watch [--project <path>] [-- <app args>]
               donkeh upgrade project [--version <version>] [--project <path>]
               donkeh use-local <framework path> [--project <path>]
@@ -482,7 +573,7 @@ public static partial class Cli
               donkeh inspect component <name> [--properties|--events|--examples]
               donkeh component search <query> [--limit <n>]
               donkeh component inspect <name> [--properties|--events|--examples|--source]
-              donkeh component scaffold <name> [--csx] [--force] [--dry-run]
+              donkeh component scaffold <name> [--csharp] [--force] [--dry-run]
               donkeh csx syntax [<category>]
               donkeh csx inspect|validate|compile <file>
               donkeh css properties|selectors|functions
@@ -497,12 +588,15 @@ public static partial class Cli
             Agent-facing commands accept --json.
 
             Commands:
-              new project       Create a minimal app, or a component library with a
-                                live test container when --type framework is used.
-              new component     Create src/Components/<Name>/<Name>.cs and .css, embed
-                                the stylesheet, and register [assembly: Stylesheet(...)].
+              new project       Create a minimal CSX app, or a component library with
+                                a live test container when --type framework is used.
+              new component     Create <Name>.cx (CSX projects) or <Name>.cs and
+                                .css, embed the stylesheet, and register
+                                [assembly: Stylesheet(...)].
               enable-target     Add desktop, Android or browser support to a project.
               enable-feature    Add an opt-in development feature to a project.
+              run               Transform CSX sources when needed and run the project.
+                                A framework root runs its test container.
               watch             Run a project with CSS hot reload in Debug.
               upgrade project   Clear NuGet caches, update package versions, restore
                                 and update the global donkeh tool.
@@ -523,6 +617,8 @@ public static partial class Cli
             Options:
               -h, --help        Show this help.
               --version         Show the CLI version.
+              --csx             Force CSX (.cx) generation.
+              --csharp          Force plain C# (.cs) generation.
               --force           Overwrite existing generated files.
             """);
     }
@@ -531,20 +627,25 @@ public static partial class Cli
     {
         Console.WriteLine("""
             Usage:
-              donkeh new project [<directory>] [--name <name>] [--type application|framework] [--framework <path>] [--csx] [--force]
+              donkeh new project [<directory>] [--name <name>] [--type application|framework] [--framework <path>] [--csharp] [--force]
 
             Creates a minimal Donkeh project in the current directory, or in
             <directory> when supplied. The generated app declares [AppRoot] and
             opens a blank window. Outside a framework checkout, the project uses
             the published NuGet packages automatically.
 
+            Projects use CSX (.cx) and csx.json by default. Pass --csharp to
+            generate plain C# files instead.
+
             With --type framework, creates a packable component library in src/
-            and a test-container console app that renders every component.
+            and a test-container console app that renders every component. The
+            library and test container are both generated in the selected mode.
 
             Options:
               --name <name>        Project name; defaults to the directory name.
               --type <kind>        'application' (default) or 'framework'.
               --framework <path>   Use a local framework checkout instead of NuGet.
+              --csharp             Generate plain C# instead of CSX.
               --force              Overwrite existing generated files.
             """);
     }
@@ -553,20 +654,26 @@ public static partial class Cli
     {
         Console.WriteLine("""
             Usage:
-              donkeh new component <name> [--project <path>] [--csx] [--force]
+              donkeh new component <name> [--project <path>] [--csx|--csharp] [--force]
 
             Creates:
-              src/Components/<Name>/<Name>.cs
+              src/Components/<Name>/<Name>.cx
               src/Components/<Name>/<Name>.css
 
+            In a framework project, the component is added to the library under
+            src/ and uses Components/<Name>/ paths. The component follows the
+            project: CSX projects get <Name>.cx, plain C# projects get
+            <Name>.cs.
+
             It also adds the CSS as an EmbeddedResource and writes
-            [assembly: Stylesheet("src/Components/<Name>/<Name>.css")] at the top of
+            [assembly: Stylesheet("<project-relative css path>")] at the top of
             the component file.
 
             Options:
               --project <path>     Project file or project directory.
-              --csx                Generate a CSX (.cx) component.
-               --force              Overwrite existing component files.
+              --csx                Force a CSX (.cx) component.
+              --csharp             Force a plain C# (.cs) component.
+              --force              Overwrite existing component files.
             """);
     }
 
@@ -624,7 +731,27 @@ public static partial class Cli
             Hot reload must be enabled first:
               donkeh enable-feature hot-reload
 
-            A framework root selects its test-container project.
+            A framework root selects its test-container project. CSX projects
+            should use 'donkeh run' so .cx sources are transformed.
+
+            Options:
+              --project <path>     Project file, project directory or framework root.
+              -- <app args>        Arguments forwarded to the application.
+            """);
+    }
+
+    private static void PrintRunHelp()
+    {
+        Console.WriteLine("""
+            Usage:
+              donkeh run [--project <path>] [-- <app args>]
+
+            Runs a project. CSX projects are transformed first, then started
+            through the CSX tool. Plain C# projects run through dotnet.
+
+            A framework root runs its test-container, which renders the library
+            in a live gallery. Referenced CSX projects are transformed first, so
+            library changes are visible.
 
             Options:
               --project <path>     Project file, project directory or framework root.

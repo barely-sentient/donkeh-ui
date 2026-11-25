@@ -79,7 +79,8 @@ public static class CsxSyntaxCatalog
             Notes =
             [
                 "Tag names are case-sensitive in meaning: lowercase is an HTML element, uppercase is a component.",
-                "Use the HtmlHelper element names as the vocabulary; component search can list every built-in element."
+                "Always write HTML element tags in lowercase (div, span, button); component tags use PascalCase.",
+                "Component search can list every built-in element and component."
             ]
         },
         new()
@@ -247,7 +248,7 @@ public static class CsxSyntaxCatalog
             [
                 "{\n  \"FrameworkHtmlClass\": \"_\",\n  \"FrameworkHtmlClassMethod\": \"H\",\n  \"FrameworkComponentMethod\": \"C\",\n  \"FrameworkFragmentMethod\": \"F\",\n  \"GeneratedFileOutput\": \"src/generated\"\n}"
             ],
-            Examples = ["donkeh new project MyApp --csx\ncsx run"],
+            Examples = ["donkeh new project MyApp\ndonkeh run"],
             Notes =
             [
                 "The defaults match Donkeh's UILab helper class.",

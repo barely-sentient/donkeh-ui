@@ -127,8 +127,9 @@
         <p>
             A <code>.cx</code> file is a C# file with one addition: JSX-style elements
             such as <code>&lt;Header /&gt;</code> or
-            <code>&lt;div className="app"&gt;...&lt;/div&gt;</code>. The CSX toolchain
-            transforms those elements into the ordinary <code>_.H</code>,
+            <code>&lt;div className="app"&gt;...&lt;/div&gt;</code>. Element tags are
+            lowercase, as in HTML; component tags are PascalCase, as in React. The CSX
+            toolchain transforms those elements into the ordinary <code>_.H</code>,
             <code>_.C</code> and <code>_.F</code> calls you would otherwise write by
             hand, then compiles the result as normal C#.
         </p>
@@ -155,10 +156,10 @@ csx enable vscode
 # or
 csx enable rider
 
-# Create a CSX project
-donkeh new project MyApp --csx
+# Create a CSX project (the default)
+donkeh new project MyApp
 cd MyApp
-csx run</code></pre>
+donkeh run</code></pre>
         </div>
 
         <p>
@@ -295,17 +296,20 @@ public sealed class App : Component
         <h2 id="running">Running and building</h2>
         <div class="code" data-label="Terminal">
 <pre><code># Transform .cx files and run
-csx run
+donkeh run
 
-# Transform and build only
+# Equivalent direct CSX commands
+csx run
 csx build
 
 # Classic flow (generated files already present)
 dotnet run</code></pre>
         </div>
         <p>
-            <code>csx run</code> transforms every <code>.cx</code> file first, then
-            invokes <code>dotnet run</code> on the project. <code>csx build</code>
+            <code>donkeh run</code> delegates to <code>csx run</code> for CSX projects,
+            including framework roots where it transforms the library before running the
+            test container. <code>csx run</code> transforms every <code>.cx</code> file
+            first, then invokes <code>dotnet run</code> on the project. <code>csx build</code>
             does the same with <code>dotnet build</code>.
         </p>
 

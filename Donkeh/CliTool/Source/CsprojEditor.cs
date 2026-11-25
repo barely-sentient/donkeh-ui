@@ -181,6 +181,47 @@ internal static class CsprojEditor
         return AddItemGroup(projectText, newLine, block);
     }
 
+    /// <summary>Adds a project reference when the project does not have it.</summary>
+    /// <param name="projectText">Current project file text.</param>
+    /// <param name="newLine">Line ending used by the project file.</param>
+    /// <param name="relativePath">Project-relative path to the referenced project.</param>
+    /// <returns>The updated project text.</returns>
+    public static string EnsureProjectReference(
+        string projectText,
+        string newLine,
+        string relativePath)
+    {
+        var fileName = Path.GetFileName(relativePath);
+        var existing = new Regex(
+            $@"<ProjectReference\b[^>]*Include\s*=\s*""[^""]*{Regex.Escape(fileName)}""",
+            RegexOptions.IgnoreCase);
+
+        if (existing.IsMatch(projectText))
+        {
+            return projectText;
+        }
+
+        var block =
+            $"  <ItemGroup>{newLine}" +
+            $"    <ProjectReference Include=\"{relativePath}\" />{newLine}" +
+            $"  </ItemGroup>{newLine}";
+
+        return AddItemGroup(projectText, newLine, block);
+    }
+
+    /// <summary>Removes project references that point at a file name.</summary>
+    /// <param name="projectText">Current project file text.</param>
+    /// <param name="fileName">Referenced project file name, such as <c>Donkeh.UILab.csproj</c>.</param>
+    /// <returns>The updated project text.</returns>
+    public static string RemoveProjectReferences(string projectText, string fileName)
+    {
+        var references = new Regex(
+            $@"[ \t]*<ProjectReference\b(?=[^>]*Include\s*=\s*""[^""]*{Regex.Escape(fileName)}"")[^>]*(?:/>|>.*?</ProjectReference>)[ \t]*\r?\n?",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+        return references.Replace(projectText, string.Empty);
+    }
+
     /// <summary>Removes every <c>Donkeh.*</c> package reference.</summary>
     /// <param name="projectText">Current project file text.</param>
     /// <returns>The updated project text.</returns>

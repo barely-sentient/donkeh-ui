@@ -211,7 +211,9 @@ public static partial class Cli
     {
         var name = invocation.Positionals.FirstOrDefault() ?? invocation.String("name")
             ?? throw new LlmException("LLM3006", "A component name is required.");
-        var csx = invocation.Flag("csx");
+        bool? csx = invocation.Flag("csx")
+            ? true
+            : invocation.Flag("csharp") ? false : null;
         var force = invocation.Flag("force");
         var files = ComponentGenerator.Generate(name, invocation.ProjectPath, force, csx);
         var projectFile = ComponentGenerator.FindProject(invocation.ProjectPath);
@@ -224,7 +226,7 @@ public static partial class Cli
             files = files.Select(file => Path.GetRelativePath(projectDirectory, file).Replace('\\', '/')).ToList(),
             next = new[]
             {
-                "dotnet run",
+                "donkeh run",
                 $"donkeh diagnose component {Identifiers.ComponentName(name)} --json"
             }
         };
@@ -423,7 +425,7 @@ public static partial class Cli
                 Usage:
                   donkeh component search <query> [--limit <n>] [--package <id>] [--json]
                   donkeh component inspect <name> [--properties|--events|--examples|--source] [--json]
-                  donkeh component scaffold <name> [--csx] [--force] [--dry-run] [--json]
+                  donkeh component scaffold <name> [--csharp] [--force] [--dry-run] [--json]
 
                 Search uses names, descriptions, capabilities and common synonyms.
                 Inspection omits implementation source unless --source is supplied.

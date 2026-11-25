@@ -572,9 +572,13 @@ public sealed class CapabilityService
         if (dryRun)
         {
             var className = Identifiers.ComponentName(name);
-            var useCsx = invocation.Flag("csx") || project.Csx.Present;
+            var useCsx = invocation.Flag("csx")
+                || (!invocation.Flag("csharp") && project.Csx.Present);
             var extension = useCsx ? ".cx" : ".cs";
-            var directory = Path.Combine(project.ProjectDirectory, "src", "Components", className);
+            var componentRoot = IsFrameworkLibrary(project.ProjectDirectory)
+                ? Path.Combine(project.ProjectDirectory, "Components")
+                : Path.Combine(project.ProjectDirectory, "src", "Components");
+            var directory = Path.Combine(componentRoot, className);
             var files = new[]
             {
                 Path.Combine(directory, className + extension),
@@ -948,6 +952,24 @@ public sealed class CapabilityService
         }
 
         return argumentName is null ? null : invocation.String(argumentName);
+    }
+
+    /// <summary>
+    /// Reports whether a project directory is the component library of a
+    /// framework project, recognised by a sibling <c>test-container</c>.
+    /// </summary>
+    private static bool IsFrameworkLibrary(string projectDirectory)
+    {
+        try
+        {
+            var parent = Path.GetDirectoryName(projectDirectory);
+            return parent is not null
+                && Directory.Exists(Path.Combine(parent, "test-container"));
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 
     private static object ComponentSummary(ComponentMetadata component) => new

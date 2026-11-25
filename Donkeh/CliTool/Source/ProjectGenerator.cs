@@ -21,7 +21,7 @@ internal static class ProjectGenerator
         string? frameworkRoot,
         bool force,
         ProjectKind kind = ProjectKind.Application,
-        bool csx = false)
+        bool csx = true)
     {
         targetDirectory = Path.GetFullPath(targetDirectory);
         Directory.CreateDirectory(targetDirectory);
@@ -30,7 +30,7 @@ internal static class ProjectGenerator
 
         if (kind == ProjectKind.Framework)
         {
-            return GenerateFramework(targetDirectory, projectName, frameworkRoot, force);
+            return GenerateFramework(targetDirectory, projectName, frameworkRoot, force, csx);
         }
 
         if (csx)
@@ -97,18 +97,23 @@ internal static class ProjectGenerator
         string targetDirectory,
         string projectName,
         string? frameworkRoot,
-        bool force)
+        bool force,
+        bool csx)
     {
         var rootNamespace = Identifiers.Namespace(projectName);
         var sourceDirectory = Path.Combine(targetDirectory, "src");
         var testDirectory = Path.Combine(targetDirectory, "test-container");
         var libraryProject = Path.Combine(sourceDirectory, projectName + ".csproj");
         var componentDirectory = Path.Combine(sourceDirectory, "Components", "HelloCard");
-        var componentFile = Path.Combine(componentDirectory, "HelloCard.cs");
+        var componentFile = Path.Combine(
+            componentDirectory,
+            "HelloCard" + (csx ? ".cx" : ".cs"));
         var componentCss = Path.Combine(componentDirectory, "HelloCard.css");
         var testProject = Path.Combine(testDirectory, "TestContainer.csproj");
-        var testProgram = Path.Combine(testDirectory, "Program.cs");
+        var testProgram = Path.Combine(testDirectory, csx ? "Program.cx" : "Program.cs");
         var testTargets = Path.Combine(testDirectory, "Directory.Build.targets");
+        var libraryCsxConfig = Path.Combine(sourceDirectory, "csx.json");
+        var testCsxConfig = Path.Combine(testDirectory, "csx.json");
         var testStyles = Path.Combine(testDirectory, "Styles", "gallery.css");
         var gitignore = Path.Combine(targetDirectory, ".gitignore");
         var solution = Path.Combine(targetDirectory, projectName + ".sln");
@@ -127,6 +132,12 @@ internal static class ProjectGenerator
             solution,
             readme
         };
+
+        if (csx)
+        {
+            files.Add(libraryCsxConfig);
+            files.Add(testCsxConfig);
+        }
 
         if (useCheckout)
         {
@@ -269,26 +280,47 @@ internal static class ProjectGenerator
                 """);
         }
 
-        TextFiles.Write(componentFile, $$"""
-            using Donkeh.UILab;
-            using static Donkeh.UILab.HtmlHelper;
-            using static Donkeh.UILab._;
+        TextFiles.Write(componentFile, csx
+            ? $$"""
+                using Donkeh.UILab;
 
-            [assembly: Donkeh.UILab.Stylesheet("Components/HelloCard/HelloCard.css")]
+                [assembly: Donkeh.UILab.Stylesheet("Components/HelloCard/HelloCard.css")]
 
-            namespace {{rootNamespace}}.Components;
+                namespace {{rootNamespace}}.Components;
 
-            /// <summary>A starter component for the component library.</summary>
-            public sealed class HelloCard : Component
-            {
-                /// <inheritdoc/>
-                public override Node Render() =>
-                    Div(new() { ClassName = "hello-card" },
-                        H2(new() { ClassName = "hello-card-title" }, Text("Hello from {{packageId}}")),
-                        P(new() { ClassName = "hello-card-copy" },
-                            Text("Edit this component and the test container will show the change.")));
-            }
-            """);
+                /// <summary>A starter component for the component library.</summary>
+                public sealed class HelloCard : Component
+                {
+                    /// <inheritdoc/>
+                    public override Node Render() =>
+                        <div className="hello-card">
+                            <h2 className="hello-card-title">Hello from {{packageId}}</h2>
+                            <p className="hello-card-copy">
+                                Edit this component and the test container will show the change.
+                            </p>
+                        </div>;
+                }
+                """
+            : $$"""
+                using Donkeh.UILab;
+                using static Donkeh.UILab.HtmlHelper;
+                using static Donkeh.UILab._;
+
+                [assembly: Donkeh.UILab.Stylesheet("Components/HelloCard/HelloCard.css")]
+
+                namespace {{rootNamespace}}.Components;
+
+                /// <summary>A starter component for the component library.</summary>
+                public sealed class HelloCard : Component
+                {
+                    /// <inheritdoc/>
+                    public override Node Render() =>
+                        Div(new() { ClassName = "hello-card" },
+                            H2(new() { ClassName = "hello-card-title" }, Text("Hello from {{packageId}}")),
+                            P(new() { ClassName = "hello-card-copy" },
+                                Text("Edit this component and the test container will show the change.")));
+                }
+                """);
 
         TextFiles.Write(componentCss, """
             .hello-card {
@@ -354,6 +386,12 @@ internal static class ProjectGenerator
                         .ToArray();
             }
             """);
+
+        if (csx)
+        {
+            TextFiles.Write(libraryCsxConfig, CsxConfig("generated"));
+            TextFiles.Write(testCsxConfig, CsxConfig("generated"));
+        }
 
         TextFiles.Write(testStyles, """
             .gallery {
@@ -421,13 +459,11 @@ internal static class ProjectGenerator
             ## Preview
 
             ```powershell
-            donkeh enable-feature hot-reload
-            donkeh watch
+            donkeh run
             ```
 
             The container discovers every public component in `src/` and renders it
-            in a gallery. Supported C# edits and CSS edits update the running
-            preview; unsupported C# edits restart the app.
+            in a gallery. CSX sources are transformed automatically before the run.
 
             ## Publish
 
@@ -620,15 +656,7 @@ internal static class ProjectGenerator
             }
             """);
 
-        TextFiles.Write(csxConfig, """
-            {
-              "FrameworkHtmlClass": "_",
-              "FrameworkHtmlClassMethod": "H",
-              "FrameworkComponentMethod": "C",
-              "FrameworkFragmentMethod": "F",
-              "GeneratedFileOutput": "src/generated"
-            }
-            """);
+        TextFiles.Write(csxConfig, CsxConfig("src/generated"));
 
         TextFiles.Write(gitignoreFile, """
             bin/
@@ -746,6 +774,17 @@ internal static class ProjectGenerator
                         ["style"] = "margin:0;width:100vw;height:100vh;background:#ffffff"
                     }
                 });
+        }
+        """;
+
+    /// <summary>Builds the <c>csx.json</c> configuration shared by generated projects.</summary>
+    private static string CsxConfig(string generatedFileOutput) => $$"""
+        {
+          "FrameworkHtmlClass": "_",
+          "FrameworkHtmlClassMethod": "H",
+          "FrameworkComponentMethod": "C",
+          "FrameworkFragmentMethod": "F",
+          "GeneratedFileOutput": "{{generatedFileOutput}}"
         }
         """;
 
