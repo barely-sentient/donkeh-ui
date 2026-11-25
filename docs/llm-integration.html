@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>LLM integration · Donkeh</title>
+    <meta name="description" content="Discover and extend the Donkeh CLI and MCP capabilities for LLM agents.">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<header class="topbar">
+    <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span class="brand-name">Donkeh</span>
+        <span class="brand-tag">docs</span>
+    </a>
+</header>
+
+<main class="content" id="content">
+    <div class="breadcrumb">Docs <span>/</span> LLM integration</div>
+    <h1>LLM integration</h1>
+    <p class="lead">
+        The Donkeh CLI exposes project, component, CSX, CSS, renderer,
+        documentation and diagnostic capabilities as JSON commands and as MCP
+        tools. Packages can extend the same catalogue without modifying the CLI.
+    </p>
+
+    <h2 id="discovery">Discovery</h2>
+    <p>
+        Start with the overview, then inspect one capability or the MCP input
+        schemas. Every agent-facing command accepts <code>--json</code>.
+    </p>
+    <div class="code" data-label="Terminal">
+<pre><code>donkeh mcp show --json
+donkeh mcp capabilities csx.validate --json
+donkeh mcp tools --json
+donkeh mcp invoke csx.validate --file ./Components/Card.cx --json
+donkeh inspect project --json
+donkeh component search "file selection" --json</code></pre>
+    </div>
+
+    <h2 id="mcp">MCP server</h2>
+    <p>
+        <code>donkeh mcp start</code> hosts the same capability implementations on
+        stdio. Tool results include text content and structured JSON. stdout is
+        reserved for the protocol; diagnostics go to stderr.
+    </p>
+    <div class="code" data-label="Terminal">
+<pre><code>donkeh mcp start --project ./MyApp</code></pre>
+    </div>
+
+    <h2 id="csx">CSX and CSS intelligence</h2>
+    <p>
+        CSX validation uses the shipped CSX transformer plus project props
+        metadata. CSS validation uses the real tokenizer, data engine and
+        LayoutLab property resolver, not a browser compatibility list.
+    </p>
+    <div class="code" data-label="Terminal">
+<pre><code>donkeh csx syntax components --json
+donkeh csx validate ./Components/Card.cx --json
+donkeh csx compile ./Components/Card.cx --generated --json
+donkeh css property display --json
+donkeh css validate ./styles.css --json</code></pre>
+    </div>
+
+    <h2 id="registration">Package registration</h2>
+    <p>
+        A package adds a <code>donkeh.llm.json</code> manifest at its root. Static
+        capabilities return declared JSON; executable providers implement
+        <code>ILlmCapabilityProvider</code> and are loaded only when the manifest
+        explicitly registers them.
+    </p>
+    <div class="code" data-label="donkeh.llm.json">
+<pre><code>{
+  "schemaVersion": 1,
+  "package": "Acme.Donkeh.FileExplorer",
+  "capabilities": [
+    {
+      "name": "acme.fileexplorer.components",
+      "category": "Components",
+      "summary": "List file explorer components.",
+      "result": { "components": ["FileExplorer"] }
+    }
+  ],
+  "components": [
+    {
+      "name": "FileExplorer",
+      "kind": "assembly",
+      "description": "A file browser with selection support.",
+      "properties": [
+        { "name": "ViewMode", "type": "string", "default": "\"List\"" }
+      ]
+    }
+  ]
+}</code></pre>
+    </div>
+    <p>
+        Names cannot override built-in namespaces or another package's MCP tool.
+        Provider assemblies must stay inside the manifest directory, and the
+        registry never executes shell commands on their behalf.
+    </p>
+
+    <h2 id="tokens">Token efficiency</h2>
+    <p>
+        Inspect a summary first, then request only the part you need:
+        <code>--properties</code>, <code>--events</code>, <code>--examples</code>,
+        <code>--section</code>, <code>--summary</code> or <code>--limit</code>.
+        Generated CSX output, source maps and resolved bindings are opt-in.
+    </p>
+</main>
+</body>
+</html>

@@ -1,0 +1,79 @@
+{
+  "generatedFrom": "docs/implementation-windowing.html, docs/implementation-browser.html, docs/implementation-android.html",
+  "categories": [
+    "text",
+    "images",
+    "clipping",
+    "transforms",
+    "animations",
+    "scrolling",
+    "input",
+    "drawPrimitives",
+    "media",
+    "webview",
+    "inspector",
+    "limitations"
+  ],
+  "renderers": [
+    {
+      "name": "desktop",
+      "platform": "Desktop",
+      "packages": ["Donkeh.Windowing"],
+      "description": "Silk.NET window plus the OpenGL instanced renderer, using LayoutLab for layout and paint instructions.",
+      "capabilities": {
+        "text": { "status": "supported", "notes": "TrueType pipeline with system-font discovery, fallback chains, glyph atlases and kerning. No complex shaping, bidi reordering or tab expansion." },
+        "images": { "status": "supported", "notes": "File, data and packed sources; intrinsic sizing, object-fit and a shared cache with CSS backgrounds. SVG is rasterised by the host." },
+        "clipping": { "status": "supported", "notes": "Per-instance clip rectangles and rounded rectangles are fragment-shader inputs; overflow clipping is applied by layout." },
+        "transforms": { "status": "supported", "notes": "Affine transforms are per-instance shader inputs; CSS transform values are resolved by LayoutLab." },
+        "animations": { "status": "supported", "notes": "CSS transitions and keyframe animations run through the style resolver; animated paints refresh at 60 Hz while presentation can run higher." },
+        "scrolling": { "status": "supported", "notes": "Wheel deltas, smooth scroll, host-painted scrollbars, pointer auto-scroll and optional touch panning." },
+        "input": { "status": "supported", "notes": "Pointer, keyboard, focus, text editing, clipboard, IME, select popups, context menus, drag and drop, paste and cursor mapping." },
+        "drawPrimitives": { "status": "supported", "notes": "Rects, rounded rects, borders, ellipses, shadows, glyphs and images share one instanced pipeline; canvas OnDraw and OnContext callbacks run at the host boundary." },
+        "media": { "status": "supported", "notes": "Audio through SoundFlow and video through LibVLC; media controls are host-painted." },
+        "webview": { "status": "supported", "notes": "Desktop hosts provide the WebView control surface." },
+        "inspector": { "status": "supported", "notes": "Built-in inspector can run docked or in its own window; devtools can be disabled to remove its cost." },
+        "limitations": { "status": "partial", "notes": "OpenGL-only with no software fallback; no complex text shaping or bidi; font and image caches are not evicted; fixed 640x360 video frame upload." }
+      }
+    },
+    {
+      "name": "android",
+      "platform": "Android",
+      "packages": ["Donkeh.Windowing.Android"],
+      "description": "Activity-owned GLES 3.0 surface reusing the same DonkehWindow, LayoutLab and GLRenderer pipeline as desktop.",
+      "capabilities": {
+        "text": { "status": "supported", "notes": "Same TrueType pipeline as desktop; density is applied so CSS pixels stay device-independent." },
+        "images": { "status": "supported", "notes": "Same image cache and decoding path as desktop." },
+        "clipping": { "status": "supported", "notes": "Same shader-driven clip and layout clipping as desktop." },
+        "transforms": { "status": "supported", "notes": "Same LayoutLab transform resolution and instanced rendering." },
+        "animations": { "status": "supported", "notes": "Same animation runtime; frame pacing is VSync with a 60 FPS cap." },
+        "scrolling": { "status": "supported", "notes": "Touch panning with an eight-pixel slop threshold and axis locking, plus host-painted scrollbars with wider touch targets." },
+        "input": { "status": "supported", "notes": "Touch maps to pointer events; long press becomes a context menu; focus, text editing and permissions are host-backed." },
+        "drawPrimitives": { "status": "supported", "notes": "Same instanced renderer and canvas handling as desktop." },
+        "media": { "status": "supported", "notes": "Uses the shared native media path; Android surface and frame pacing are activity-owned." },
+        "webview": { "status": "partial", "notes": "Depends on the platform host; verify the Android WebView surface for the target API level." },
+        "inspector": { "status": "unsupported", "notes": "Devtools are disabled by default on Android; the inspector is a desktop tool." },
+        "limitations": { "status": "partial", "notes": "No native title bar, frameless resize or window dragging; MSAA disabled; 60 FPS cap; no inspector path." }
+      }
+    },
+    {
+      "name": "web",
+      "platform": "Browser",
+      "packages": ["Donkeh.Windowing.Browser"],
+      "description": "Blazor WebAssembly bootstrap that mirrors the UILab tree into the real DOM. The browser owns layout, cascade and native controls.",
+      "capabilities": {
+        "text": { "status": "supported", "notes": "Rendered by the browser with native fonts and text layout." },
+        "images": { "status": "supported", "notes": "Native img elements and browser image handling." },
+        "clipping": { "status": "supported", "notes": "CSS overflow, border-radius and clip properties are applied by the browser." },
+        "transforms": { "status": "supported", "notes": "CSS transforms are applied by the browser." },
+        "animations": { "status": "supported", "notes": "CSS transitions and animations are driven by the browser." },
+        "scrolling": { "status": "supported", "notes": "Browser scrolling; the host consumes opt-in scroll deltas for handlers." },
+        "input": { "status": "supported", "notes": "Delegated browser events; focus, caret, selection, IME and native form state stay browser-owned." },
+        "drawPrimitives": { "status": "unsupported", "notes": "A native canvas element exists, but C# canvas draw callbacks are not bridged and there is no WebGL interop." },
+        "media": { "status": "supported", "notes": "Native video and audio elements; opt-in play, pause, ended and timeupdate tracking." },
+        "webview": { "status": "unsupported", "notes": "The browser host does not expose a nested WebView surface." },
+        "inspector": { "status": "unsupported", "notes": "The inspector is not part of the browser host; use browser devtools." },
+        "limitations": { "status": "partial", "notes": "No LayoutLab or OpenGL renderer; desktop-specific layout behaviour and the inspector are unavailable; canvas drawing is not bridged." }
+      }
+    }
+  ]
+}

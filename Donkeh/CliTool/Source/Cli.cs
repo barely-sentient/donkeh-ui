@@ -1,7 +1,9 @@
+using Donkeh.Llm;
+
 namespace Donkeh.Cli;
 
 /// <summary>Command-line entry point for the Donkeh developer tool.</summary>
-public static class Cli
+public static partial class Cli
 {
     private static readonly string Version =
         typeof(Cli).Assembly.GetName().Version?.ToString(3) ?? "0.1.0";
@@ -11,20 +13,69 @@ public static class Cli
     /// <returns>Zero on success, one on a user-facing failure.</returns>
     public static int Run(string[] args)
     {
+        var json = args.Contains("--json", StringComparer.OrdinalIgnoreCase);
+
         try
         {
             return RunCore(args);
         }
+        catch (LlmException exception)
+        {
+            if (json)
+            {
+                WriteJsonError(exception.Code, exception.Message, exception.Hint);
+            }
+            else
+            {
+                Console.Error.WriteLine($"error: {exception.Message}");
+
+                if (!string.IsNullOrWhiteSpace(exception.Hint))
+                {
+                    Console.Error.WriteLine($"hint: {exception.Hint}");
+                }
+            }
+
+            return 1;
+        }
         catch (CliException exception)
         {
-            Console.Error.WriteLine($"error: {exception.Message}");
+            if (json)
+            {
+                WriteJsonError("CLI0001", exception.Message, null);
+            }
+            else
+            {
+                Console.Error.WriteLine($"error: {exception.Message}");
+            }
+
             return 1;
         }
         catch (Exception exception)
         {
-            Console.Error.WriteLine($"error: {exception.Message}");
+            if (json)
+            {
+                WriteJsonError("CLI9999", exception.Message, null);
+            }
+            else
+            {
+                Console.Error.WriteLine($"error: {exception.Message}");
+            }
+
             return 1;
         }
+    }
+
+    private static void WriteJsonError(string code, string message, string? hint)
+    {
+        Console.WriteLine(LlmJson.Serialize(new
+        {
+            error = new
+            {
+                code,
+                message,
+                hint
+            }
+        }));
     }
 
     private static int RunCore(string[] args)
@@ -45,6 +96,11 @@ public static class Cli
         {
             Console.WriteLine($"donkeh {Version}");
             return 0;
+        }
+
+        if (IsLlmCommand(args[0]))
+        {
+            return RunLlmCommand(args);
         }
 
         if (string.Equals(args[0], "upgrade", StringComparison.OrdinalIgnoreCase))
@@ -419,6 +475,27 @@ public static class Cli
               donkeh use-local <framework path> [--project <path>]
               donkeh use-nuget [--version <version>] [--project <path>]
 
+              donkeh mcp show|tools|capabilities [<name>]
+              donkeh mcp invoke <capability> [--arg value]...
+              donkeh mcp start [--project <path>]
+              donkeh inspect project|dependencies|components|configuration [--project <path>]
+              donkeh inspect component <name> [--properties|--events|--examples]
+              donkeh component search <query> [--limit <n>]
+              donkeh component inspect <name> [--properties|--events|--examples|--source]
+              donkeh component scaffold <name> [--csx] [--force] [--dry-run]
+              donkeh csx syntax [<category>]
+              donkeh csx inspect|validate|compile <file>
+              donkeh css properties|selectors|functions
+              donkeh css property <name>
+              donkeh css validate <file>
+              donkeh renderer inspect|capabilities
+              donkeh docs search <query>
+              donkeh docs get <topic> [--section <id>]
+              donkeh diagnose project|component <name>
+              donkeh doctor
+
+            Agent-facing commands accept --json.
+
             Commands:
               new project       Create a minimal app, or a component library with a
                                 live test container when --type framework is used.
@@ -431,6 +508,17 @@ public static class Cli
                                 and update the global donkeh tool.
               use-local         Switch the project to a local framework checkout.
               use-nuget         Switch the project back to published NuGet packages.
+
+            LLM and agent tooling:
+              mcp               Discover Donkeh capabilities or start the MCP stdio server.
+              inspect           Inspect the project, dependencies, components or configuration.
+              component         Search, inspect or scaffold components.
+              csx               Discover CSX syntax, inspect, validate or compile CSX files.
+              css               Discover supported CSS vocabulary or validate a stylesheet.
+              renderer          Inspect the active renderer and its capabilities.
+              docs              Search or retrieve Donkeh documentation.
+              diagnose          Run project or component diagnostics.
+              doctor            Check the Donkeh environment and project health.
 
             Options:
               -h, --help        Show this help.

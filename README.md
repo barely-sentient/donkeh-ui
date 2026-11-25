@@ -74,6 +74,7 @@ dotnet watch --project test-container run
 - [Component testing](https://barely-sentient.github.io/donkeh-ui/component-testing.html)
 - [Inspector overview](https://barely-sentient.github.io/donkeh-ui/inspector.html)
 - [Host permissions](https://barely-sentient.github.io/donkeh-ui/host-permissions.html)
+- [LLM integration](https://barely-sentient.github.io/donkeh-ui/llm-integration.html)
 
 Everything else lives at
 **[barely-sentient.github.io/donkeh-ui](https://barely-sentient.github.io/donkeh-ui)**.
