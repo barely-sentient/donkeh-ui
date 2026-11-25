@@ -1071,6 +1071,25 @@ public sealed unsafe class GLRenderer : IDisposable
         var color = ColorOf(command.Style.Color, _opacity);
         var glyphs = run.Glyphs;
 
+        // Glyph bitmaps carry side bearings and are rasterised at whole
+        // pixels, so the first and last glyph can extend about a pixel past
+        // the advance width used by layout. Clipping text exactly to the
+        // element's padding box shaves the outer edges off those glyphs.
+        // Give text one pixel of horizontal slack; normal shapes keep the
+        // exact clip.
+        var savedClip = _clip;
+        if (savedClip.HasClip)
+        {
+            _clip = savedClip with
+            {
+                Rect = new Rect(
+                    savedClip.Rect.X - 2,
+                    savedClip.Rect.Y,
+                    savedClip.Rect.Width + 4,
+                    savedClip.Rect.Height)
+            };
+        }
+
         for (var i = 0; i < glyphs.Length; i++)
         {
             var glyph = glyphs[i];
@@ -1086,6 +1105,8 @@ public sealed unsafe class GLRenderer : IDisposable
                 color,
                 alphaTexture: true);
         }
+
+        _clip = savedClip;
     }
 
     /// <summary>
