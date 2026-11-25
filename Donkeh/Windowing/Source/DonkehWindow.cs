@@ -10439,9 +10439,21 @@ public sealed partial class DonkehWindow : IDisposable, IDonkehHostWindow
     /// Returns the highest positive z-index in a subtree, or zero when none is
     /// promoted. Hit testing uses this to test popovers before static siblings.
     /// </summary>
+    /// <remarks>
+    /// Fixed boxes are tested separately, and boxes with <c>pointer-events: none</c>
+    /// cannot receive the pointer themselves. Counting either one here would let a
+    /// hidden tooltip promote its whole ancestor subtree above a real modal overlay,
+    /// which made palette, dialog and menu rows fall through to the content below.
+    /// Interactive children of a transparent box are still inspected.
+    /// </remarks>
     private static int MaxPromotedZ(LayoutBox box)
     {
-        int z = box.Style.HasZIndex && box.Style.ZIndex > 0 ? box.Style.ZIndex : 0;
+        int z = 0;
+
+        if (!box.IsFixed && box.Style.PointerEvents != PointerEvents.None)
+        {
+            z = box.Style.HasZIndex && box.Style.ZIndex > 0 ? box.Style.ZIndex : 0;
+        }
 
         for (var i = 0; i < box.Children.Count; i++)
         {
