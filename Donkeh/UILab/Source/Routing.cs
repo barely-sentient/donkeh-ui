@@ -141,7 +141,7 @@ namespace Donkeh.UILab
     }
 
     /// <summary>Props for <see cref="AppRouter"/>.</summary>
-    public class AppRouterProps : Props
+    public partial class AppRouterProps : Props
     {
         /// <summary>
         /// Gets the initially selected path. Defaults to <c>/</c> and is read when
@@ -196,7 +196,7 @@ namespace Donkeh.UILab
     }
 
     /// <summary>Props for <see cref="AppRoutes"/>.</summary>
-    public class AppRoutesProps : Props
+    public partial class AppRoutesProps : Props
     {
         /// <summary>Gets the route declarations to search, in order.</summary>
         public Node?[]? Children { get; init; }
@@ -225,7 +225,7 @@ namespace Donkeh.UILab
             return Props.Fallback ?? F();
         }
 
-        private static Node? FindRoute(Node?[]? children, string current)
+        internal static Node? FindRoute(Node?[]? children, string current)
         {
             if (children is null)
             {
@@ -236,15 +236,26 @@ namespace Donkeh.UILab
             {
                 var child = children[i];
 
-                if (child is ComponentNode
-                    {
-                        ComponentType: var type,
-                        Props: RouteProps props
-                    }
-                    && type == typeof(Route)
-                    && Router.MatchesNormalized(props.Path, current))
+                if (child is ComponentNode node)
                 {
-                    return child;
+                    if (node.ComponentType == typeof(Route) && node.Props is RouteProps props)
+                    {
+                        var routePath = props.Index ? "/" : props.Path;
+
+                        if (Router.MatchesNormalized(routePath, current))
+                        {
+                            return child;
+                        }
+                    }
+                    else if (node.ComponentType == typeof(Routes) && node.Props is RoutesProps routes)
+                    {
+                        var nested = FindRoute(routes.Children, current);
+
+                        if (nested is not null)
+                        {
+                            return nested;
+                        }
+                    }
                 }
 
                 if (child is FragmentNode fragment)
@@ -262,14 +273,54 @@ namespace Donkeh.UILab
         }
     }
 
+    /// <summary>Props for <see cref="Routes"/>.</summary>
+    public partial class RoutesProps : Props
+    {
+        /// <summary>Gets the route declarations to search, in order.</summary>
+        public Node?[]? Children { get; init; }
+
+        /// <summary>Gets the content rendered when no route matches.</summary>
+        public Node? Fallback { get; init; }
+    }
+
+    /// <summary>
+    /// CSX-friendly alias for a route table. It accepts the same children as
+    /// <see cref="AppRoutes"/> and can be nested inside an <see cref="AppRoutes"/>
+    /// wrapper without changing route matching.
+    /// </summary>
+    public sealed class Routes : Component<RoutesProps>
+    {
+        /// <inheritdoc/>
+        public override Node Render()
+        {
+            var current = UseContext(Router.Path);
+            var route = AppRoutes.FindRoute(Props.Children, current);
+
+            return route ?? Props.Fallback ?? F();
+        }
+    }
+
     /// <summary>Props for <see cref="Route"/>.</summary>
-    public class RouteProps : Props
+    public partial class RouteProps : Props
     {
         /// <summary>Gets the route path, for example <c>/</c>, <c>/about</c> or <c>/docs/*</c>.</summary>
         public string Path { get; init; } = "/";
 
         /// <summary>Gets the content rendered when the route matches.</summary>
         public Node?[]? Children { get; init; }
+
+        /// <summary>
+        /// Gets a value indicating whether this is an index route. An index route
+        /// matches the root path and is useful in CSX route tables.
+        /// </summary>
+        public bool Index { get; init; }
+
+        /// <summary>
+        /// Gets the single element rendered when the route matches. In CSX this is
+        /// written as <c>element={&lt;Home /&gt;}</c> and takes precedence over
+        /// <see cref="Children"/> and <see cref="Content"/>.
+        /// </summary>
+        public Node? Element { get; init; }
 
         /// <summary>
         /// Gets a factory invoked only when the route matches. When set, it takes
@@ -286,10 +337,16 @@ namespace Donkeh.UILab
         public override Node Render()
         {
             var current = UseContext(Router.Path);
+            var routePath = Props.Index ? "/" : Props.Path;
 
-            if (!Router.MatchesNormalized(Props.Path, current))
+            if (!Router.MatchesNormalized(routePath, current))
             {
                 return F();
+            }
+
+            if (Props.Element is { } element)
+            {
+                return element;
             }
 
             if (Props.Content is { } content)
@@ -302,7 +359,7 @@ namespace Donkeh.UILab
     }
 
     /// <summary>Props for <see cref="Link"/>.</summary>
-    public class LinkProps : Props
+    public partial class LinkProps : Props
     {
         /// <summary>Gets the destination path.</summary>
         public string To { get; init; } = "/";
@@ -383,6 +440,12 @@ namespace Donkeh.UILab
         /// <returns>The configured route table component.</returns>
         public static Node AppRoutes(params Node?[] routes) =>
             C<AppRoutes, AppRoutesProps>(new AppRoutesProps { Children = routes });
+
+        /// <summary>Creates a CSX-friendly <see cref="Routes"/> route table.</summary>
+        /// <param name="routes">Route declarations in priority order.</param>
+        /// <returns>The configured route table component.</returns>
+        public static Node Routes(params Node?[] routes) =>
+            C<Routes, RoutesProps>(new RoutesProps { Children = routes });
 
         /// <summary>Creates a <see cref="Donkeh.UILab.Route"/> declaration.</summary>
         /// <param name="path">The route path.</param>

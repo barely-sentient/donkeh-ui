@@ -109,9 +109,9 @@ return H("div", Text(theme));
 ## Routing
 
 `AppRouter` owns a page path and publishes it through `Router.Path` and
-`Router.SetPage`. `AppRoutes` picks the first matching `Route`; `Link` updates the
-page without browser navigation. Import `Donkeh.UILab.Routing` for the short
-factories.
+`Router.SetPage`. `AppRoutes` (or the CSX-friendly `Routes` alias) picks the first
+matching `Route`; `Link` updates the page without browser navigation. Import
+`Donkeh.UILab.Routing` for the short factories.
 
 Routes whose content is expensive to construct can pass a factory instead of
 children. The factory runs only on a frame where that route matches, so unmatched
@@ -136,6 +136,25 @@ var app = AppRouter("/",
 
 renderer.Mount(app);
 ```
+
+In CSX, routing uses the familiar lowercase attribute names:
+
+```csharp
+<AppRouter initialPath="/">
+    <AppRoutes>
+        <Routes>
+            <Route index element={<Home />} />
+            <Route path="/about" element={<About />} />
+            <Route path="/docs/*" element={<Docs />} />
+            <Route path="*" element={<NotFound />} />
+        </Routes>
+    </AppRoutes>
+</AppRouter>
+```
+
+`path`, `index`, `element`, `fallback`, `initialPath`, `to` and `activeClassName`
+are CSX aliases for the PascalCase props. `Routes` can be used on its own or nested
+inside `AppRoutes`.
 
 `Route` supports exact paths, trailing `/*` prefixes and a `*` catch-all. Use the
 props form when you need a fallback or active-link classes:

@@ -115,6 +115,76 @@ public sealed class RouterTests
         Assert.True(link.HasClass("active"));
     }
 
+    [Fact]
+    public void CsxStyleRoutePropsRenderElement()
+    {
+        var renderer = new Renderer();
+        renderer.Mount(
+            AppRouter("/about",
+                AppRoutes(
+                    C<Route, RouteProps>(new RouteProps
+                    {
+                        index = true,
+                        element = Text("Home")
+                    }),
+                    C<Route, RouteProps>(new RouteProps
+                    {
+                        path = "/about",
+                        element = Text("About")
+                    }))));
+
+        Assert.Contains("About", CollectText(renderer.Root));
+    }
+
+    [Fact]
+    public void IndexRouteMatchesRoot()
+    {
+        var renderer = new Renderer();
+        renderer.Mount(
+            AppRouter("/",
+                AppRoutes(
+                    C<Route, RouteProps>(new RouteProps
+                    {
+                        index = true,
+                        element = Text("Home")
+                    }),
+                    Route("/about", Text("About")))));
+
+        Assert.Contains("Home", CollectText(renderer.Root));
+    }
+
+    [Fact]
+    public void AppRoutesWrapsCsxRoutesTable()
+    {
+        var renderer = new Renderer();
+        renderer.Mount(
+            AppRouter("/",
+                C<AppRoutes, AppRoutesProps>(new AppRoutesProps
+                {
+                    Children =
+                    [
+                        C<Routes, RoutesProps>(new RoutesProps
+                        {
+                            Children =
+                            [
+                                C<Route, RouteProps>(new RouteProps
+                                {
+                                    path = "/",
+                                    element = Text("Home")
+                                }),
+                                C<Route, RouteProps>(new RouteProps
+                                {
+                                    path = "/about",
+                                    element = Text("About")
+                                })
+                            ]
+                        })
+                    ]
+                })));
+
+        Assert.Contains("Home", CollectText(renderer.Root));
+    }
+
     [Theory]
     [InlineData("/", "/", true)]
     [InlineData("about", "/about", true)]

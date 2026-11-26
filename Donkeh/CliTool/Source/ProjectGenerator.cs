@@ -794,7 +794,11 @@ internal static class ProjectGenerator
           "FrameworkHtmlClassMethod": "H",
           "FrameworkComponentMethod": "C",
           "FrameworkFragmentMethod": "F",
-          "GeneratedFileOutput": "{{generatedFileOutput}}"
+          "GeneratedFileOutput": "{{generatedFileOutput}}",
+          "InjectedUsings": [
+            "using static Donkeh.UILab._;",
+            "using static Donkeh.UILab.HtmlHelper;"
+          ]
         }
         """;
 

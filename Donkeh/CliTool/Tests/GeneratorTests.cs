@@ -272,6 +272,11 @@ public sealed class GeneratorTests
         Assert.True(File.Exists(Path.Combine(directory.Path, "csx.json")));
         Assert.Contains(Path.Combine(directory.Path, "Program.cx"), files);
         Assert.Contains(Path.Combine(directory.Path, "csx.json"), files);
+
+        var config = File.ReadAllText(Path.Combine(directory.Path, "csx.json"));
+        Assert.Contains("\"InjectedUsings\"", config, StringComparison.Ordinal);
+        Assert.Contains("\"using static Donkeh.UILab._;\"", config, StringComparison.Ordinal);
+        Assert.Contains("\"using static Donkeh.UILab.HtmlHelper;\"", config, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -304,6 +309,13 @@ public sealed class GeneratorTests
         Assert.True(File.Exists(Path.Combine(directory.Path, "test-container", "csx.json")));
         Assert.True(File.Exists(Path.Combine(directory.Path, "test-container", "Program.cx")));
         Assert.Contains(component, files);
+
+        var libraryConfig = File.ReadAllText(Path.Combine(directory.Path, "src", "csx.json"));
+        var testConfig = File.ReadAllText(Path.Combine(directory.Path, "test-container", "csx.json"));
+        Assert.Contains("\"using static Donkeh.UILab._;\"", libraryConfig, StringComparison.Ordinal);
+        Assert.Contains("\"using static Donkeh.UILab.HtmlHelper;\"", libraryConfig, StringComparison.Ordinal);
+        Assert.Contains("\"using static Donkeh.UILab._;\"", testConfig, StringComparison.Ordinal);
+        Assert.Contains("\"using static Donkeh.UILab.HtmlHelper;\"", testConfig, StringComparison.Ordinal);
     }
 
     [Fact]
