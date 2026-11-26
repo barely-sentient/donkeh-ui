@@ -798,7 +798,13 @@ namespace Donkeh.UILab
 
             instance.SetProps(newNode.Props);
             instance.ContextScope = scope;
-            oldNode.Props = newNode.Props;
+
+            // Do not copy newNode.Props onto oldNode. A component may return one of its
+            // input nodes (the router does this), so the same node can be both the
+            // retained logical node and a reusable route definition. Overwriting its
+            // props corrupts the caller's tree, and a later render of that route then
+            // matches the wrong path. The component instance already holds the current
+            // props, so the retained node only needs its live slot refreshed.
             oldNode.ParentLive = liveParent;
 
             if (!instance.InvokeShouldRender())

@@ -28,6 +28,27 @@ public sealed class RouterTests
     }
 
     [Fact]
+    public void RouterCanReturnToAPreviouslyMountedRoute()
+    {
+        var renderer = new Renderer();
+        renderer.Mount(
+            AppRouter("/a",
+                AppRoutes(
+                    Route("/a", () => H("div", Text("PAGE-A"), Link("/b", Text("TO-B")))),
+                    Route("/b", () => H("div", Text("PAGE-B"), Link("/a", Text("TO-A")))))));
+
+        Assert.Contains("PAGE-A", CollectText(renderer.Root));
+
+        Click(renderer.Root, "/b");
+        Assert.Contains("PAGE-B", CollectText(renderer.Root));
+
+        Click(renderer.Root, "/a");
+        var text = CollectText(renderer.Root);
+        Assert.Contains("PAGE-A", text);
+        Assert.DoesNotContain("PAGE-B", text);
+    }
+
+    [Fact]
     public void LazyRouteContentRunsOnlyWhenMatched()
     {
         var homeBuilds = 0;
@@ -233,6 +254,14 @@ public sealed class RouterTests
                 Collect(child, builder);
             }
         }
+    }
+
+    private static void Click(Node? root, string href)
+    {
+        var anchor = FindAnchor(root, href);
+
+        Assert.True(anchor.TryGetEventHandler("click", out var handler));
+        ((Action)handler!)();
     }
 
     private static ElementNode FindAnchor(Node? node, string href)
