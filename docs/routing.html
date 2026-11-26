@@ -3,8 +3,8 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Routing and setPage  -  Donkeh</title>
-    <meta name="description" content="Use AppRouter, route tables, Links and Router.SetPage to navigate between pages without a browser URL.">
+    <title>Routing, route values and setPage  -  Donkeh</title>
+    <meta name="description" content="Use AppRouter, route tables, :name parameters, Router.RouteValues, Links and Router.SetPage to navigate between pages without a browser URL.">
     <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/site.css">
     <script>
@@ -108,12 +108,12 @@
 
     <main class="content" id="content">
         <div class="breadcrumb">Docs <span>/</span> Components <span>/</span> Routing</div>
-        <h1>Routing and setPage</h1>
+        <h1>Routing, route values and setPage</h1>
         <p class="lead">
             The router is a small, host-agnostic path store. It decides which route
-            content is rendered and exposes the current path plus a
-            <code>setPage</code> action through context. It does not touch a URL bar,
-            browser history or the network.
+            content is rendered and exposes the current path, the values captured by the
+            matching route and a <code>setPage</code> action through context. It does not
+            touch a URL bar, browser history or the network.
         </p>
 
         <h2 id="quick-start">A route table</h2>
@@ -208,10 +208,20 @@ private static Node Docs() =&gt;
                     <tr><td><code>/</code></td><td>Only the root path.</td></tr>
                     <tr><td><code>/settings</code></td><td>Exactly <code>/settings</code>.</td></tr>
                     <tr><td><code>/docs/*</code></td><td><code>/docs</code> and every descendant such as <code>/docs/intro</code>.</td></tr>
+                    <tr><td><code>/projects/:id</code></td><td>One segment such as <code>/projects/42</code>; captures <code>id=42</code>.</td></tr>
+                    <tr><td><code>/projects/:id/*</code></td><td><code>/projects/42</code> and every descendant such as <code>/projects/42/edit</code>; captures <code>id</code>.</td></tr>
                     <tr><td><code>*</code></td><td>Every path. Put it last if you use it as a catch-all.</td></tr>
                     <tr><td><code>about</code></td><td>Normalised to <code>/about</code>.</td></tr>
                 </tbody>
             </table>
+        </div>
+
+        <div class="callout note">
+            <strong>Declare static routes before parameterised routes</strong>
+            <code>AppRoutes</code> takes the first match. Put <code>/projects/create</code>
+            before <code>/projects/:id</code>, otherwise <code>create</code> is captured
+            as the <code>id</code> value. Put <code>:name</code> routes before broad
+            wildcards for the same reason.
         </div>
 
         <p>
@@ -239,13 +249,15 @@ C&lt;AppRoutes, AppRoutesProps&gt;(new AppRoutesProps
 
         <h2 id="setpage">Reading the path and calling setPage</h2>
         <p>
-            <code>AppRouter</code> publishes two context values:
+            <code>AppRouter</code> publishes the path and the navigation action, while
+            the matched <code>Route</code> publishes the captured values:
         </p>
         <div class="table-wrap">
             <table>
                 <thead><tr><th>Context</th><th>Value</th></tr></thead>
                 <tbody>
                     <tr><td><code>Router.Path</code></td><td>The current normalised path as a <code>string</code>.</td></tr>
+                    <tr><td><code>Router.RouteValues</code></td><td>The <code>RouteValues</code> captured by the matched <code>Route</code>.</td></tr>
                     <tr><td><code>Router.SetPage</code></td><td>An <code>Action&lt;string&gt;</code> that navigates to a new path.</td></tr>
                 </tbody>
             </table>
@@ -256,8 +268,8 @@ C&lt;AppRoutes, AppRoutesProps&gt;(new AppRoutesProps
 {
     public override Node Render()
     {
-        var router = UseRouter();
-        return &lt;button onClick={() =&gt; router.setPage("/saved")}&gt;Save&lt;/button&gt;;
+        var setPage = UseContext(Router.SetPage);
+        return &lt;button onClick={() =&gt; setPage("/saved")}&gt;Save&lt;/button&gt;;
     }
 }</code></pre>
 <pre class="csharp"><code>using Donkeh.UILab;
@@ -289,7 +301,7 @@ public sealed class SaveButton : Component
 {
     public override Node Render()
     {
-        var path = UsePath();
+        var path = UseContext(Router.Path);
         return &lt;span className="path"&gt;{path}&lt;/span&gt;;
     }
 }</code></pre>
@@ -309,6 +321,103 @@ public sealed class SaveButton : Component
             Calling <code>UseContext(Router.SetPage)</code> outside an
             <code>AppRouter</code> gets the default no-op action.
         </div>
+
+        <h2 id="route-values">Route parameters and values</h2>
+        <p>
+            A <code>:name</code> segment captures one path segment. The matched
+            <code>Route</code> publishes the captured values to its content through
+            <code>Router.RouteValues</code>, so any component rendered by that route
+            can read them with <code>UseContext</code>.
+        </p>
+
+        <div class="code" data-label="Route values">
+<pre class="csx"><code>public sealed class ProjectPage : Component
+{
+    public override Node Render()
+    {
+        var values = UseContext(Router.RouteValues);
+        var id = values["id"] ?? "missing";
+
+        return (
+            &lt;div className="page"&gt;
+                &lt;h1&gt;Project {id}&lt;/h1&gt;
+            &lt;/div&gt;
+        );
+    }
+}
+
+public sealed class App : Component
+{
+    public override Node Render() =&gt;
+        AppRouter("/projects/42",
+            AppRoutes(
+                Route("/projects", Text("Projects")),
+                Route("/projects/create", Text("Create")),
+                Route("/projects/:id", () =&gt; &lt;ProjectPage /&gt;)));
+}</code></pre>
+<pre class="csharp"><code>public sealed class ProjectPage : Component
+{
+    public override Node Render()
+    {
+        var values = UseContext(Router.RouteValues);
+        var id = values["id"] ?? "missing";
+
+        return Div(new() { ClassName = "page" },
+            H1(new(), Text("Project " + id)));
+    }
+}
+
+public sealed class App : Component
+{
+    public override Node Render() =&gt;
+        AppRouter("/projects/42",
+            AppRoutes(
+                Route("/projects", Text("Projects")),
+                Route("/projects/create", Text("Create")),
+                Route("/projects/:id", C&lt;ProjectPage&gt;())));
+}</code></pre>
+        </div>
+
+        <p>
+            <code>RouteValues</code> is a read-only set:
+            <code>values["id"]</code> returns <code>string?</code>,
+            <code>values.TryGetValue("id", out var id)</code> avoids the null check,
+            and <code>values.Count</code> / <code>values.Values</code> expose the whole
+            set. Captured segments are URL-decoded. Query strings and fragments are
+            dropped during normalisation, so route values come from path segments only.
+        </p>
+
+        <p>
+            Values are scoped to the content returned by the matched <code>Route</code>.
+            A component outside that content sees <code>RouteValues.Empty</code>, and a
+            nested <code>Route</code> replaces the set for its own content. Use
+            <code>/projects/:id/*</code> when the same parameter should also be visible
+            to child pages.
+        </p>
+
+        <h3 id="matching">Matching a path manually</h3>
+        <p>
+            Hosts and navigation helpers can resolve route values without rendering a
+            component. <code>Router.TryMatch</code> returns whether the pattern matched
+            and fills a <code>RouteValues</code>; <code>Router.Match</code> returns the
+            values directly (or an empty set). <code>Router.Matches</code> remains the
+            boolean-only helper.
+        </p>
+
+        <div class="code" data-label="Matching">
+<pre><code>if (Router.TryMatch("/projects/:id/edit", "/projects/42/edit", out var values))
+{
+    var id = values["id"]; // "42"
+}
+
+var same = Router.Match("/projects/:id", "/projects/42")["id"]; // "42"
+var matches = Router.Matches("/projects/:id", "/projects/42");  // true</code></pre>
+        </div>
+
+        <p>
+            Both helpers normalise the route and the path before matching, so
+            <code>projects/:id</code> and <code>/projects/42/</code> work as expected.
+        </p>
 
         <h2 id="links">Links and active state</h2>
         <p>
@@ -350,6 +459,8 @@ public sealed class SaveButton : Component
                     <tr><td>Section layout</td><td>Return a layout component from a wildcard route, then render <code>AppRoutes</code> again inside it for child pages.</td></tr>
                     <tr><td>Current page in a header</td><td>Read <code>Router.Path</code> in any component under <code>AppRouter</code>.</td></tr>
                     <tr><td>Programmatic navigation</td><td>Read <code>Router.SetPage</code> in an event handler or effect; do not call setters during render.</td></tr>
+                    <tr><td>Record pages</td><td>Declare <code>/resource/:id</code> and read <code>UseContext(Router.RouteValues)["id"]</code> in the page component.</td></tr>
+                    <tr><td>Static before parameterised</td><td>Declare <code>/resource/create</code> before <code>/resource/:id</code>; <code>AppRoutes</code> uses the first match.</td></tr>
                     <tr><td>Not found</td><td>Set <code>AppRoutesProps.Fallback</code>, or add a final <code>Route("*", ...)</code>.</td></tr>
                 </tbody>
             </table>

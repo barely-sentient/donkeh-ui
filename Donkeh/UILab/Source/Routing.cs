@@ -5,6 +5,47 @@ using static Donkeh.UILab._;
 namespace Donkeh.UILab
 {
     /// <summary>
+    /// Values captured by the route that matched the current page.
+    /// </summary>
+    public sealed class RouteValues
+    {
+        /// <summary>An empty value set.</summary>
+        public static RouteValues Empty { get; } = new(new Dictionary<string, string>(StringComparer.Ordinal));
+
+        private readonly IReadOnlyDictionary<string, string> _values;
+
+        /// <summary>Creates a value set over an existing dictionary.</summary>
+        /// <param name="values">The captured route values.</param>
+        public RouteValues(IReadOnlyDictionary<string, string> values)
+        {
+            ArgumentNullException.ThrowIfNull(values);
+            _values = values;
+        }
+
+        /// <summary>Gets the captured values.</summary>
+        public IReadOnlyDictionary<string, string> Values => _values;
+
+        /// <summary>Gets the number of captured values.</summary>
+        public int Count => _values.Count;
+
+        /// <summary>Gets a captured value by name, or <see langword="null"/>.</summary>
+        public string? this[string name] => _values.TryGetValue(name, out var value) ? value : null;
+
+        /// <summary>Attempts to get a captured value by name.</summary>
+        public bool TryGetValue(string name, out string? value)
+        {
+            if (_values.TryGetValue(name, out var found))
+            {
+                value = found;
+                return true;
+            }
+
+            value = null;
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Shared router contexts and path helpers. An <see cref="AppRouter"/> publishes
     /// these values to its subtree.
     /// </summary>
@@ -17,14 +58,22 @@ namespace Donkeh.UILab
     /// </para>
     /// <para>
     /// Paths are normalised to start with <c>/</c>, collapse duplicate slashes and
-    /// drop a trailing slash (except for the root). A route ending in <c>/*</c>
+    /// drop a trailing slash (except for the root). A <c>:name</c> segment captures
+    /// one path segment into <see cref="RouteValues"/>; a route ending in <c>/*</c>
     /// matches that prefix and its descendants; <c>*</c> alone is a catch-all.
     /// </para>
     /// </remarks>
     public static class Router
     {
+        private static readonly RouteValues NoRouteValues = global::Donkeh.UILab.RouteValues.Empty;
+
         /// <summary>The current normalised path.</summary>
         public static readonly Context<string> Path = new("/");
+
+        /// <summary>
+        /// The values captured by the matching <see cref="Route"/> for the current path.
+        /// </summary>
+        public static readonly Context<RouteValues> RouteValues = new(NoRouteValues);
 
         /// <summary>
         /// Sets the current page. Components obtain it with
@@ -89,27 +138,107 @@ namespace Donkeh.UILab
         public static bool Matches(string? routePath, string? currentPath) =>
             MatchesNormalized(routePath, Normalize(currentPath));
 
+        /// <summary>Matches a route and returns the values captured from <c>:name</c> segments.</summary>
+        /// <param name="routePath">The declared route path.</param>
+        /// <param name="currentPath">The current page path.</param>
+        /// <param name="values">The captured values, or <see cref="RouteValues.Empty"/>.</param>
+        /// <returns><see langword="true"/> when the route is active.</returns>
+        public static bool TryMatch(
+            string? routePath,
+            string? currentPath,
+            out RouteValues values) =>
+            TryMatchNormalized(Normalize(routePath), Normalize(currentPath), out values);
+
+        /// <summary>Matches a route and returns its captured values, or an empty set.</summary>
+        public static RouteValues Match(string? routePath, string? currentPath) =>
+            TryMatch(routePath, currentPath, out var values) ? values : NoRouteValues;
+
         /// <summary>Tests a route against an already normalised current path.</summary>
         /// <param name="routePath">The declared route path.</param>
         /// <param name="currentPath">A path returned by <see cref="Normalize"/>.</param>
         /// <returns><see langword="true"/> when the route is active.</returns>
-        internal static bool MatchesNormalized(string? routePath, string currentPath)
+        internal static bool MatchesNormalized(string? routePath, string currentPath) =>
+            TryMatchNormalized(routePath, currentPath, out var ignored);
+
+        /// <summary>
+        /// Matches a route against a normalised path, capturing <c>:name</c> segments.
+        /// </summary>
+        internal static bool TryMatchNormalized(
+            string? routePath,
+            string currentPath,
+            out RouteValues values)
         {
             var route = Normalize(routePath);
+            values = NoRouteValues;
 
             if (route == "*")
             {
                 return true;
             }
 
-            if (route.EndsWith("/*", StringComparison.Ordinal))
+            var routeSegments = SplitPath(route);
+            var currentSegments = SplitPath(currentPath);
+            Dictionary<string, string>? captures = null;
+            var currentIndex = 0;
+
+            for (var i = 0; i < routeSegments.Length; i++)
             {
-                var prefix = route[..^2];
-                return currentPath.Equals(prefix, StringComparison.Ordinal)
-                    || currentPath.StartsWith(prefix + "/", StringComparison.Ordinal);
+                var segment = routeSegments[i];
+
+                if (segment == "*")
+                {
+                    if (captures is not null)
+                    {
+                        values = new RouteValues(captures);
+                    }
+
+                    return true;
+                }
+
+                if (currentIndex >= currentSegments.Length)
+                {
+                    return false;
+                }
+
+                if (segment.Length > 1 && segment[0] == ':')
+                {
+                    captures ??= new Dictionary<string, string>(StringComparer.Ordinal);
+                    captures[segment[1..]] = DecodeSegment(currentSegments[currentIndex]);
+                }
+                else if (!string.Equals(segment, currentSegments[currentIndex], StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
+                currentIndex++;
             }
 
-            return route.Equals(currentPath, StringComparison.Ordinal);
+            if (currentIndex != currentSegments.Length)
+            {
+                return false;
+            }
+
+            if (captures is not null)
+            {
+                values = new RouteValues(captures);
+            }
+
+            return true;
+        }
+
+        private static string[] SplitPath(string path) =>
+            path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+        private static string DecodeSegment(string value)
+        {
+            try
+            {
+                return Uri.UnescapeDataString(value);
+            }
+            catch (UriFormatException)
+            {
+                return value;
+            }
         }
 
         /// <summary>
@@ -339,22 +468,27 @@ namespace Donkeh.UILab
             var current = UseContext(Router.Path);
             var routePath = Props.Index ? "/" : Props.Path;
 
-            if (!Router.MatchesNormalized(routePath, current))
+            if (!Router.TryMatchNormalized(routePath, current, out var values))
             {
                 return F();
             }
 
+            Node content;
+
             if (Props.Element is { } element)
             {
-                return element;
+                content = element;
             }
-
-            if (Props.Content is { } content)
+            else if (Props.Content is { } factory)
             {
-                return content() ?? F();
+                content = factory() ?? F();
+            }
+            else
+            {
+                content = F(Props.Children ?? []);
             }
 
-            return F(Props.Children ?? []);
+            return Provider(Router.RouteValues, values, content);
         }
     }
 

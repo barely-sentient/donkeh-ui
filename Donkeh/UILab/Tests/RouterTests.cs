@@ -215,9 +215,56 @@ public sealed class RouterTests
     [InlineData("/docs/*", "/doc", false)]
     [InlineData("*", "/anything", true)]
     [InlineData("/about", "/", false)]
+    [InlineData("/projects/:id", "/projects/42", true)]
+    [InlineData("/projects/:id", "/projects", false)]
+    [InlineData("/projects/:id", "/projects/42/edit", false)]
+    [InlineData("/projects/:id/*", "/projects/42/edit", true)]
     public void MatchesRoutes(string route, string current, bool expected)
     {
         Assert.Equal(expected, Router.Matches(route, current));
+    }
+
+    [Theory]
+    [InlineData("/projects/:id", "/projects/42", true, "42")]
+    [InlineData("/projects/:id/*", "/projects/42/edit", true, "42")]
+    [InlineData("/projects/:id", "/projects/42/edit", false, null)]
+    [InlineData("/docs/*", "/docs/deep", true, null)]
+    public void TryMatchCapturesRouteValues(
+        string route,
+        string current,
+        bool expected,
+        string? id)
+    {
+        var matched = Router.TryMatch(route, current, out var values);
+
+        Assert.Equal(expected, matched);
+        Assert.Equal(id, values["id"]);
+    }
+
+    [Fact]
+    public void MatchedRoutePublishesRouteValues()
+    {
+        var renderer = new Renderer();
+        renderer.Mount(
+            AppRouter("/projects/42",
+                AppRoutes(
+                    Route("/projects/:id", C<RouteValueText>()))));
+
+        Assert.Contains("42", CollectText(renderer.Root));
+    }
+
+    [Fact]
+    public void StaticRouteBeforeParameterizedRouteWins()
+    {
+        var renderer = new Renderer();
+        renderer.Mount(
+            AppRouter("/projects/create",
+                AppRoutes(
+                    Route("/projects/create", Text("CREATE")),
+                    Route("/projects/:id", Text("EDIT")))));
+
+        Assert.Contains("CREATE", CollectText(renderer.Root));
+        Assert.DoesNotContain("EDIT", CollectText(renderer.Root));
     }
 
     [Theory]
@@ -316,4 +363,9 @@ public sealed class NavigateButton : Component
 public sealed class PathText : Component
 {
     public override Node Render() => Text(UseContext(Router.Path));
+}
+
+public sealed class RouteValueText : Component
+{
+    public override Node Render() => Text(UseContext(Router.RouteValues)["id"] ?? "none");
 }
