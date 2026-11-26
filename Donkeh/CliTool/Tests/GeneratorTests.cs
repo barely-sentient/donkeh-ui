@@ -246,7 +246,8 @@ public sealed class GeneratorTests
         Assert.Contains("<PackageId>Acme.Components</PackageId>", library, StringComparison.Ordinal);
         Assert.Contains("Donkeh.UILab", library, StringComparison.Ordinal);
         Assert.Contains("<EmbeddedResource Include=\"Components/HelloCard/HelloCard.css\" />", library, StringComparison.Ordinal);
-        Assert.Contains("class HelloCard : Component", component, StringComparison.Ordinal);
+        Assert.Contains("class HelloCardProps : PropsWithChildren", component, StringComparison.Ordinal);
+        Assert.Contains("class HelloCard : Component<HelloCardProps>", component, StringComparison.Ordinal);
         Assert.Contains("ProjectReference Include=\"../src/Acme.Components.csproj\"", container, StringComparison.Ordinal);
         Assert.Contains("[AppRoot", program, StringComparison.Ordinal);
         Assert.Contains("Each(ComponentTypes()", program, StringComparison.Ordinal);
@@ -343,6 +344,14 @@ public sealed class GeneratorTests
             StringComparison.Ordinal);
         Assert.Contains(
             "[assembly: Donkeh.UILab.Stylesheet(\"Components/StatusBadge/StatusBadge.css\")]",
+            component,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "class StatusBadgeProps : PropsWithChildren",
+            component,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "class StatusBadge : Component<StatusBadgeProps>",
             component,
             StringComparison.Ordinal);
     }
@@ -518,7 +527,8 @@ public sealed class GeneratorTests
         var css = File.ReadAllText(cssFile);
         var project = File.ReadAllText(projectFile);
 
-        Assert.Contains("class MyWidget : Component", component, StringComparison.Ordinal);
+        Assert.Contains("class MyWidgetProps : PropsWithChildren", component, StringComparison.Ordinal);
+        Assert.Contains("class MyWidget : Component<MyWidgetProps>", component, StringComparison.Ordinal);
         Assert.Contains("Div(new()", component, StringComparison.Ordinal);
         Assert.Contains(
             "[assembly: Donkeh.UILab.Stylesheet(\"src/Components/MyWidget/MyWidget.css\")]",

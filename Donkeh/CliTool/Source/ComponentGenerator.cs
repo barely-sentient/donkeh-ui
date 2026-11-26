@@ -64,8 +64,13 @@ internal static class ComponentGenerator
 
                 namespace {{componentNamespace}};
 
+                /// <summary>{{className}} props.</summary>
+                public sealed class {{className}}Props : PropsWithChildren
+                {
+                }
+
                 /// <summary>{{className}} component.</summary>
-                public sealed class {{className}} : Component
+                public sealed class {{className}} : Component<{{className}}Props>
                 {
                     /// <inheritdoc/>
                     public override Node Render() =>
@@ -84,8 +89,13 @@ internal static class ComponentGenerator
 
                 namespace {{componentNamespace}};
 
+                /// <summary>{{className}} props.</summary>
+                public sealed class {{className}}Props : PropsWithChildren
+                {
+                }
+
                 /// <summary>{{className}} component.</summary>
-                public sealed class {{className}} : Component
+                public sealed class {{className}} : Component<{{className}}Props>
                 {
                     /// <inheritdoc/>
                     public override Node Render() =>

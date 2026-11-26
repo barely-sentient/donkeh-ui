@@ -288,8 +288,13 @@ internal static class ProjectGenerator
 
                 namespace {{rootNamespace}}.Components;
 
+                /// <summary>Props for the starter component.</summary>
+                public sealed class HelloCardProps : PropsWithChildren
+                {
+                }
+
                 /// <summary>A starter component for the component library.</summary>
-                public sealed class HelloCard : Component
+                public sealed class HelloCard : Component<HelloCardProps>
                 {
                     /// <inheritdoc/>
                     public override Node Render() =>
@@ -310,8 +315,13 @@ internal static class ProjectGenerator
 
                 namespace {{rootNamespace}}.Components;
 
+                /// <summary>Props for the starter component.</summary>
+                public sealed class HelloCardProps : PropsWithChildren
+                {
+                }
+
                 /// <summary>A starter component for the component library.</summary>
-                public sealed class HelloCard : Component
+                public sealed class HelloCard : Component<HelloCardProps>
                 {
                     /// <inheritdoc/>
                     public override Node Render() =>
